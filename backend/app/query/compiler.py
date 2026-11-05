@@ -14,6 +14,7 @@ class CompiledQuery:
     source: str
     template_id: str | None = None
     template_version: int | None = None
+    kind: str = "mysql"
 
 
 TemplateExecutor = Callable[[TemplateCandidate, dict[str, Any], QuerySpec], str]
