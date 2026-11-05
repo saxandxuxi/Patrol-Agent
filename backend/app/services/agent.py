@@ -1563,6 +1563,37 @@ def _llm_result_summary(message: str, result: dict[str, Any]) -> str:
         return ""
 
 
+def _repair_result_presentation(
+    question: str,
+    result: dict[str, Any],
+    verdict: dict[str, Any],
+) -> str:
+    """只修最终回复的措辞和单位；查询结果已经可信，禁止重跑或改数值。"""
+    try:
+        repaired = chat(
+            prompts.messages(
+                "repair_presentation",
+                question=question,
+                reply=str(result.get("reply") or ""),
+                sql=str(result.get("sql") or "")[:2000],
+                columns=json.dumps(result.get("columns") or [], ensure_ascii=False),
+                rows=json.dumps(
+                    list(result.get("rows") or [])[:10],
+                    ensure_ascii=False,
+                    default=str,
+                )[:2400],
+                reason=str(verdict.get("reason") or ""),
+            ),
+            temperature=0,
+            model=role_model("semantic") or role_model("verify"),
+            max_tokens=1200,
+        ).strip()
+    except Exception as exc:  # noqa: BLE001
+        log_error("agent", "repair_presentation_failed", exc, question=question[:120])
+        return ""
+    return repaired.strip("`").strip()
+
+
 def _answer_format(shape: str | None) -> str:
     if shape == "count":
         return "number"
@@ -2385,6 +2416,20 @@ def _repair_direct_payload(message: str, payload: dict[str, Any]) -> dict[str, A
         failure = _verification_failure(message, payload) or {}
     if not failure:
         return payload
+
+    if not bool(failure.get("retryable")):
+        partial = dict(payload)
+        reason = str(failure.get("reason") or "查询结果表达修正失败")
+        partial.update(
+            {
+                "accepted": False,
+                "partial": True,
+                "error": reason,
+                "failure": failure,
+                "failures": [{"step_id": 1, "failure": failure}],
+            }
+        )
+        return partial
 
     from . import tools as tool_registry
 

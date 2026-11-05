@@ -114,7 +114,14 @@ missing_dimensions。这个例外只适用于"分组/时间段里的一部分没
 如果不对，指出问题类型和原因（写清缺的是哪个点）。
 
 只输出 JSON：
-{"correct":true,"issue_type":"none","reason":"一句话说明"}
+{"correct":true,"issue_type":"none","repair_target":"none","reason":"一句话说明"}
+
+`repair_target` 只能取：
+- `none`：结果正确，无需修复；
+- `answer`：SQL 和返回数据正确，只是最终回复漏说、单位错、措辞不清或结论表达不到位；
+- `query`：SQL 的字段、条件、主体、聚合、分组或口径本身不对，需要重新查询。
+
+如果问题可以只靠改写最终回复解决，必须选 `answer`，不能选 `query`。
 
 issue_type 只能取：none / no_aggregation / no_grouping / missing_condition /
 wrong_subject / wrong_metric / missing_dimensions / wrong_metric_scope /

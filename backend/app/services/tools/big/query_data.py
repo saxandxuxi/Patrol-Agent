@@ -52,6 +52,41 @@ def _verification_failure(
     )
     if verdict.get("correct", True):
         return None
+    issue = str(verdict.get("issue_type") or "other")
+    target = str(verdict.get("repair_target") or "")
+    if target == "answer" or issue in {"missing_dimensions", "reasoning_insufficient"}:
+        repaired = agent._repair_result_presentation(question, payload, verdict)
+        if repaired and repaired != reply:
+            payload["reply"] = repaired
+            payload["presentation_repair"] = {
+                "original_reply": reply,
+                "repaired_reply": repaired,
+                "reason": verdict.get("reason"),
+            }
+            verdict = nl2sql.verify_answer(
+                question,
+                sql,
+                payload,
+                repaired,
+            )
+            if verdict.get("correct", True):
+                payload["verification"] = verdict
+                return None
+        return build_failure(
+            "answer_presentation_mismatch",
+            stage="presentation",
+            reason=str(
+                verdict.get("reason")
+                or "查询数据正确，但最终回复表达修正后仍未通过验收"
+            ),
+            evidence={
+                "step_question": question,
+                "sql": sql,
+                "columns": list(payload.get("columns") or []),
+                "rows": list(payload.get("rows") or [])[:10],
+                "verdict": verdict,
+            },
+        )
     return build_failure(
         "sql_semantic_mismatch",
         stage="verify",
@@ -194,6 +229,8 @@ def query_data(
         for row in rows[:10]
     ]
     failure = _verification_failure(filled_question, payload) if ok else None
+    if payload.get("presentation_repair") and result_id:
+        save_result(result_id, payload)
     accepted = ok and failure is None
     return observation(
         "query_data",

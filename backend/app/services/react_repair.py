@@ -24,7 +24,6 @@ def _entry(failure_code: str) -> dict[str, Any]:
     retryable = value.get("retryable")
     if (
         not isinstance(candidates, list)
-        or not candidates
         or not all(isinstance(item, str) and item for item in candidates)
         or not isinstance(rounds, int)
         or rounds < 0

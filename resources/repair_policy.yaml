@@ -8,6 +8,11 @@ sql_semantic_mismatch:
   repair_role: sql
   max_repair_rounds: 2
   retryable: true
+answer_presentation_mismatch:
+  candidates: []
+  repair_role: answer
+  max_repair_rounds: 0
+  retryable: false
 result_shape_mismatch:
   candidates: [query_data, check_coverage]
   repair_role: sql

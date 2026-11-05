@@ -379,6 +379,15 @@ def _run_structured_repair(
     while obs.get("failure"):
         if int(state["rounds"]) >= react_repair.GLOBAL_REPAIR_LIMIT:
             return obs, args, {}
+        allowed = [
+            str(item.get("name") or "")
+            for item in _allowed_tools(obs["failure"])
+        ]
+        if not bool(obs["failure"].get("retryable")) or not allowed:
+            return obs, args, {
+                "action": "abort",
+                "message": str(obs["failure"].get("reason") or "该失败不需要重跑工具"),
+            }
         decision = _deviation_decision(
             blackboard,
             step,
@@ -389,10 +398,6 @@ def _run_structured_repair(
             previous_calls=state["calls"],
             helper_observations=helper_observations,
         )
-        allowed = [
-            str(item.get("name") or "")
-            for item in _allowed_tools(obs["failure"])
-        ]
         error = _validate_decision(decision, allowed, state["calls"])
         if error:
             return obs, args, {**decision, "message": error}

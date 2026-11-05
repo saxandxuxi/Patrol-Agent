@@ -1351,10 +1351,19 @@ def verify_answer(
         )
         if isinstance(data, dict):
             issue = str(data.get("issue_type") or "none").strip().lower()
+            target = str(data.get("repair_target") or "").strip().lower()
+            if target not in {"none", "answer", "query"}:
+                if issue in {"missing_dimensions", "reasoning_insufficient"}:
+                    target = "answer"
+                elif issue == "none":
+                    target = "none"
+                else:
+                    target = "query"
             verdict = {
                 "correct": bool(data.get("correct", True)),
                 "issue_type": issue if issue in _VERIFY_ISSUES else "other",
                 "reason": _pick_text(data.get("reason"), 200),
+                "repair_target": target,
             }
     except Exception as exc:  # noqa: BLE001
         log_error("nl2sql", "verify_answer_failed", exc, question=question[:120])
