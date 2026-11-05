@@ -209,15 +209,41 @@ def _gate_issue(step: dict[str, Any], obs: dict[str, Any]) -> str:
     data = obs.get("data") or {}
     if data.get("await_user"):
         return "ask_user"
-    produced = data.get("produced") or {}
-    missing = [
-        item.get("key")
-        for item in step.get("produces") or []
-        if item.get("key") and not produced.get(item.get("key"))
-    ]
-    if missing:
-        return "missing_produce:" + ",".join(str(item) for item in missing)
     return ""
+
+
+def _missing_produced_keys(step: dict[str, Any], obs: dict[str, Any]) -> list[str]:
+    produced = (obs.get("data") or {}).get("produced") or {}
+    return [
+        str(item.get("key"))
+        for item in step.get("produces") or []
+        if isinstance(item, dict)
+        and item.get("key")
+        and not produced.get(str(item.get("key")))
+    ]
+
+
+def _later_data_step_needs(
+    steps: list[dict[str, Any]],
+    index: int,
+    keys: list[str],
+) -> bool:
+    current_id = int(steps[index].get("id") or 0)
+    for later in steps[index + 1 :]:
+        if str(later.get("type") or "") in {"analysis", "post_calc"}:
+            continue
+        if current_id in {int(item) for item in later.get("depends_on") or []}:
+            return True
+        question = str(later.get("question") or "")
+        if any(f"{{{{{key}}}}}" in question for key in keys):
+            return True
+        if any(
+            str(item.get("from_step") or "") == str(current_id)
+            for item in later.get("needs") or []
+            if isinstance(item, dict)
+        ):
+            return True
+    return False
 
 
 def _tool_results(blackboard: ReactBlackboard) -> dict[int, dict[str, Any]]:
@@ -585,6 +611,7 @@ def _section(step: dict[str, Any], obs: dict[str, Any]) -> dict[str, Any]:
         "plan": plan_step,
         "risk_warnings": list((cached or {}).get("risk_warnings") or data.get("risk_warnings") or []),
         "verification_warning": obs.get("verification_warning"),
+        "produced_warning": obs.get("produced_warning"),
         "wants_images": bool(step.get("wants_images")),
     }
 
@@ -812,7 +839,19 @@ def run(
                 obs, args, frozen_query = _execute_step(blackboard, step)
             observed_step = {**step, "question": frozen_query}
             blackboard.add(observed_step, obs)
+            missing_produced = _missing_produced_keys(step, obs)
+            if missing_produced and obs.get("ok"):
+                obs["produced_warning"] = {
+                    "missing": missing_produced,
+                    "note": "步骤结果可用，但规划声明的下游键未提取；后续步骤优先使用完整前序结果。",
+                }
             issue = _gate_issue(step, obs)
+            if (
+                not issue
+                and missing_produced
+                and _later_data_step_needs(steps, index, missing_produced)
+            ):
+                issue = "missing_produce:" + ",".join(missing_produced)
             failure = obs.get("failure")
             if not issue and not failure:
                 section = _section(observed_step, obs)

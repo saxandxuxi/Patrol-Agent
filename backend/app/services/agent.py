@@ -2597,6 +2597,84 @@ def _analysis_payload(
     }
 
 
+def _numeric_value(dep: dict[str, Any], key: str = "") -> float | None:
+    if key:
+        produced = dep.get("produced") or {}
+        try:
+            return float(str(produced.get(key)))
+        except (TypeError, ValueError):
+            pass
+    for row in dep.get("rows") or []:
+        if not isinstance(row, dict):
+            continue
+        for name, value in row.items():
+            if key and key not in str(name):
+                continue
+            try:
+                return float(str(value))
+            except (TypeError, ValueError):
+                continue
+    if not key:
+        for row in dep.get("rows") or []:
+            if not isinstance(row, dict):
+                continue
+            for value in row.values():
+                try:
+                    return float(str(value))
+                except (TypeError, ValueError):
+                    continue
+    return None
+
+
+def _ratio_and_average_conclusion(
+    question: str,
+    task: dict[str, Any],
+    deps: list[dict[str, Any]],
+) -> str:
+    need_items = [
+        (int(item.get("from_step") or 0), str(item.get("key") or ""))
+        for item in task.get("needs") or []
+        if isinstance(item, dict) and item.get("from_step")
+    ]
+    needs = {step_id: key for step_id, key in need_items}
+    dep_ids = [int(item) for item in task.get("depends_on") or []]
+    denominator = None
+    numerator = None
+    denominator_item = next(
+        (
+            (step_id, key)
+            for step_id, key in need_items
+            if any(word in key.lower() for word in ("total", "count", "处数", "总数"))
+        ),
+        (0, ""),
+    )
+    denominator_id, denominator_key = denominator_item
+    for step_id, dep in zip(dep_ids, deps):
+        value = _numeric_value(
+            dep,
+            denominator_key if step_id == denominator_id else needs.get(step_id, ""),
+        )
+        if value is None:
+            value = _numeric_value(dep)
+        if step_id == denominator_id:
+            denominator = value
+        elif numerator is None:
+            numerator = value
+    if numerator is None and len(deps) > 1:
+        numerator = _numeric_value(deps[-1])
+        denominator = denominator or _numeric_value(deps[0])
+    parts: list[str] = []
+    if denominator and numerator is not None:
+        if any(word in question for word in ("比例", "占比", "百分比")):
+            parts.append(f"占比 {numerator / denominator * 100:.2f}%")
+        if "平均面积" in question:
+            total = _numeric_value(deps[0], "total_area")
+            count = _numeric_value(deps[0], "total_count")
+            if total is not None and count:
+                parts.append(f"平均面积 {total / count:.2f}㎡")
+    return "；".join(parts)
+
+
 def _post_calc_payload(
     task: dict[str, Any],
     results: dict[int, dict[str, Any]],
@@ -2609,6 +2687,16 @@ def _post_calc_payload(
     deps = [results[tid] for tid in (task.get("depends_on") or []) if tid in results]
     rows = [row for dep in deps for row in (dep.get("rows") or [])]
     question = str(task.get("question") or "")
+    arithmetic = _ratio_and_average_conclusion(question, task, deps)
+    if arithmetic:
+        return {
+            "reply": arithmetic,
+            "source": "calc",
+            "engine": "post_calc",
+            "accepted": True,
+            "columns": [],
+            "rows": [],
+        }
     # 1) 确定性：两个对象比大小/求差（覆盖绝大多数场景）
     conclusion = _difference_conclusion(question or "多多少", rows)
     if conclusion:
