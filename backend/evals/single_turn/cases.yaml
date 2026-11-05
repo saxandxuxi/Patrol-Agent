@@ -1,0 +1,65 @@
+version: 1
+cases:
+  - id: west_oil_count
+    question: 西乡段泛油有多少处？
+    expected_status: answered
+    required_contains: [处]
+  - id: route_metrics
+    question: 按路线分组，统计每条路线的病害总数、病害总面积、平均单处病害面积，并关联获取该路线的长度
+    expected_status: answered
+    required_contains: [路线]
+    required_filters: [group_by_route, route_length_km]
+  - id: route_top_type
+    question: 按路线和病害类型分组，统计各路线下每种病害类型的数量，找出每条路线数量最多的主要病害类型
+    expected_status: answered
+    required_filters: [group_by_route, group_by_damage_type]
+  - id: patrol_lines_nov_2
+    question: 11月2日巡检了哪些线路？
+    expected_status: answered
+    required_filters: [collection_time_2026_11_02, patrol_route_relation]
+  - id: recent_three_months_patrols
+    question: 近三月有多少巡检记录？
+    expected_status: answered
+    required_contains: [次]
+  - id: crack_time_route_density
+    question: 裂缝集中在哪几个月？哪些路？这些路的病害密度怎么样？
+    expected_status: answered
+    required_filters: [crack_types, group_by_month, group_by_route]
+  - id: patrol_month_counts
+    question: 数据库里各个月份的巡查次数分别是多少？总共多少次？
+    expected_status: answered
+    required_contains: ["206 次"]
+    required_filters: [group_by_month, sum_equals_total]
+  - id: device_counts_nov_2026
+    question: 2026 年 11 月，巡检设备分别完成了多少次巡检？
+    expected_status: answered
+    required_filters: [group_by_device, non_null_device]
+  - id: oil_by_route
+    question: 泛油分别落在哪些路线、各有多少处？
+    expected_status: answered
+    required_filters: [damage_type_oil, group_by_route]
+  - id: oil_severity_route
+    question: 哪个道路的泛油问题更严重？
+    expected_status: answered
+    required_filters: [count, total_area, route_length, comparison]
+  - id: disease_severity_route
+    question: 哪个道路的病害最严重？
+    expected_status: answered
+    required_filters: [count, total_area, route_length, comparison]
+  - id: changsha_zhijiang_trend
+    question: 长沙－芷江高速公路病害数量，最近是在增加还是在减少？
+    expected_status: answered
+    required_filters: [route_id, group_by_time, trend]
+  - id: q3_disease_route_additions
+    question: 统计第三季度，不同病害在不同道路上的新增情况
+    expected_status: answered
+    required_filters: [2026_q3, group_by_damage_type, group_by_route]
+  - id: length_over_two_with_details
+    question: 病害长度大于 2 米的有多少处？这些病害的总长度是多少米？把具体的数据调出来
+    expected_status: answered
+    required_contains: ["20108", "135279.02", "前 500"]
+    required_filters: [effective_disease_length_gt_2, exact_count, truncated_detail]
+  - id: ai_type_reliability
+    question: AI识别的病害类型，靠谱吗？有多少是认不出来的？
+    expected_status: answered
+    required_filters: [total_count, low_confidence_count, confidence]
