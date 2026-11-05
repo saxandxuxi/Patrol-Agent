@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+from app.query.contracts import AnswerPackage
 from app.query.service import TurnStart
 from app.query.templates import (
     CandidateSet,
@@ -63,6 +64,20 @@ def turn_with_confirmation_card() -> TurnStart:
 
 class AgentIntegrationTests(unittest.TestCase):
     @patch("app.services.agent._persist_conversation_turn")
+    @patch("app.services.agent.chat_settings.load", return_value={"single_turn_compiler_enabled": False})
+    @patch("app.query.service.start_single_turn")
+    def test_disabled_flag_never_calls_single_turn_service(
+        self,
+        start,
+        _settings,
+        _persist,
+    ):
+        with patch.object(agent, "_handle_message", return_value={"reply": "legacy"}):
+            payload = agent.handle_message("泛油有多少处？", session_id="s1")
+        start.assert_not_called()
+        self.assertEqual(payload["reply"], "legacy")
+
+    @patch("app.services.agent._persist_conversation_turn")
     @patch("app.services.agent.intent_service.classify_intent", return_value="data")
     @patch(
         "app.services.agent.chat_settings.load",
@@ -81,3 +96,30 @@ class AgentIntegrationTests(unittest.TestCase):
         self.assertTrue(payload["await_confirm"])
         self.assertEqual(payload["source"], "confirm")
         self.assertIn("compiler_context", payload)
+
+    @patch("app.services.agent._persist_conversation_turn")
+    @patch("app.services.agent.intent_service.classify_intent", return_value="data")
+    @patch(
+        "app.services.agent.chat_settings.load",
+        return_value={"single_turn_compiler_enabled": True},
+    )
+    @patch("app.query.service.start_single_turn")
+    def test_enabled_data_question_never_falls_back_to_legacy_flow(
+        self,
+        start,
+        _settings,
+        _intent,
+        _persist,
+    ):
+        start.return_value = TurnStart(
+            plan=count_plan(),
+            answer=AnswerPackage("共 10 处。"),
+        )
+        with patch.object(
+            agent,
+            "_handle_message",
+            side_effect=AssertionError("legacy flow must not run"),
+        ):
+            payload = agent.handle_message("泛油有多少处？", session_id="s1")
+        self.assertEqual(payload["reply"], "共 10 处。")
+        self.assertEqual(payload["source"], "single_turn_compiler")
