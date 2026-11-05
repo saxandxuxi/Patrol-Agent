@@ -4,6 +4,7 @@
 > 状态：设计待评审
 > 范围：单轮巡检业务数据查询；先覆盖 MySQL，保留 PostgreSQL 扩展边界
 > 决策：采用“受控查询编译器 + 有界纠错 Agent”
+> 模板策略：所有模板命中均展示确认卡，不自动执行
 
 ## 1. 背景
 
@@ -19,6 +20,8 @@
 - 后置计算可能把非空错误文案当成成功结果。
 - 控制器只能重试少数预定义工具，不能根据失败证据修正具体计划节点。
 - 回归脚本会把“明确失败”算作通过，`PASS` 只能证明程序结束。
+- 预置模板、内置模板、自动模板和已验证示例各自维护匹配规则，字段覆盖口径并不一致。
+- 模板一旦被当成“确定正确”就可能绕过 QuerySpec、单位校验和统一验收。
 
 Codex 能处理复杂任务，主要因为它具备稳定任务契约、可观察工具结果、独立成功判定和按失败证据修改方案的能力。该设计把这些能力引入巡检数据查询，但不引入自由行动的通用 Agent。
 
@@ -35,6 +38,8 @@ Codex 能处理复杂任务，主要因为它具备稳定任务契约、可观�
 7. 每个修复动作只能修改失败节点，不能删除或扩大用户原始范围。
 8. 用真实答案和失败注入集衡量一次答对率、错答放行率、误停率和修复成功率。
 9. 把巨型文件按稳定边界拆小，降低局部修改对其他数据流的影响。
+10. 模板必须成为 QuerySpec 的一种 SQL 编译实现，不能再形成独立语义链。
+11. 所有模板命中都必须展示确认卡；不存在足以跳过用户确认的“绝对高置信”模板。
 
 ### 2.2 非目标
 
@@ -45,6 +50,7 @@ Codex 能处理复杂任务，主要因为它具备稳定任务契约、可观�
 - 不为每个工具配置一个独立 LLM。
 - 不允许模型自由改写用户的问题、实体、时间和查询范围。
 - 不在本阶段承诺自动分析所有未知业务概念；无法证明时必须明确说明。
+- 不允许任何模板命中后自动执行，也不提供关闭确认的隐式降级路径。
 
 ## 3. 核心原则
 
@@ -58,6 +64,8 @@ Codex 能处理复杂任务，主要因为它具备稳定任务契约、可观�
 8. 明细验收检查查询范围、结构和元数据，不要求验收模型读取全部明细。
 9. 验收采用 `accepted / repairable / unsupported / ambiguous` 状态，不使用会吞错误的成功兜底。
 10. 每个模块必须能回答：输入是什么、谁生产、谁消费、消费方依赖的最小不变量是什么。
+11. 模板匹配只能决定“哪些 SQL 编译实现可选”，不能决定“用户一定想执行哪一条”。
+12. 唯一候选不等于绝对正确；模板被选中后仍须由用户确认，并重新通过 QuerySpec 和 SQL 校验。
 
 ## 4. 单轮查询定义
 
@@ -72,6 +80,8 @@ Codex 能处理复杂任务，主要因为它具备稳定任务契约、可观�
 
 这些内部查询共享同一个不可变 `IntentContract`，不对应用户的多次追问。
 
+模板确认不是新的一轮语义对话，也不改变原 `IntentContract`。它只表示用户对当前 QuerySpec、模板来源、参数绑定和输出口径的执行授权；确认请求不得继承或引入上一轮业务条件。
+
 ## 5. 总体数据流
 
 ```text
@@ -82,6 +92,10 @@ Codex 能处理复杂任务，主要因为它具备稳定任务契约、可观�
   -> FieldReachSet + PhysicalSchemaView + OutputProjection
   -> ValueResolver / ProvenanceResolver
   -> QuerySpec 校验
+  -> TemplateResolver
+  -> CandidateSet（存在模板候选时）
+  -> UserDecision（用户确认或修改参数）
+  -> QuerySpec / ValueBinding 二次校验
   -> QueryPlan（一个或多个内部查询节点）
   -> SQL Compiler（模板、Wren 或受控 LLM）
   -> SQL Linter / Runtime Executor
@@ -220,7 +234,84 @@ Codex 能处理复杂任务，主要因为它具备稳定任务契约、可观�
 - 用户要求的汇总和明细必须是独立节点，不能混在同一个 SELECT 视图里。
 - QuerySpec 不合法时不得进入 SQL 生成。
 
-### 6.7 QueryPlan
+### 6.7 TemplateContract
+
+输入：内置模板、预置查询、自动沉淀模板或已验证示例的统一登记信息。
+
+生产者：TemplateRegistry。
+
+消费者：TemplateResolver、QuerySpec 校验器和确认卡组装器。
+
+最小结构：
+
+```json
+{
+  "id": "route_metric_v3",
+  "version": 3,
+  "source": "builtin",
+  "status": "active",
+  "kind": "mysql",
+  "supports": {
+    "subject": "disease",
+    "view": "distribution",
+    "metrics": ["count", "total_area", "average", "length"],
+    "dimensions": ["route"],
+    "filters": ["route", "damage_type", "time_range"]
+  },
+  "parameters": [],
+  "fixed_conditions": [],
+  "sql_template": "...",
+  "output_projection": [],
+  "required_assertions": [],
+  "schema_snapshot": "..."
+}
+```
+
+最小不变量：
+
+- 模板只声明自己能表达什么，不能依赖自然语言关键词猜测用户意图。
+- `supports.metrics` 是模板能够提供的完整集合，不是“有一个指标相同就能匹配”。
+- 每个参数必须声明绑定到哪个 QuerySpec 字段、接受什么 ValueBinding。
+- 固定条件必须有字段、存储值、显示值和来源。
+- SQL 中不能存在未在 `parameters` 或 `fixed_conditions` 声明的业务过滤条件。
+- 模板版本、Schema 快照和状态必须参与确认与执行前复核。
+
+### 6.8 QueryCandidate
+
+输入：QuerySpec、TemplateContract、参数绑定和结构匹配结果。
+
+生产者：TemplateResolver。
+
+消费者：确认卡、UserDecision 和 SQL Compiler。
+
+最小字段：
+
+```json
+{
+  "candidate_id": "c1",
+  "source": "builtin",
+  "template_id": "route_metric_v3",
+  "template_version": 3,
+  "spec_fingerprint": "...",
+  "bound_parameters": [],
+  "covered_constraints": [],
+  "fixed_conditions": [],
+  "missing_constraints": [],
+  "warnings": [],
+  "requires_confirmation": true,
+  "confirmation_token": "..."
+}
+```
+
+最小不变量：
+
+- 只有通过全部硬条件校验的候选才能进入 CandidateSet。
+- 所有候选都进入确认卡，不根据置信度自动选择或自动执行。
+- `missing_constraints` 非空表示模板不能完整回答 QuerySpec，不得作为可执行候选。
+- 候选排序只影响展示顺序，不影响执行资格。
+- 确认令牌绑定 QuerySpec 指纹、模板版本、参数绑定和 Schema 快照。
+
+### 6.9 QueryPlan
 
 输入：一个或多个已验证 QuerySpec。
 
@@ -236,7 +327,7 @@ Codex 能处理复杂任务，主要因为它具备稳定任务契约、可观�
 - 明细节点声明最大行数、截断策略和分页标识。
 - 后置计算节点只消费已接受的前序结果。
 
-### 6.8 ExecutionObservation
+### 6.10 ExecutionObservation
 
 输入：SQL 执行结果或工具执行结果。
 
@@ -273,7 +364,7 @@ Codex 能处理复杂任务，主要因为它具备稳定任务契约、可观�
 - 运行错误保留数据库原文。
 - 同一查询指纹不能原样重复执行。
 
-### 6.9 VerificationReport
+### 6.11 VerificationReport
 
 输入：QuerySpec、QueryPlan、ExecutionObservation。
 
@@ -295,7 +386,7 @@ Codex 能处理复杂任务，主要因为它具备稳定任务契约、可观�
 - 表达错误不得触发数据库重查。
 - 语义模型不能覆盖确定性失败。
 
-### 6.10 AnswerPackage
+### 6.12 AnswerPackage
 
 输入：已接受的结果、必需断言和展示投影。
 
@@ -326,7 +417,58 @@ Codex 能处理复杂任务，主要因为它具备稳定任务契约、可观�
 
 只有在同一粒度、同一分组和同一过滤范围内，多个指标才允许在同一节点返回。例如按路线返回病害数、总面积和路线长度属于同一分组视图。
 
-### 7.3 SQL 生成边界
+### 7.3 模板匹配与用户确认
+
+模板匹配发生在 QuerySpec 校验之后，不能发生在意图识别之前。
+
+模板族统一包括：
+
+- 内置代码模板及其 SQL builder。
+- 预置查询模板。
+- 从成功查询沉淀的自动模板。
+- 已经参数化成模板的验证示例。
+- 其他生成 SQL 草稿的确定性候选。
+
+相似问法、向量召回和历史示例只负责召回线索，不能单独证明模板结构与当前 QuerySpec 兼容。最终资格必须由 TemplateContract 的硬条件决定。
+
+模板通过资格检查必须同时满足：
+
+1. 数据库类型一致。
+2. 主体和结果视图一致。
+3. 用户要求的全部指标都由模板返回。
+4. 用户要求的全部分组维度都由模板表达。
+5. 用户要求的全部过滤条件都有参数槽或声明过的固定条件。
+6. 模板没有加入用户未授权的业务过滤条件。
+7. 参数能绑定为带来源的 ValueBinding，而不是裸字符串。
+8. 输出投影和中文展示标签完整。
+9. SQL 模板和 builder 引用的字段存在于当前 PhysicalSchemaView。
+10. 模板状态允许使用，且未因连续错误被降级。
+
+通过资格检查的全部候选都要进入确认卡。确认卡至少展示：
+
+- 来源类型、模板标题和版本。
+- 将要回答的业务范围。
+- 每个参数的存储值、中文显示值和来源。
+- 模板固定的业务条件。
+- 输出指标和分组。
+- 可能的风险或缺失条件。
+- SQL 口径摘要，但不允许用户直接编辑任意 SQL。
+
+即使只有一个候选，也禁止自动执行。用户可以在卡上修改允许编辑的参数；确认后系统必须使用确认令牌重新校验：
+
+- QuerySpec 指纹是否仍一致。
+- 模板版本是否仍有效。
+- Schema 快照是否变化。
+- 修改后的每个参数是否仍能解析成合法 ValueBinding。
+- 模板是否仍完整覆盖用户范围。
+
+任一复核失败时，不得静默改用旧 SQL 或其他模板，而是重新生成确认卡并说明失效原因。
+
+确认卡是产品级硬规则，不提供“高置信自动执行”开关。原因是模板匹配只能证明结构兼容，不能证明当前数据、用户意图和模板 SQL 在所有情形下必然正确。
+
+如果没有通过资格检查的模板候选，可以直接进入 Wren 或受控 LLM 编译路径。修复过程中若控制器提出新的模板方案，同样必须先经过确认卡，不能由 controller 自动执行模板。
+
+### 7.4 SQL 生成边界
 
 SQL 编译器只接收已验证 QuerySpec。允许三种生成路径：
 
@@ -336,7 +478,7 @@ SQL 编译器只接收已验证 QuerySpec。允许三种生成路径：
 
 三条路径都必须输出相同结构的 `CompiledQuery`，并由同一 SQL Linter 和执行器处理。
 
-### 7.4 明细超过展示上限
+### 7.5 明细超过展示上限
 
 默认展示上限仍是 500 行，但必须区分：
 
@@ -437,6 +579,7 @@ SQL 编译器只接收已验证 QuerySpec。允许三种生成路径：
 - `patch_dimension`
 - `patch_view_shape`
 - `add_supporting_query`
+- `request_template_confirmation`
 - `retry_compile`
 - `repair_presentation`
 - `ask_user`
@@ -451,6 +594,7 @@ SQL 编译器只接收已验证 QuerySpec。允许三种生成路径：
 - 表达修复不计入数据库重查预算。
 - 依赖修复节点的下游节点只有在修复通过后执行。
 - 第二轮仍产生相同失败证据时停止重复，并返回明确原因。
+- controller 可以生成新的模板候选，但必须交给用户确认，不能自动执行模板。
 
 ## 10. 错误兜底的硬规则
 
@@ -483,6 +627,8 @@ backend/app/query/
   analysis.py         # 问题分析与意图契约
   fields.py           # FieldReachSet / PhysicalSchemaView / OutputProjection
   values.py           # ValueBinding / Provenance
+  candidates.py       # QueryCandidate / CandidateSet / 确认令牌
+  templates.py        # TemplateContract / TemplateResolver / TemplateRegistry
   planner.py          # QuerySpec 到 QueryPlan
   compiler.py         # QueryPlan 到 CompiledQuery
   executor.py         # 执行与 Observation
@@ -495,7 +641,8 @@ backend/app/query/
 
 - `agent.py` 最终只保留入口路由和旧流程适配，不继续承载单轮 SQL 细节。
 - `nl2sql.py` 逐步迁出 QuerySpec、字段解析、SQL 生成和回答摘要。
-- `templatizer.py` 拆分模板识别、参数绑定、模板验证和审核。
+- `templatizer.py` 拆分模板识别、参数绑定、模板验证和审核，并接入统一 TemplateContract。
+- `preset_lib.py`、`capabilities.py` 的模板候选统一输出 QueryCandidate，不再各自维护确认与执行协议。
 - `react_agent.py` 拆分黑板、执行器、controller、修复策略和结果组装。
 - 拆分跟随功能迁移进行，不做无关的大范围格式化或一次性重写。
 
@@ -524,6 +671,15 @@ backend/app/query/
 - 路线长度和单位换算。
 - 枚举 code 与中文标签。
 - 时间范围和月份分组。
+- 模板结构完全匹配。
+- 模板只匹配部分指标而必须拒绝。
+- 模板遗漏用户过滤条件而必须拒绝。
+- 模板固定条件与用户条件冲突。
+- 唯一模板候选仍必须弹出确认卡。
+- 多模板候选全部展示，不能自动选择第一条执行。
+- 用户修改模板参数后重新校验来源和范围。
+- 模板版本或 Schema 在确认前变化。
+- 模板执行失败后的 Wren 回退。
 - 汇总加明细。
 - 明细超过 500 行。
 - 空数据库与条件空结果。
@@ -535,6 +691,8 @@ backend/app/query/
 ### 12.3 质量指标
 
 - 一次答对率。
+- 首次候选集是否包含正确口径。
+- 确认后一次执行正确率。
 - 最终正确率。
 - 错答放行率。
 - 可回答题误停率。
@@ -543,6 +701,10 @@ backend/app/query/
 - 重复 SQL 执行次数。
 - 范围漂移次数。
 - 超能力问题正确拒绝率。
+- 模板错误命中率。
+- 模板候选遗漏率。
+- 模板确认后执行一致率。
+- 无确认直接执行模板次数，必须为零。
 
 临时诊断脚本和日志不进入仓库；固定回归题、真实答案和契约测试属于核心工程资产，必须版本化。
 
@@ -572,13 +734,14 @@ backend/app/query/
 
 ### 阶段 1：契约和只读影子路径
 
-- 建立 IntentContract、QuerySpec、三类字段视图、Observation 和 VerificationReport。
+- 建立 IntentContract、QuerySpec、三类字段视图、TemplateContract、QueryCandidate、Observation 和 VerificationReport。
 - 对固定题目生成影子 QuerySpec，并记录旧链路和新链路差异。
 - 不改变线上默认回答。
 
 ### 阶段 2：简单单查询切换
 
 - 计数、分组、明细、阈值过滤先切换到新内核。
+- 内置模板、预置模板、自动模板和验证示例统一进入确认卡，不自动执行。
 - 旧路径保留为显式降级开关。
 - 验收一次答对率、误停率和范围漂移。
 
@@ -610,6 +773,9 @@ backend/app/query/
 10. 超出数据能力的问题返回具体原因，不返回猜测答案。
 11. 同一失败原样重复执行会被拒绝。
 12. 第一阶段固定题目全部通过真实答案或不变量验证。
+13. 所有模板候选都经过 QuerySpec 硬条件校验，部分指标或条件覆盖不能命中。
+14. 任一模板命中都必须展示确认卡，包括唯一候选。
+15. 用户确认后必须重新校验 QuerySpec、参数来源、模板版本和 Schema 快照。
 
 ## 16. 风险与控制
 
@@ -617,5 +783,6 @@ backend/app/query/
 - 迁移风险：新内核先影子运行，再按查询类型逐类切换。
 - LLM 波动：关键事实由确定性代码校验，模型不直接决定成功。
 - 延迟增加：简单题保持在确定性编译路径；只有失败时才进入有界修复。
+- 确认负担：用户选择所有模板都必须确认，因此确认卡要展示最少但足够判断的范围、参数和风险，不能堆积无关元数据。
 - 测试维护成本：真实答案只记录稳定事实和不变量，不硬编码容易变化的展示摘要。
 - 大文件拆分风险：按功能迁移拆模块，禁止无关重构和全库格式化。
