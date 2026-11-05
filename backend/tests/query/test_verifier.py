@@ -1,7 +1,7 @@
 import unittest
 
 from app.query.compiler import CompiledQuery
-from app.query.contracts import ExecutionObservation
+from app.query.contracts import ExecutionObservation, QuerySpec
 from app.query.verifier import verify_result
 from tests.query.factories import count_spec, detail_spec
 
@@ -51,6 +51,43 @@ def count_observation() -> ExecutionObservation:
 
 
 class VerifierTests(unittest.TestCase):
+    def test_distribution_rejects_null_group_label(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("device",),
+            filters=(),
+            output_projection=("device",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT device_code, COUNT(*) FROM patrol GROUP BY device_code",
+            columns=("设备", "次数"),
+            row_count=1,
+            preview_rows=({"设备": "NULL", "次数": "20"},),
+            rows_fetched=1,
+        )
+        report = verify_result(
+            spec,
+            CompiledQuery(observation.sql, "wren", "wren"),
+            observation,
+            semantic_checker=lambda *_: (),
+            presentation_checker=lambda *_: (),
+        )
+        self.assertEqual(report.status, "repairable")
+        self.assertIn(
+            "unusable_group_label",
+            {item.code for item in report.issues},
+        )
+
     def test_large_detail_uses_metadata_not_full_rows(self):
         report = verify_result(
             spec=detail_spec(),

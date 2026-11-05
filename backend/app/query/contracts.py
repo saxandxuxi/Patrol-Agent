@@ -50,6 +50,7 @@ class QuerySpec:
     order_by: tuple[Any, ...]
     limit: int | None
     required_assertions: tuple[str, ...]
+    question: str = ""
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ class ExecutionObservation:
     columns: tuple[str, ...] = ()
     row_count: int = 0
     preview_rows: tuple[dict[str, Any], ...] = ()
+    result_rows: tuple[dict[str, Any], ...] = ()
     rows_fetched: int = 0
     truncated: bool = False
     total_count: int | None = None

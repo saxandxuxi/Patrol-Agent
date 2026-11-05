@@ -1467,7 +1467,7 @@ def condition_lines(plan: dict[str, Any]) -> list[str]:
                 literals = ", ".join(_condition_literal(part, False) or "''" for part in value)
                 snippet = f"{expr} IN ({literals})"
             else:
-                snippet = f"{expr} = {literal}"
+                snippet = f"{expr} {op} {literal}"
             extra = ""
             if expr.startswith("t."):
                 extra = "，需要 JOIN ai_maintain_patrol t ON p.patrol_id = t.id"
@@ -5837,21 +5837,21 @@ def simple_patrol_route_list_mdl(plan: dict[str, Any]) -> str | None:
         "t.del_flag = 0",
         "pr.del_flag = 0",
         "r.del_flag = 0",
+        "r.short_name IS NOT NULL",
+        "r.short_name <> ''",
+        "r.short_name NOT IN ('未知路线')",
     ]
     if slots.get("time_start"):
         where.append(f"t.create_time >= '{slots['time_start']}'")
     if slots.get("time_end"):
         where.append(f"t.create_time < '{slots['time_end']}'")
     return (
-        "SELECT r.short_name AS 路线名称, COUNT(DISTINCT d.id) AS 病害数量\n"
+        "SELECT DISTINCT r.short_name AS 路线名称\n"
         "FROM patrol t\n"
         "JOIN patrol_route pr ON pr.patrol_id = t.id\n"
         "JOIN route r ON pr.routes_id = r.id\n"
-        "LEFT JOIN disease d ON d.patrol_id = t.id\n"
-        "  AND d.routes_id = r.id AND d.del_flag = 0\n"
         f"WHERE {' AND '.join(where)}\n"
-        "GROUP BY r.id, r.short_name\n"
-        "ORDER BY 病害数量 DESC, r.short_name\n"
+        "ORDER BY r.short_name\n"
         f"LIMIT {settings.sql_max_rows}"
     )
 

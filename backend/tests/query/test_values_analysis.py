@@ -8,6 +8,23 @@ from app.query.values import resolve_value
 
 
 class ValueAnalysisTests(unittest.TestCase):
+    @patch("app.query.values.route_resolver._resolve_route")
+    def test_route_name_resolves_to_storage_id(self, resolve_route):
+        resolve_route.return_value = {
+            "id": "route-1",
+            "short_name": "长沙－芷江高速公路",
+        }
+        value = resolve_value(
+            "route_name",
+            "=",
+            "长沙－芷江高速公路",
+            "长沙－芷江高速公路病害数量趋势",
+            "mysql",
+        )
+        self.assertEqual(value.storage_value, "route-1")
+        self.assertEqual(value.display_value, "长沙－芷江高速公路")
+        self.assertEqual(value.resolver, "route_dictionary")
+
     @patch("app.query.values.known_problem_types", return_value=["泛油", "纵向裂缝"])
     def test_damage_type_resolution_preserves_display_and_source(
         self,
@@ -24,6 +41,331 @@ class ValueAnalysisTests(unittest.TestCase):
         self.assertEqual(value.display_value, "泛油")
         self.assertEqual(value.source, "user_explicit")
         self.assertEqual(value.resolver, "damage_type_dictionary")
+
+    @patch("app.query.values.known_problem_types", return_value=["纵向裂缝", "横向裂缝"])
+    def test_umbrella_damage_type_expands_to_dictionary_values(
+        self,
+        _known_problem_types,
+    ):
+        value = resolve_value(
+            "problem_type_name",
+            "=",
+            "裂缝",
+            "裂缝有多少处？",
+            "mysql",
+        )
+        self.assertEqual(value.display_value, "裂缝")
+        self.assertEqual(value.storage_value, ["纵向裂缝", "横向裂缝"])
+        self.assertEqual(value.resolver, "damage_type_dictionary_expand")
+
+    def test_quarter_value_is_normalized_to_exact_time_bounds(self):
+        value = resolve_value(
+            "create_time",
+            "between",
+            "Q3",
+            "统计第三季度不同病害在不同道路上的新增情况",
+            "mysql",
+        )
+        self.assertEqual(value.resolver, "time_range")
+        self.assertEqual(
+            value.storage_value,
+            ("2026-07-01 00:00:00", "2026-10-01 00:00:00"),
+        )
+
+    def test_unspecified_year_day_filter_uses_current_business_year(self):
+        start = resolve_value(
+            "create_time",
+            ">=",
+            "2023-11-02 00:00:00",
+            "11月2日巡检了哪些线路？",
+            "mysql",
+        )
+        end = resolve_value(
+            "create_time",
+            "<",
+            "2023-11-03 00:00:00",
+            "11月2日巡检了哪些线路？",
+            "mysql",
+        )
+        self.assertEqual(start.storage_value, "2026-11-02 00:00:00")
+        self.assertEqual(end.storage_value, "2026-11-03 00:00:00")
+
+    def test_relative_three_month_value_becomes_exact_bounds(self):
+        value = resolve_value(
+            "create_time",
+            ">=",
+            "3 months ago",
+            "近三月有多少巡检记录？",
+            "mysql",
+        )
+        self.assertEqual(value.op, "between")
+        self.assertEqual(len(value.storage_value), 2)
+        self.assertEqual(value.resolver, "time_range")
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_patrol_device_dimension_uses_populated_equipment_id(
+        self,
+        chat_json,
+        _resolve,
+    ):
+        chat_json.return_value = {
+            "final_goal": "巡检设备次数",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "subject": "patrol",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["device_code"],
+                    "filters": [],
+                    "output_projection": ["device_code", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                }
+            ],
+        }
+        plan = analyze_single_turn(
+            "巡检设备分别完成了多少次巡检？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+        self.assertEqual(plan.nodes[0].spec.dimensions, ("equipment_id",))
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_device_question_cannot_degrade_to_a_single_count(
+        self,
+        chat_json,
+        _resolve,
+    ):
+        chat_json.return_value = {
+            "final_goal": "巡检设备次数",
+            "intent_family": "count",
+            "views": [
+                {
+                    "id": "q1",
+                    "subject": "patrol",
+                    "view": "count",
+                    "metrics": ["count"],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": ["count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                }
+            ],
+        }
+        plan = analyze_single_turn(
+            "2026 年 11 月，巡检设备分别完成了多少次巡检？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+        spec = plan.nodes[0].spec
+        self.assertEqual(spec.view, "distribution")
+        self.assertEqual(spec.dimensions, ("equipment_id",))
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_detail_limit_defaults_to_display_cap_when_user_did_not_request_a_count(
+        self,
+        chat_json,
+        _resolve,
+    ):
+        chat_json.return_value = {
+            "final_goal": "列出病害明细",
+            "intent_family": "detail",
+            "views": [
+                {
+                    "id": "q1",
+                    "subject": "disease",
+                    "view": "list",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": ["id"],
+                    "order_by": [],
+                    "limit": 50,
+                    "required_assertions": ["preserve_user_scope"],
+                }
+            ],
+        }
+        plan = analyze_single_turn(
+            "把具体的数据调出来",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+        self.assertEqual(plan.nodes[0].spec.limit, 500)
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_distribution_limit_is_ignored_without_an_explicit_top_request(
+        self,
+        chat_json,
+        _resolve,
+    ):
+        chat_json.return_value = {
+            "final_goal": "路线指标",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["route_name"],
+                    "filters": [],
+                    "output_projection": ["route_name", "count"],
+                    "order_by": [],
+                    "limit": 10,
+                    "required_assertions": ["preserve_user_scope"],
+                }
+            ],
+        }
+        plan = analyze_single_turn(
+            "按路线分组统计每条路线的病害总数",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+        self.assertIsNone(plan.nodes[0].spec.limit)
+
+    @patch("app.query.analysis.chat_json")
+    def test_ai_reliability_contract_uses_threshold_total_and_post_calc(self, chat_json):
+        chat_json.return_value = {
+            "final_goal": "评估AI识别可靠性",
+            "intent_family": "analysis",
+            "views": [
+                {
+                    "id": "q1",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["confidence"],
+                    "filters": [],
+                    "output_projection": ["confidence", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                }
+            ],
+        }
+        plan = analyze_single_turn(
+            "AI识别的病害类型，靠谱吗？有多少是认不出来的？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+        self.assertEqual(len(plan.nodes), 3)
+        low, total, calculation = plan.nodes
+        self.assertEqual(low.spec.filters[0].field, "confidence")
+        self.assertEqual(low.spec.filters[0].storage_value, "0.7")
+        self.assertEqual(low.spec.filters[0].op, "<")
+        self.assertEqual(total.spec.view, "count")
+        self.assertEqual(calculation.node_type, "post_calc")
+        self.assertEqual(calculation.depends_on, (low.id, total.id))
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_density_contract_adds_route_length_metric(
+        self,
+        chat_json,
+        resolve,
+    ):
+        chat_json.return_value = {
+            "final_goal": "裂缝月份路线密度",
+            "intent_family": "analysis",
+            "views": [
+                {
+                    "id": "q3",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count", "sum_disease_length"],
+                    "dimensions": ["route_name"],
+                    "filters": [{"field": "problem_type_name", "op": "=", "raw_value": "裂缝"}],
+                    "output_projection": ["route_name", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "question": "这些路的病害密度怎么样？",
+                }
+            ],
+        }
+        resolve.return_value = ValueBinding(
+            field="problem_type_name",
+            op="=",
+            storage_value=["横向裂缝", "纵向裂缝"],
+            display_value="裂缝",
+            source="user_explicit",
+            resolver="damage_type_dictionary_expand",
+            raw_text="裂缝",
+        )
+        plan = analyze_single_turn(
+            "裂缝集中在哪几个月？哪些路？这些路的病害密度怎么样？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+        self.assertIn("route_length_km", plan.nodes[0].spec.metrics)
+        calculation = next(node for node in plan.nodes if node.node_type == "post_calc")
+        self.assertEqual(calculation.depends_on, (plan.nodes[0].id,))
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_route_metrics_contract_replaces_asset_split(
+        self,
+        chat_json,
+        _resolve,
+    ):
+        chat_json.return_value = {
+            "final_goal": "路线多指标",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count", "sum_area", "avg_area"],
+                    "dimensions": ["routes_id"],
+                    "filters": [],
+                    "output_projection": ["routes_id", "route_name"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                },
+                {
+                    "id": "q2",
+                    "subject": "asset",
+                    "view": "list",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": ["asset_code", "length_unit", "memo"],
+                    "order_by": [],
+                    "limit": 500,
+                    "required_assertions": ["preserve_user_scope"],
+                },
+            ],
+        }
+        plan = analyze_single_turn(
+            "按路线分组，统计每条路线的病害总数、病害总面积、平均单处病害面积，并关联获取该路线的长度",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+        self.assertEqual(len(plan.nodes), 1)
+        spec = plan.nodes[0].spec
+        self.assertEqual(spec.dimensions, ("route_name",))
+        self.assertEqual(
+            spec.metrics,
+            ("count", "total_area", "average_area", "route_length_km"),
+        )
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")

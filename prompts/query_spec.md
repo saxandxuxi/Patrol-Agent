@@ -31,6 +31,8 @@ count / sum / avg / distribution / list / detail / top / trend / bucket_compare 
   "views": [
     {
       "id": "q1",
+      "action": "query_data",
+      "question": "该节点要执行的完整独立子问题",
       "subject": "disease",
       "view": "count",
       "metrics": ["count"],

@@ -2736,12 +2736,12 @@ def _ratio_and_average_conclusion(
     deps: list[dict[str, Any]],
 ) -> str:
     need_items = [
-        (int(item.get("from_step") or 0), str(item.get("key") or ""))
+        (str(int(item.get("from_step") or 0)), str(item.get("key") or ""))
         for item in task.get("needs") or []
         if isinstance(item, dict) and item.get("from_step")
     ]
     needs = {step_id: key for step_id, key in need_items}
-    dep_ids = [int(item) for item in task.get("depends_on") or []]
+    dep_ids = [str(item) for item in task.get("depends_on") or []]
     denominator = None
     numerator = None
     denominator_item = next(
@@ -2750,9 +2750,12 @@ def _ratio_and_average_conclusion(
             for step_id, key in need_items
             if any(word in key.lower() for word in ("total", "count", "处数", "总数"))
         ),
-        (0, ""),
+        ("0", ""),
     )
-    denominator_id, denominator_key = denominator_item
+    denominator_id, denominator_key = (
+        str(denominator_item[0]),
+        denominator_item[1],
+    )
     for step_id, dep in zip(dep_ids, deps):
         value = _numeric_value(
             dep,
@@ -2990,6 +2993,103 @@ def _density_rows(
     }
 
 
+def _trend_conclusion(
+    question: str,
+    deps: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not re.search(r"增加.*还是.*减少|上升.*还是.*下降|趋势", question):
+        return None
+    rows = [
+        dict(row)
+        for dep in deps
+        for row in (dep.get("rows") or [])
+        if isinstance(row, dict) and row
+    ]
+    if len(rows) < 2:
+        return None
+    columns = list(rows[0])
+    time_column = next(
+        (
+            column
+            for column in columns
+            if re.search(r"月份|日期|时间|month|date|time", column, re.I)
+        ),
+        "",
+    )
+    metric_column = next(
+        (
+            column
+            for column in columns
+            if re.search(r"数量|次数|总数|处数|count", column, re.I)
+        ),
+        "",
+    )
+    if not (time_column and metric_column):
+        return None
+    ordered = sorted(rows, key=lambda row: str(row.get(time_column) or ""))
+    previous = ordered[-2]
+    latest = ordered[-1]
+    try:
+        previous_value = float(str(previous.get(metric_column)))
+        latest_value = float(str(latest.get(metric_column)))
+    except (TypeError, ValueError):
+        return None
+    if latest_value > previous_value:
+        direction = "增加（上升）"
+    elif latest_value < previous_value:
+        direction = "减少（下降）"
+    else:
+        direction = "持平"
+    reply = (
+        f"{previous.get(time_column)} 为 {previous.get(metric_column)}，"
+        f"{latest.get(time_column)} 为 {latest.get(metric_column)}，"
+        f"最近呈{direction}趋势。"
+    )
+    return {
+        "reply": reply,
+        "source": "calc",
+        "engine": "post_calc",
+        "accepted": True,
+        "columns": [time_column, metric_column],
+        "rows": [previous, latest],
+    }
+
+
+def _ai_reliability_conclusion(
+    question: str,
+    deps: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not re.search(r"AI\s*识别", question) or "认不出" not in question:
+        return None
+    if len(deps) < 2:
+        return None
+    first = _numeric_value(deps[0])
+    second = _numeric_value(deps[1])
+    if first is None or second is None:
+        return None
+    low_count = min(first, second)
+    total_count = max(first, second)
+    share = (low_count / total_count * 100) if total_count else 0
+    reply = (
+        f"AI识别病害共 {total_count} 条，其中 {low_count} 条属于无法识别或低置信度"
+        f"（按置信度低于 0.7 统计），占 {share:.2f}%。"
+    )
+    return {
+        "reply": reply,
+        "source": "calc",
+        "engine": "post_calc",
+        "accepted": True,
+        "columns": ["低置信度数量", "总记录数", "低置信度占比"],
+        "rows": [
+            {
+                "低置信度数量": low_count,
+                "总记录数": total_count,
+                "低置信度占比": f"{share:.2f}%",
+            }
+        ],
+    }
+
+
 def _per_group_average_rows(
     question: str,
     deps: list[dict[str, Any]],
@@ -3075,9 +3175,19 @@ def _post_calc_payload(
     deps = [results[tid] for tid in (task.get("depends_on") or []) if tid in results]
     rows = [row for dep in deps for row in (dep.get("rows") or [])]
     question = str(task.get("question") or "")
+    ai_reliability = _ai_reliability_conclusion(question, deps)
+    if ai_reliability:
+        return ai_reliability
     density = _density_rows(question, deps)
+    if not density and "严重" in question:
+        density = _density_rows("病害密度", deps)
     if density:
+        if "严重" in question:
+            density["reply"] = "按病害密度判断，" + str(density.get("reply") or "")
         return density
+    trend = _trend_conclusion(question, deps)
+    if trend:
+        return trend
     average_rows = _per_group_average_rows(question, deps)
     if average_rows:
         return average_rows

@@ -91,6 +91,33 @@ def verify_deterministic(
                 )
             )
     elif spec.view in {"distribution", "trend", "count", "sum", "avg", "top"}:
+        label_columns = [
+            key
+            for key in observation.columns
+            if not any(
+                str(row.get(key, ""))
+                .replace(".", "", 1)
+                .replace("-", "", 1)
+                .isdigit()
+                for row in observation.preview_rows[:10]
+            )
+        ]
+        if spec.view == "distribution" and label_columns:
+            has_label = any(
+                str(row.get(key) or "").strip().upper()
+                not in {"", "NULL", "NONE"}
+                for row in observation.preview_rows[:10]
+                for key in label_columns
+            )
+            if not has_label:
+                issues.append(
+                    VerificationIssue(
+                        code="unusable_group_label",
+                        message="分组标签全部为空或 NULL",
+                        node_id=spec.id,
+                        stage="fact",
+                    )
+                )
         numeric = any(
             isinstance(value, (int, float))
             or (

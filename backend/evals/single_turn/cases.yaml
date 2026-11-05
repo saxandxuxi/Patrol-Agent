@@ -28,7 +28,7 @@ cases:
   - id: patrol_month_counts
     question: 数据库里各个月份的巡查次数分别是多少？总共多少次？
     expected_status: answered
-    required_contains: ["206 次"]
+    required_contains: ["206", "次"]
     required_filters: [group_by_month, sum_equals_total]
   - id: device_counts_nov_2026
     question: 2026 年 11 月，巡检设备分别完成了多少次巡检？

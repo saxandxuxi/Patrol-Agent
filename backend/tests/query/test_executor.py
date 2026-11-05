@@ -29,5 +29,7 @@ class ExecutorTests(unittest.TestCase):
             count_sql="SELECT COUNT(*) AS n FROM ai_problem",
         )
         self.assertEqual(observation.rows_fetched, 500)
+        self.assertEqual(len(observation.result_rows), 500)
+        self.assertEqual(len(observation.preview_rows), 10)
         self.assertEqual(observation.total_count, 20108)
         self.assertTrue(observation.truncated)

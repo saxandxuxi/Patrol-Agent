@@ -66,6 +66,7 @@ def execute_compiled(
         columns=columns,
         row_count=rows_fetched,
         preview_rows=rows[:10],
+        result_rows=rows,
         rows_fetched=rows_fetched,
         truncated=truncated,
         total_count=total_count,

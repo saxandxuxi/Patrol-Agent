@@ -173,11 +173,15 @@ def _query_data_over_prior_result(question: str) -> bool:
     text = str(question or "")
     prior_pattern = (
         r"根据(?:步骤|前序)|基于[^，。；]{0,8}(?:前序查询结果|步骤)|"
-        r"前序查询结果|步骤\s*\d+"
+        r"基于\s*(?:q|步骤)\s*\d+|前序查询结果|步骤\s*\d+"
     )
     has_prior = bool(re.search(prior_pattern, text))
     has_calc = bool(
-        re.search(r"计算|比较|求差|求和|占比|比例|平均|合计|排序|取最大|取第一条", text)
+        re.search(
+            r"计算|比较|求差|求和|占比|比例|平均|合计|排序|取最大|取第一条|"
+            r"最多|最少|最高|最低",
+            text,
+        )
     )
     query_text = re.sub(r"前序查询结果|步骤\s*\d+", "", text)
     has_new_query = bool(

@@ -12,12 +12,14 @@ def build_query_plan(
     schema: PhysicalSchemaView,
     reach: FieldReachSet,
     dependencies: dict[str, tuple[str, ...]] | None = None,
+    node_types: dict[str, str] | None = None,
 ) -> QueryPlan:
     if not specs:
         raise QuerySpecError("模型没有产出任何查询视图")
     seen: set[str] = set()
     nodes: list[PlanNode] = []
     deps_by_node = dependencies or {}
+    types_by_node = node_types or {}
     for spec in specs:
         if spec.id in seen:
             raise QuerySpecError(f"查询节点 id 重复：{spec.id}")
@@ -30,6 +32,7 @@ def build_query_plan(
                 id=spec.id,
                 spec=spec,
                 depends_on=tuple(deps_by_node.get(spec.id, ())),
+                node_type=types_by_node.get(spec.id, "query_data"),
             )
         )
     return QueryPlan(question=contract.original_question, nodes=tuple(nodes))
