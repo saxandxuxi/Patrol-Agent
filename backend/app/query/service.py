@@ -200,3 +200,13 @@ def confirm_single_turn(
     decision = consume_confirmation(ticket_token, choices, overrides)
     _PENDING.pop(ticket_token, None)
     return _execute_plan(pending.plan, decision, pending.candidates)
+
+
+def pending_confirmation(ticket_token: str) -> TurnStart | None:
+    pending = _PENDING.get(str(ticket_token or ""))
+    if pending is None:
+        return None
+    return TurnStart(
+        plan=pending.plan,
+        candidate_set=pending.candidates,
+    )

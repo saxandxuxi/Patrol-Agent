@@ -4692,6 +4692,113 @@ def _persist_conversation_turn(
     )
 
 
+def _single_turn_compiler_payload(turn: Any, ticket_token: str = "") -> dict[str, Any]:
+    if turn.answer is not None:
+        return {
+            "reply": turn.answer.text,
+            "source": "single_turn_compiler",
+            "sections": list(turn.answer.sections),
+            "rows": [],
+            "columns": [],
+            "references": [],
+            "result_id": str(uuid.uuid4()),
+            "engine": "single_turn_compiler",
+        }
+    cards: list[dict[str, Any]] = []
+    for candidate in turn.candidate_set.candidates:
+        card = candidate.confirmation_card
+        cards.append(
+            {
+                "kind": card.source,
+                "id": candidate.candidate_id,
+                "node_id": candidate.node_id,
+                "title": card.title,
+                "question": turn.plan.question,
+                "scope": card.scope_summary,
+                "shape": candidate.contract.view,
+                "subject": candidate.contract.subject,
+                "slots": [
+                    {
+                        "name": item.field,
+                        "label": item.display_value,
+                        "value": item.storage_value,
+                        "options": [],
+                        "editable": True,
+                    }
+                    for item in candidate.bound_parameters
+                ],
+                "score": 0,
+                "reasons": list(candidate.covered_constraints),
+                "warn": bool(candidate.warnings),
+            }
+        )
+    token = ticket_token or (
+        turn.confirmation_ticket.token if turn.confirmation_ticket else ""
+    )
+    return {
+        "reply": "请确认查询口径后再执行。",
+        "source": "confirm",
+        "await_confirm": True,
+        "choose_token": token,
+        "capability_choices": cards,
+        "recommended_id": cards[0]["id"] if cards else "",
+        "compiler_context": {
+            "ticket_token": token,
+            "nodes": [{"id": node.id, "view": node.spec.view} for node in turn.plan.nodes],
+            "candidates": cards,
+        },
+        "sql": None,
+        "columns": [],
+        "rows": [],
+        "references": [],
+    }
+
+
+def _maybe_single_turn_compiler(
+    message: str,
+    *,
+    choose_token: str | None,
+    capability_id: str | None,
+    slot_values: dict[str, str] | None,
+) -> dict[str, Any] | None:
+    if not bool(chat_settings.load().get("single_turn_compiler_enabled", False)):
+        return None
+    from app.query import service as single_turn_service
+
+    if choose_token:
+        pending = single_turn_service.pending_confirmation(choose_token)
+        if pending is None or pending.candidate_set is None:
+            return None
+        picked = next(
+            (
+                candidate
+                for candidate in pending.candidate_set.candidates
+                if str(candidate.candidate_id) == str(capability_id or "")
+            ),
+            None,
+        )
+        if picked is None:
+            picked = pending.candidate_set.candidates[0]
+        choices = {picked.node_id: picked.candidate_id}
+        overrides = {picked.node_id: dict(slot_values or {})}
+        answer = single_turn_service.confirm_single_turn(
+            choose_token,
+            choices,
+            overrides,
+        )
+        return _single_turn_compiler_payload(
+            single_turn_service.TurnStart(
+                plan=pending.plan,
+                answer=answer,
+            )
+        )
+    intent = intent_service.classify_intent(message)
+    if intent not in {"data", "analysis", "composite"}:
+        return None
+    turn = single_turn_service.start_single_turn(message)
+    return _single_turn_compiler_payload(turn)
+
+
 def handle_message(
     message: str,
     session_id: str | None = None,
@@ -4773,6 +4880,14 @@ def _handle_message_entry(
     if single_turn:
         # 确认卡等提前返回分支也必须先从干净状态开始，不能等进 _handle_message。
         _clear_turn_context(session_id)
+    compiler_payload = _maybe_single_turn_compiler(
+        message,
+        choose_token=choose_token,
+        capability_id=capability_id,
+        slot_values=slot_values,
+    )
+    if compiler_payload is not None:
+        return compiler_payload
     # 执行前复述确认（方案第二章）：复杂问题先问一句「我将查询：…」，用户点确认再执行。
     # 开关默认关（config.confirm_before_query / 前端开关），简单问题永不确认。
     if not confirmed and chat_settings.load().get("confirm_before_query", False):

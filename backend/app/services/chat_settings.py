@@ -46,6 +46,9 @@ def load() -> dict[str, Any]:
         "confirm_before_query": bool(
             stored.get("confirm_before_query", settings.confirm_before_query)
         ),
+        "single_turn_compiler_enabled": bool(
+            stored.get("single_turn_compiler_enabled", False)
+        ),
         "reflect_check": bool(
             stored.get("reflect_check", settings.reflect_check_enabled)
         ),
@@ -157,6 +160,7 @@ def save(payload: dict[str, Any]) -> dict[str, Any]:
         "reflect_check",
         "followup_suggestions",
         "confirm_before_query",
+        "single_turn_compiler_enabled",
         "auto_template_enabled",
         "auto_template_mine_enabled",
         "rag_direct_enabled",
