@@ -69,6 +69,16 @@ def _need_keys(step: dict[str, Any]) -> list[str]:
     ]
 
 
+def _dependency_ids(step: dict[str, Any]) -> list[int]:
+    ids = {int(item) for item in step.get("depends_on") or [] if str(item).isdigit()}
+    ids.update(
+        int(item.get("from_step"))
+        for item in step.get("needs") or []
+        if isinstance(item, dict) and item.get("from_step")
+    )
+    return sorted(ids)
+
+
 def _has_dependent_steps(steps: list[dict[str, Any]], index: int) -> bool:
     """当前步骤被后续步骤依赖时，不能通过 skip_step 绕过失败。"""
     current = steps[index]
@@ -365,6 +375,23 @@ def _decision_signature(decision: dict[str, Any]) -> tuple[str, str]:
     )
 
 
+def _observation_fingerprint(obs: dict[str, Any]) -> str:
+    data = obs.get("data") or {}
+    failure = obs.get("failure") or {}
+    return json.dumps(
+        {
+            "failure_code": failure.get("failure_code"),
+            "sql": (failure.get("evidence") or {}).get("sql"),
+            "columns": data.get("columns") or [],
+            "rows": list(data.get("preview_rows") or [])[:10],
+            "summary": obs.get("summary"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+
+
 def _run_structured_repair(
     blackboard: ReactBlackboard,
     step: dict[str, Any],
@@ -406,6 +433,11 @@ def _run_structured_repair(
             return obs, args, decision
         name = str(decision.get("tool") or "")
         signature = _decision_signature(decision)
+        previous_observation = {
+            "summary": str(obs.get("summary") or ""),
+            "failure": dict(obs.get("failure") or {}),
+        }
+        previous_fingerprint = _observation_fingerprint(obs)
         if action == "retry_tool":
             if name != current_tool:
                 return obs, args, {
@@ -432,6 +464,33 @@ def _run_structured_repair(
                 "accepted": next_obs.get("accepted"),
             }
         )
+        if (
+            action == "retry_tool"
+            and next_obs.get("failure")
+            and _observation_fingerprint(next_obs) == previous_fingerprint
+        ):
+            current = dict(next_obs.get("failure") or {})
+            previous_summary = str(previous_observation.get("summary") or "")[:180]
+            current_summary = str(next_obs.get("summary") or "")[:180]
+            reason = (
+                "连续两次结果相同且仍未通过验收，已停止重试；"
+                "可能是生成器或验收器存在问题。"
+                f"上次答案：{previous_summary or '（空）'}；"
+                f"本次答案：{current_summary or '（空）'}；"
+                f"上次原因：{previous_observation['failure'].get('reason') or '未知'}；"
+                f"本次原因：{current.get('reason') or '未知'}"
+            )
+            current["reason"] = reason
+            evidence = dict(current.get("evidence") or {})
+            evidence["previous_observation"] = previous_observation
+            evidence["current_observation"] = {
+                "summary": str(next_obs.get("summary") or ""),
+                "failure": dict(next_obs.get("failure") or {}),
+            }
+            current["evidence"] = evidence
+            stopped = dict(next_obs)
+            stopped.update({"accepted": False, "ok": False, "failure": current})
+            return stopped, next_args, {"action": "abort", "message": reason}
         if action == "retry_tool":
             obs, args = next_obs, next_args
     return obs, args, {}
@@ -574,8 +633,9 @@ def _execute_step(
     step: dict[str, Any],
     repair_feedback: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], str]:
+    step_type = str(step.get("type") or "")
     question, missing = _frozen_step(step, blackboard.values)
-    if missing:
+    if missing and step_type not in {"analysis", "post_calc"}:
         obs = observation(
             "react",
             ok=False,
@@ -594,7 +654,6 @@ def _execute_step(
             next_hint="回退静态执行器。",
         )
         return obs, {}, question
-    step_type = str(step.get("type") or "")
     if tool_name == "query_data":
         args: dict[str, Any] = {
             "question": question,
@@ -610,11 +669,7 @@ def _execute_step(
         args = {"question": question, "force_ai": True}
     elif tool_name in {"analyze", "post_calc"}:
         prior = sorted(_tool_results(blackboard))
-        depends_on = [
-            int(item.get("from_step") or 0)
-            for item in step.get("needs") or []
-            if isinstance(item, dict) and item.get("from_step")
-        ]
+        depends_on = _dependency_ids(step)
         if step_type == "analysis":
             depends_on = prior
         args = {
@@ -661,16 +716,29 @@ def run(
                 title=f"步骤 {index + 1}/{len(steps)}：{_tool_for_step(step)}",
             )
             need_keys = _need_keys(step)
+            dependency_ids = _dependency_ids(step)
             event_bus.emit_event(
                 "thought",
                 text=(
-                    "依赖已就绪："
-                    + "、".join(f"{key}={blackboard.values.get(key)}" for key in need_keys)
-                    if need_keys
+                    (
+                        "依赖步骤已就绪："
+                        + "、".join(str(item) for item in dependency_ids)
+                        + (
+                            "；依赖值："
+                            + "、".join(
+                                f"{key}={blackboard.values.get(key)}"
+                                for key in need_keys
+                            )
+                            if need_keys
+                            else ""
+                        )
+                    )
+                    if dependency_ids
                     else "该步骤无前置依赖，按冻结问法直接执行。"
                 ),
             )
-            if any(not blackboard.values.get(key) for key in _need_keys(step)):
+            missing_needs = any(not blackboard.values.get(key) for key in _need_keys(step))
+            if missing_needs and str(step.get("type") or "") not in {"analysis", "post_calc"}:
                 obs = observation(
                     "react",
                     ok=False,
@@ -853,15 +921,17 @@ def run(
         event_bus.emit_event("phase", title="拼接真实工具观察")
         payload = _payload(_grounded_answer(sections), blackboard, sections)
         if failures:
+            failure_reasons = [
+                str((item.get("failure") or {}).get("reason") or "未知原因")
+                for item in failures
+            ]
             payload["reply"] = (
                 "部分步骤未完成："
-                + "；".join(
-                    str((item.get("failure") or {}).get("reason") or "未知原因")
-                    for item in failures
-                )
+                + "；".join(failure_reasons)
                 + "\n\n"
                 + str(payload.get("reply") or "")
             )
+            payload["error"] = "；".join(failure_reasons)
         payload.update(
             {
                 "partial": bool(failures),
