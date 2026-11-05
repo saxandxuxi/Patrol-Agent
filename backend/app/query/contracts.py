@@ -11,6 +11,13 @@ class QuerySpecError(ValueError):
 
 
 @dataclass(frozen=True)
+class UserDecision:
+    token: str
+    choices: dict[str, str] = field(default_factory=dict)
+    overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class ValueBinding:
     field: str
     op: str
