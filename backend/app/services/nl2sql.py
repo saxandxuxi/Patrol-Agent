@@ -1023,9 +1023,10 @@ def _infer_enum_conditions(plan: dict[str, Any]) -> None:
         best_codes = {code for score, code in matches if score == best_score}
         if len(best_codes) != 1:
             continue
-        inferred.append(
-            {"field": field, "op": "=", "value": next(iter(best_codes))}
-        )
+        condition = {"field": field, "op": "=", "value": next(iter(best_codes))}
+        if not _condition_mentioned(condition, message):
+            continue
+        inferred.append(condition)
     if inferred:
         plan.setdefault("slots", {})["semantic_conditions"] = conditions + inferred
         semantic = plan.setdefault("semantic", {})
@@ -1061,12 +1062,40 @@ def _condition_mentioned(condition: dict[str, Any], message: str, kind: str = "m
     values = condition.get("value")
     values = values if isinstance(values, list) else [values]
     text = _squash_text(message)
+    field = str(condition.get("field") or "")
+    label_text = _squash_text(str(_CONDITION_LABELS.get(field) or ""))
+    field_context = {
+        "problem_type_name": ("病害", "类型"),
+        "disease_categories_type": ("病害", "大类"),
+        "up_or_down": ("上行", "下行", "方向"),
+        "patrol_type": ("巡查", "巡检", "类型"),
+        "surface_type": ("路面", "类型"),
+        "tech_grade": ("技术等级", "等级"),
+        "problem_source": ("病害来源", "来源"),
+        "problem_status": ("病害状态", "状态"),
+        "operate_type": ("病害操作", "操作"),
+        "enable_type": ("基础状态", "状态"),
+        "track_problem": ("重点关注",),
+        "collect": ("收藏",),
+    }.get(field, ())
+    has_field_context = bool(
+        (label_text and label_text in text)
+        or any(_squash_text(word) in text for word in field_context)
+    )
+    if not has_field_context:
+        return False
     for value in values:
         code = str(value if value is not None else "").strip()
         if not code:
             continue
         label = str(code_map.get(code) or "").strip()
-        if label and _squash_text(label) in text:
+        squashed_label = _squash_text(label)
+        if squashed_label and squashed_label in text:
+            return True
+        if any(
+            squashed_label[:size] in text
+            for size in range(2, min(len(squashed_label), 8) + 1)
+        ):
             return True
         # 用户直接写了枚举值本身（非数字，避免 "10" 撞上桩号/日期）也算说到过
         if not code.isdigit() and _squash_text(code) in text:
@@ -2714,7 +2743,19 @@ def _semantic_condition_values(plan: dict[str, Any], fields: set[str]) -> list[s
 
 
 # 用户说这些词 = 要"字典里没有识别的类型"，不是某一种具体病害
-_UNKNOWN_TYPE_WORDS = ("未识别", "未知类型", "没有识别", "没识别", "识别不出", "无类型", "类型为空")
+_UNKNOWN_TYPE_WORDS = (
+    "未识别",
+    "未知类型",
+    "无法识别",
+    "认不出来",
+    "认不出",
+    "识别不了",
+    "没有识别",
+    "没识别",
+    "识别不出",
+    "无类型",
+    "类型为空",
+)
 _TYPE_FIELDS = {"problem_type_name", "damage_type", "damage_type_name", "problem_type"}
 _UNKNOWN_TYPE_VALUES = {"未识别", "未知", "未知类型", "无", "空", "null", "none", ""}
 
@@ -2792,7 +2833,7 @@ def _canonicalize_unknown_type(plan: dict[str, Any], message: str) -> None:
     3) 什么都没有、或者错抽成 `problem_status = '0'`（"未识别"被当成工单状态）→
        只要用户原话里明确说了"未识别/未知类型"，就补成 unknown_type。
     """
-    slots = plan.get("slots") or {}
+    slots = plan.setdefault("slots", {})
     conditions = list(slots.get("semantic_conditions") or [])
     found = False
     kept: list[dict[str, Any]] = []

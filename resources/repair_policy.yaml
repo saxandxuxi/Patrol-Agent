@@ -18,6 +18,11 @@ result_shape_mismatch:
   repair_role: sql
   max_repair_rounds: 2
   retryable: true
+plan_contract_violation:
+  candidates: [ask_user]
+  repair_role: null
+  max_repair_rounds: 0
+  retryable: false
 empty_unexpected:
   candidates: [check_coverage, query_data, ask_user]
   repair_role: semantic

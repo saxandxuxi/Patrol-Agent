@@ -23,6 +23,32 @@ def _endpoint(base_url: str) -> str:
     return f"{base}/chat/completions"
 
 
+_ROLE_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "planner": ("semantic",),
+    "controller": ("semantic",),
+    "verify": ("semantic",),
+}
+
+
+def _role_choice(
+    settings_payload: dict[str, Any],
+    role: str,
+    visited: set[str] | None = None,
+) -> str:
+    seen = set(visited or set())
+    if role in seen:
+        return ""
+    seen.add(role)
+    chosen = str(settings_payload.get(f"{role}_model") or "").strip()
+    if chosen:
+        return chosen
+    for fallback in _ROLE_FALLBACKS.get(role, ()):
+        inherited = _role_choice(settings_payload, fallback, seen)
+        if inherited:
+            return inherited
+    return ""
+
+
 def role_model(role: str) -> dict[str, Any] | None:
     """按角色取模型：sql（生成 SQL）/ knowledge（知识问答）。
 
@@ -31,7 +57,7 @@ def role_model(role: str) -> dict[str, Any] | None:
     """
     from .chat_settings import load as load_chat_settings
 
-    chosen = str(load_chat_settings().get(f"{role}_model") or "").strip()
+    chosen = _role_choice(load_chat_settings(), role)
     if not chosen:
         return None
     # 「供应商/模型」写法（如 deepseek/deepseek-chat）：key 和 base_url 都跟着换

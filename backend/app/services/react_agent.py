@@ -134,6 +134,51 @@ def _tool_for_step(step: dict[str, Any]) -> str:
     }.get(str(step.get("type") or ""), "")
 
 
+def _contract_preflight_issue(step: dict[str, Any]) -> dict[str, Any] | None:
+    contract = step.get("contract") or {}
+    if not isinstance(contract, dict) or contract.get("status") != "invalid":
+        return None
+    violations = [
+        item for item in contract.get("violations") or [] if isinstance(item, dict)
+    ]
+    return {
+        "message": (
+            "规划步骤未通过执行前契约："
+            + "；".join(
+                str(item.get("message") or item.get("code") or "未知问题")
+                for item in violations
+            )
+        ),
+        "contract": contract,
+        "violations": violations,
+    }
+
+
+def _print_success_observation(step: dict[str, Any], obs: dict[str, Any]) -> None:
+    """把成功子查询的可核对事实同步打印到控制台。"""
+    if not obs.get("ok") or obs.get("failure"):
+        return
+    data = obs.get("data") or {}
+    result_id = str(data.get("result_id") or "")
+    cached = get_result(result_id) if result_id else None
+    record = {
+        "step_id": step.get("id"),
+        "tool": obs.get("tool") or _tool_for_step(step),
+        "question": data.get("question") or step.get("question"),
+        "row_count": data.get("row_count", len(data.get("preview_rows") or [])),
+        "columns": list(data.get("columns") or []),
+        "sample_rows": list(data.get("preview_rows") or [])[:10],
+        "sql": (cached or {}).get("sql"),
+        "summary": str(obs.get("summary") or "")[:1000],
+        "verification_warning": obs.get("verification_warning"),
+    }
+    print(
+        "[react][success] "
+        + json.dumps(record, ensure_ascii=False, default=str),
+        flush=True,
+    )
+
+
 def _run_atomic_tool(
     name: str, frozen_query: str, values: dict[str, str]
 ) -> dict[str, Any] | None:
@@ -319,7 +364,7 @@ def _deviation_decision(
                 payload["coverage_and_values"], ensure_ascii=False, default=str
             ),
         ),
-        model=role_model("semantic"),
+        model=role_model("controller"),
     )
     return data if isinstance(data, dict) else {}
 
@@ -515,7 +560,11 @@ def _run_structured_repair(
                 f"上次原因：{previous_observation['failure'].get('reason') or '未知'}；"
                 f"本次原因：{current.get('reason') or '未知'}"
             )
-            if _observation_has_data(next_obs):
+            if (
+                _observation_has_data(next_obs)
+                and str(current.get("failure_code") or "")
+                not in {"result_shape_mismatch", "plan_contract_violation"}
+            ):
                 warning = {
                     "reason": reason,
                     "previous_observation": previous_observation,
@@ -723,6 +772,7 @@ def _execute_step(
             "wren_first": True,
             "produces": list(step.get("produces") or []),
             "repair_feedback": repair_feedback,
+            "contract": step.get("contract"),
         }
     elif tool_name == "query_knowledge":
         args = {"question": question}
@@ -758,6 +808,7 @@ def run(
         goal=str(plan.get("final_goal") or question),
         plan=plan,
         spec=dict(plan.get("spec") or {}),
+        max_steps=max(8, min(20, len(steps) + 4)),
     )
     sections: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
@@ -796,6 +847,39 @@ def run(
                         "decision": {"action": "abort", "message": reason},
                     }
                 )
+                index += 1
+                continue
+            contract_issue = _contract_preflight_issue(step)
+            if contract_issue:
+                failure = react_repair.build_failure(
+                    "plan_contract_violation",
+                    stage="preflight",
+                    reason=contract_issue["message"],
+                    evidence=contract_issue,
+                )
+                obs = observation(
+                    "react",
+                    ok=False,
+                    accepted=False,
+                    failure=failure,
+                    summary=contract_issue["message"],
+                    error=contract_issue["message"],
+                    next_hint="回到规划器拆分视图或修正枚举来源。",
+                )
+                blackboard.add(step, obs)
+                failures.append(
+                    {
+                        "step_id": int(step.get("id") or 0),
+                        "question": str(step.get("question") or ""),
+                        "failure": failure,
+                        "decision": {
+                            "action": "abort",
+                            "message": failure["reason"],
+                        },
+                    }
+                )
+                failed_step_ids.add(int(step.get("id") or 0))
+                blackboard.used_plan_steps.add(int(step.get("id") or 0))
                 index += 1
                 continue
             event_bus.emit_event(
@@ -863,6 +947,7 @@ def run(
                     }
                 )
                 sections.append(section)
+                _print_success_observation(observed_step, obs)
                 blackboard.used_plan_steps.add(int(step.get("id") or 0))
                 retry_count = 0
                 index += 1
@@ -888,6 +973,7 @@ def run(
                         }
                     )
                     sections.append(section)
+                    _print_success_observation(observed_step, repaired)
                     blackboard.used_plan_steps.add(int(step.get("id") or 0))
                     index += 1
                     continue
@@ -1009,12 +1095,15 @@ def run(
                 str((item.get("failure") or {}).get("reason") or "未知原因")
                 for item in failures
             ]
-            payload["reply"] = (
-                "部分步骤未完成："
-                + "；".join(failure_reasons)
-                + "\n\n"
-                + str(payload.get("reply") or "")
-            )
+            if sections:
+                payload["reply"] = (
+                    "部分步骤未完成："
+                    + "；".join(failure_reasons)
+                    + "\n\n"
+                    + str(payload.get("reply") or "")
+                )
+            else:
+                payload["reply"] = "查询未完成：" + "；".join(failure_reasons)
             payload["error"] = "；".join(failure_reasons)
         payload.update(
             {

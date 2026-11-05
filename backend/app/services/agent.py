@@ -2027,7 +2027,9 @@ def _build_query_result(
                     sql_risk_warnings.append(join_warning)
                 try:
                     result = sql_engine.execute_sql(
-                        kind, _enforce_top_limit(physical, plan)
+                        kind,
+                        _enforce_top_limit(physical, plan),
+                        question=message,
                     )
                     result["engine"] = "wren"
                     sql = result["sql"]
@@ -2100,7 +2102,11 @@ def _build_query_result(
 
             from_template = bool(template_sql) and candidate == template_sql
             try:
-                result = sql_engine.execute_sql(kind, _enforce_top_limit(candidate, plan))
+                result = sql_engine.execute_sql(
+                    kind,
+                    _enforce_top_limit(candidate, plan),
+                    question=message,
+                )
                 if join_warning and join_warning not in sql_risk_warnings:
                     sql_risk_warnings.append(join_warning)
                 sql = result["sql"]
@@ -2503,8 +2509,10 @@ def _analysis_payload(
             knowledge_parts.append(reply[:1500])
         elif rows:
             data_parts.append(
-                f"- {label + '：' if label else ''}{reply[:400]}\n  明细前几行："
-                + json.dumps(rows[:10], ensure_ascii=False, default=str)[:800]
+                f"- {label + '：' if label else ''}{reply[:1200]}\n  明细"
+                + ("（全部）" if len(rows) <= 80 else f"（前 80/{len(rows)} 行）")
+                + "："
+                + json.dumps(rows[:80], ensure_ascii=False, default=str)[:8000]
             )
         elif reply:
             data_parts.append(f"- {label + '：' if label else ''}前置数据无结果：{reply[:400]}")
@@ -2523,6 +2531,24 @@ def _analysis_payload(
             data_parts.append(f"- {label + '：' if label else ''}{reply[:300]}")
         else:
             knowledge_parts.append(reply[:800])
+    if "密度" in question:
+        derived = _density_rows(
+            question,
+            [
+                dependency
+                for task_id, dependency in results.items()
+                if int(task_id) in (task.get("depends_on") or [])
+            ],
+        )
+        if derived:
+            data_parts.append(
+                "\n- 确定性密度计算结果（直接采用，不要重算）：\n"
+                + json.dumps(
+                    derived.get("rows") or [],
+                    ensure_ascii=False,
+                    default=str,
+                )[:8000]
+            )
     previous_table = ""
     if any(word in question for word in ("上面", "上表", "表格", "刚才", "前面", "上一轮")):
         context = memory_service.load_session(session_id) or {}
@@ -2537,7 +2563,7 @@ def _analysis_payload(
         messages = prompts.messages(
             "analysis",
             question=question,
-            data_result="\n".join(data_parts)[:2500] or "（本次没有新的数据查询）",
+            data_result="\n".join(data_parts)[:12000] or "（本次没有新的数据查询）",
             knowledge_result="\n".join(knowledge_parts)[:3000] or "（没有检索到相关规范）",
             previous_table=previous_table or "（无）",
         )
@@ -2675,6 +2701,182 @@ def _ratio_and_average_conclusion(
     return "；".join(parts)
 
 
+def _per_group_max_rows(
+    question: str,
+    deps: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """从“路线 × 类型 × 数量”结果中确定性地取每条路线数量最大的一行。"""
+    if not re.search(r"每条|每个|每一组|各组|每组", question):
+        return None
+    source_rows = [
+        dict(row)
+        for dep in deps
+        for row in (dep.get("rows") or [])
+        if isinstance(row, dict) and row
+    ]
+    if not source_rows:
+        return None
+    columns = list(source_rows[0])
+    numeric_columns: list[str] = []
+    for column in columns:
+        values = [str(row.get(column) or "").strip() for row in source_rows]
+        numbers = [value for value in values if re.fullmatch(r"-?\d+(?:\.\d+)?", value)]
+        if numbers and len(numbers) >= max(1, len(values) // 2):
+            numeric_columns.append(column)
+    if not numeric_columns:
+        return None
+    metric = next(
+        (
+            column
+            for column in numeric_columns
+            if re.search(r"数量|处数|总数|病害数|count|次数|total", column, re.I)
+        ),
+        numeric_columns[-1],
+    )
+    group = next(
+        (
+            column
+            for column in columns
+            if column != metric
+            and any(
+                not re.fullmatch(r"-?\d+(?:\.\d+)?", str(row.get(column) or "").strip())
+                for row in source_rows
+            )
+        ),
+        "",
+    )
+    if not group:
+        return None
+    label = next(
+        (
+            column
+            for column in columns
+            if column not in {group, metric}
+            and any(
+                not re.fullmatch(r"-?\d+(?:\.\d+)?", str(row.get(column) or "").strip())
+                for row in source_rows
+            )
+        ),
+        "",
+    )
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in source_rows:
+        key = str(row.get(group) or "")
+        if not key:
+            continue
+        try:
+            value = float(str(row.get(metric)))
+        except (TypeError, ValueError):
+            continue
+        previous = grouped.get(key)
+        if previous is None or value > float(previous["_value"]):
+            grouped[key] = {**row, "_value": value}
+    result_rows: list[dict[str, Any]] = []
+    for row in grouped.values():
+        item = {group: row.get(group), metric: row.get(metric)}
+        if label:
+            item[label] = row.get(label)
+        result_rows.append(item)
+    if not result_rows:
+        return None
+    selected = [group, metric] + ([label] if label else [])
+    summary = "；".join(
+        f"{row.get(group)}："
+        + (f"{row.get(label)} " if label else "")
+        + f"{row.get(metric)}"
+        for row in result_rows
+    )
+    return {
+        "reply": summary,
+        "source": "calc",
+        "engine": "post_calc",
+        "accepted": True,
+        "columns": selected,
+        "rows": result_rows,
+    }
+
+
+def _density_rows(
+    question: str,
+    deps: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """按分组行确定性地计算“数量 / 长度”密度。"""
+    if "密度" not in question:
+        return None
+    rows = [
+        dict(row)
+        for dep in deps
+        for row in (dep.get("rows") or [])
+        if isinstance(row, dict) and row
+    ]
+    if not rows:
+        return None
+    columns = list(rows[0])
+    count_column = next(
+        (
+            column
+            for column in columns
+            if re.search(r"(?:病害|泛油)?(?:总数|数量|处数)|count", column, re.I)
+        ),
+        "",
+    )
+    length_column = next(
+        (
+            column
+            for column in columns
+            if re.search(r"长度|(?:^|_)km$|公里", column, re.I)
+        ),
+        "",
+    )
+    label_column = next(
+        (
+            column
+            for column in columns
+            if column not in {count_column, length_column}
+            and any(
+                not re.fullmatch(r"-?\d+(?:\.\d+)?", str(row.get(column) or "").strip())
+                for row in rows
+            )
+        ),
+        "",
+    )
+    if not (count_column and length_column and label_column):
+        return None
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            count = float(str(row.get(count_column)))
+            length = float(str(row.get(length_column)))
+        except (TypeError, ValueError):
+            continue
+        if length <= 0:
+            continue
+        out.append(
+            {
+                label_column: row.get(label_column),
+                count_column: row.get(count_column),
+                length_column: row.get(length_column),
+                "密度_处_per_km": round(count / length, 4),
+            }
+        )
+    if not out:
+        return None
+    out.sort(key=lambda item: float(item["密度_处_per_km"]), reverse=True)
+    top = out[0]
+    return {
+        "reply": (
+            f"密度最高的是{top[label_column]}，"
+            f"{top['密度_处_per_km']} 处/公里"
+            f"（{top[count_column]} 处 ÷ {top[length_column]} 公里）。"
+        ),
+        "source": "calc",
+        "engine": "post_calc",
+        "accepted": True,
+        "columns": [label_column, count_column, length_column, "密度_处_per_km"],
+        "rows": out,
+    }
+
+
 def _post_calc_payload(
     task: dict[str, Any],
     results: dict[int, dict[str, Any]],
@@ -2687,6 +2889,9 @@ def _post_calc_payload(
     deps = [results[tid] for tid in (task.get("depends_on") or []) if tid in results]
     rows = [row for dep in deps for row in (dep.get("rows") or [])]
     question = str(task.get("question") or "")
+    density = _density_rows(question, deps)
+    if density:
+        return density
     arithmetic = _ratio_and_average_conclusion(question, task, deps)
     if arithmetic:
         return {
@@ -2697,6 +2902,9 @@ def _post_calc_payload(
             "columns": [],
             "rows": [],
         }
+    grouped_max = _per_group_max_rows(question, deps)
+    if grouped_max:
+        return grouped_max
     # 1) 确定性：两个对象比大小/求差（覆盖绝大多数场景）
     conclusion = _difference_conclusion(question or "多多少", rows)
     if conclusion:
@@ -2867,11 +3075,20 @@ def _handle_composite(
     plan: dict[str, Any] | None = None,
     tasks: list[dict[str, Any]] | None = None,
     intent: str = "data",
+    original_message: str | None = None,
 ) -> dict[str, Any]:
     # 「按步骤答 / 每步选口径」已删除：复合题只摆**整题卡**（一次答对整条），
     # 或者让 AI 走 Wren；子步骤不再有候选卡，也不会带着"用户逐步选择"进来。
     # tasks 由调用方传进来时（image 路由已经先拆过一次）直接复用，不重复规划。
-    tasks = tasks if tasks is not None else cross_db.decompose_cross_db(message, scope)
+    tasks = (
+        tasks
+        if tasks is not None
+        else cross_db.decompose_cross_db(
+            message,
+            scope,
+            original_message=original_message or message,
+        )
+    )
     # 复合题也先当"普通题"过一遍确定性闸（用户要求：先模板/示例匹配，靠用户决策；
     # 选了模板就直接出结果、跳过后面的所有步骤）。两条硬约束：
     #   · 数据 + 规范混合的问题不能被模板截胡（只答了数字、漏了规范 —— H2/H3/H10 栽过）；
@@ -4469,7 +4686,12 @@ def _followup_step(message: str, payload: dict[str, Any]) -> dict[str, Any]:
     """后续建议：回答末尾主动提示用户接下来可能想知道什么（升级4）。"""
     if not chat_settings.load().get("followup_suggestions", True):
         return payload
-    if str(payload.get("source") or "") in {"clarification", "error"} or payload.get("sections"):
+    if (
+        str(payload.get("source") or "") in {"clarification", "error"}
+        or payload.get("partial")
+        or payload.get("failures")
+        or payload.get("sections")
+    ):
         return payload
     # 确定性直出（模板/校准/用户确认过的口径）不生成"要不要再帮你看看"：
     # 用户要的就是那一句结果，追问既多余又要多花一次大模型往返。
@@ -4938,6 +5160,7 @@ def _handle_message(
                 # 整题计划如果探测时已经算过就直接复用，不重复规划
                 plan=probe_plan,
                 intent=intent,
+                original_message=effective_message,
             )
         except capabilities.ChooseCapability:
             # 复合题的能力确认卡（子步骤候选）要冒泡到 handle_message 去组装，

@@ -52,10 +52,18 @@ def _task_kind(question: str, planned: Any, scope: list[str]) -> str:
     return resolved[0] if resolved else scope[0]
 
 
-def decompose_cross_db(message: str, scope: list[str] | None = None) -> list[dict[str, Any]]:
+def decompose_cross_db(
+    message: str,
+    scope: list[str] | None = None,
+    original_message: str | None = None,
+) -> list[dict[str, Any]]:
     """整句交给语义规划器拆步骤，每个数据步骤再绑定一个数据源。"""
     scope = scope or db_scope(message)
-    plan = orchestrator.decompose_plan(message, kind="")
+    plan = orchestrator.decompose_plan(
+        message,
+        kind="",
+        original_message=original_message,
+    )
     tasks = list(plan.get("steps") or [])
     if not tasks:
         tasks = [{"type": "data", "question": message}]

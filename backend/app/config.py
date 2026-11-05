@@ -176,6 +176,10 @@ class Settings(BaseSettings):
     # 数据源判断 / 反思改 SQL）。这些环节决定后面整条链路的走向，值得用强模型；
     # 都是短输入短输出，单次成本远低于写 SQL。留空则用默认模型。
     semantic_model: str = ""
+    # 任务规划和 ReAct 异常调度各自可独立选模型。两者的失败模式不同：
+    # 规划更看重业务拆解和歧义控制，调度更看重工具选择与止损判断。
+    planner_model: str = ""
+    controller_model: str = ""
     # L2 示例直达（docs/RAG示例直达与AI直答旁路方案.md §6）：
     # 同问判定用便宜模型（role_model("semantic")），阈值/分差/召回数都在设置页可改。
     # 同义改写只要"打分模型认为口径一致"就摆卡，门槛别卡死（用户确认才是最后一道闸）

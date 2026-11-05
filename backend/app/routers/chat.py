@@ -77,6 +77,8 @@ class ChatSettingsPayload(BaseModel):
     knowledge_model: str | None = None
     verify_model: str | None = None
     semantic_model: str | None = None
+    planner_model: str | None = None
+    controller_model: str | None = None
 
 
 

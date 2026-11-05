@@ -74,6 +74,34 @@
             </el-select>
             <span class="param-hint">当前生效：{{ effective('semantic_model') }}</span>
           </el-form-item>
+          <el-form-item label="任务规划模型">
+            <el-select
+              v-model="roles.planner_model"
+              filterable
+              allow-create
+              clearable
+              :placeholder="defaultLabel('planner_model')"
+              style="width: 100%"
+            >
+              <el-option :label="defaultLabel('planner_model')" value="" />
+              <el-option v-for="name in roleChoices" :key="name" :label="name" :value="name" />
+            </el-select>
+            <span class="param-hint">当前生效：{{ effective('planner_model') }}</span>
+          </el-form-item>
+          <el-form-item label="ReAct 调度模型">
+            <el-select
+              v-model="roles.controller_model"
+              filterable
+              allow-create
+              clearable
+              :placeholder="defaultLabel('controller_model')"
+              style="width: 100%"
+            >
+              <el-option :label="defaultLabel('controller_model')" value="" />
+              <el-option v-for="name in roleChoices" :key="name" :label="name" :value="name" />
+            </el-select>
+            <span class="param-hint">当前生效：{{ effective('controller_model') }}</span>
+          </el-form-item>
           <div class="form-actions">
             <el-button type="primary" @click="saveRoles">保存角色模型</el-button>
           </div>
@@ -86,6 +114,8 @@
           语义理解模型管「读懂人话」的几个环节（意图分类 / 拆分 / 上下文补全 / 结果解读 /
           后置计算说明 / 数据源判断 / 反思改 SQL）——它决定后面整条链路的走向，
           建议用强通用模型（qwen3.7-plus）。清空 = 跟随默认模型。
+          任务规划模型负责拆步骤和执行前契约；ReAct 调度模型只在异常时决定补证据、重试或
+          停止当前分支。清空任一项 = 跟随语义理解模型，可分别换成 GLM / DeepSeek 做交叉校准。
         </p>
       </div>
 
@@ -286,6 +316,8 @@ const roles = reactive({
   knowledge_model: '',
   verify_model: '',
   semantic_model: '',
+  planner_model: '',
+  controller_model: '',
 })
 const chatOptions = reactive({
   enable_thinking: true,
@@ -326,6 +358,8 @@ async function loadRoles() {
     roles.knowledge_model = data.knowledge_model || ''
     roles.verify_model = data.verify_model || ''
     roles.semantic_model = data.semantic_model || ''
+    roles.planner_model = data.planner_model || ''
+    roles.controller_model = data.controller_model || ''
     const saved = models.value.map((item) => item.model).filter(Boolean)
     roleChoices.value = [...new Set([...(data.model_choices || []), ...saved])]
   } catch (err) {
@@ -340,6 +374,8 @@ async function saveRoles() {
       knowledge_model: roles.knowledge_model || '',
       verify_model: roles.verify_model || '',
       semantic_model: roles.semantic_model || '',
+      planner_model: roles.planner_model || '',
+      controller_model: roles.controller_model || '',
     })
     ElMessage.success('已保存角色模型，下一次提问生效')
   } catch (err) {

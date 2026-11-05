@@ -478,6 +478,12 @@
               "object",
               "null"
             ]
+          },
+          "contract": {
+            "type": [
+              "object",
+              "null"
+            ]
           }
         },
         "required": [

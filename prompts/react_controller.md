@@ -1,7 +1,7 @@
 <!--
 用途：ReAct 执行偏差决策器
 调用：react_agent._deviation_decision()
-模型：role_model("semantic")
+模型：role_model("controller")
 占位符：<<goal>> <<current_step>> <<frozen_query>> <<observation_error>>
         <<failure>> <<allowed_tools>> <<previous_attempts>> <<helper_observations>>
         <<coverage_and_values>>

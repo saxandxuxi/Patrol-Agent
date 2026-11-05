@@ -436,7 +436,55 @@ def generate_sql(
     return response
 
 
-def execute_sql(kind: str, sql: str) -> dict[str, Any]:
+_UNREQUESTED_ENUM_CONTEXTS: dict[str, tuple[str, ...]] = {
+    "problem_source": (
+        "病害来源",
+        "来源",
+        "手动新增",
+        "车辆巡检",
+        "人工巡检",
+        "新增历史工单",
+        "路长转养护",
+        "路政转养护",
+    ),
+    "operate_type": ("病害操作", "操作类型"),
+    "problem_status": ("工单状态", "病害状态"),
+    "enable_type": ("基础状态",),
+    "track_problem": ("重点关注",),
+    "collect": ("收藏",),
+}
+
+
+def strip_unrequested_enum_filters(sql: str, question: str) -> str:
+    """移除模型自行添加、但用户没有点名字段上下文的枚举过滤。
+
+    “新增情况”是时间范围内新增的记录，不等于 `problem_source=15/0`。这类错误会
+    把整条查询静默收窄成 0 行，因此在执行前按字段来源做最后一道确定性约束。
+    """
+    text = str(sql or "")
+    message = str(question or "")
+    for field, contexts in _UNREQUESTED_ENUM_CONTEXTS.items():
+        if any(word in message for word in contexts):
+            continue
+        pattern = re.compile(
+            rf"\s+AND\s+(?:[A-Za-z_]\w*\.)?`?{re.escape(field)}`?\s*=\s*"
+            r"(?:'(?:''|[^'])*'|-?\d+(?:\.\d+)?)",
+            re.IGNORECASE,
+        )
+        updated = pattern.sub("", text)
+        if updated != text:
+            log_event(
+                "sql_engine",
+                "WARNING",
+                "unrequested_enum_filter_stripped",
+                field=field,
+                question=message[:80],
+            )
+            text = updated
+    return text
+
+
+def execute_sql(kind: str, sql: str, question: str = "") -> dict[str, Any]:
     started = time.perf_counter()
     event_bus.emit_event(
         "action",
@@ -444,7 +492,10 @@ def execute_sql(kind: str, sql: str) -> dict[str, Any]:
         tool="execute_sql",
         args={"kind": kind, "sql_chars": len(str(sql or ""))},
     )
-    ok, error, sql = validate_sql(extract_sql(sql), kind)
+    sql = extract_sql(sql)
+    if question:
+        sql = strip_unrequested_enum_filters(sql, question)
+    ok, error, sql = validate_sql(sql, kind)
     if not ok:
         event_bus.emit_event(
             "observation",

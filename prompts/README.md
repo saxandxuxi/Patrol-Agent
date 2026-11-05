@@ -27,7 +27,9 @@
 | `intent.md` | 意图分类（knowledge/data/analysis/image/composite/metadata） | `intent.classify_intent` | 默认模型 | `<<message>>` |
 | `metadata.md` | 宏观元数据查询解析（表/字段/库结构，只出 JSON，不写 SQL） | `metadata_service.parse_metadata_request` | `role_model("semantic")` | `<<databases>> <<tables>> <<message>>` |
 | `datasource.md` | 跨库判定（mysql/postgresql/seaweedfs） | `cross_db._llm_classify_dbs` | 默认模型 | `<<candidates>> <<example_datasource>> <<example_datasource_first>> <<message>>` |
-| `planning.md` | 任务规划（先想清楚几步再动手，分析类必须带 analyze 步） | `orchestrator._llm_tasks` | `role_model("semantic")` | `<<question>>` |
+| `planning.md` | 任务规划（先想清楚几步再动手，分析类必须带 analyze 步） | `orchestrator._llm_tasks` | `role_model("planner")` | `<<question>> <<known_damage_types>>` |
+| `repair_plan.md` | 执行前规划契约校准（伪枚举、混合视图、依赖和字段组合） | `orchestrator._repair_plan` | `role_model("planner")` | `<<question>> <<planning_question>> <<plan>> <<issues>> <<known_damage_types>>` |
+| `react_controller.md` | ReAct 异常分支调度（重试、补证据、跳过或止损） | `react_agent._deviation_decision` | `role_model("controller")` | `<<goal>> <<current_step>> <<frozen_query>> <<observation_error>> <<failure>> <<allowed_tools>>` |
 | `dialogue_understanding.md` | 对话理解（关系/多对象/补全成完整问题） | `memory._llm_complete_followup` | `role_model("semantic")` | `<<history>> <<message>>` |
 | `reflect_check.md` | 反思自检（数字自洽/结论有依据/不许编比率） | `agent._reflect_check_step` | `role_model("semantic")` | `<<question>> <<reply>> <<data>>` |
 | `followup_suggestion.md` | 回答末尾的后续建议 | `agent._followup_step` | `role_model("knowledge")` | `<<question>> <<reply>>` |

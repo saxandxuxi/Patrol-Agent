@@ -103,6 +103,12 @@ def load() -> dict[str, Any]:
             "knowledge_model": str(settings.qwen_model or ""),
             "verify_model": str(settings.verify_model or settings.qwen_model or ""),
             "semantic_model": str(settings.semantic_model or settings.qwen_model or ""),
+            "planner_model": str(
+                settings.planner_model or settings.semantic_model or settings.qwen_model or ""
+            ),
+            "controller_model": str(
+                settings.controller_model or settings.semantic_model or settings.qwen_model or ""
+            ),
         },
         "sql_model": (
             str(stored["sql_model"]) if "sql_model" in stored else str(settings.nl2sql_model or "")
@@ -123,6 +129,16 @@ def load() -> dict[str, Any]:
             str(stored["semantic_model"])
             if "semantic_model" in stored
             else str(settings.semantic_model or "")
+        ),
+        "planner_model": (
+            str(stored["planner_model"])
+            if "planner_model" in stored
+            else str(settings.planner_model or "")
+        ),
+        "controller_model": (
+            str(stored["controller_model"])
+            if "controller_model" in stored
+            else str(settings.controller_model or "")
         ),
         # 下拉候选：内置清单 + **各供应商的「供应商/模型」**（只列填了 key 的供应商）。
         # 角色模型存的就是这个字符串，llm.role_model 认「供应商/模型」写法（key/base_url 一起换）。
@@ -166,7 +182,14 @@ def save(payload: dict[str, Any]) -> dict[str, Any]:
                 current[key] = cast(payload[key])
             except (TypeError, ValueError):
                 continue
-    for key in ("sql_model", "knowledge_model", "verify_model", "semantic_model"):
+    for key in (
+        "sql_model",
+        "knowledge_model",
+        "verify_model",
+        "semantic_model",
+        "planner_model",
+        "controller_model",
+    ):
         if payload.get(key) is not None:
             current[key] = str(payload[key]).strip()
     set_memory(_KEY, {key: value for key, value in current.items() if key != "model_choices"})

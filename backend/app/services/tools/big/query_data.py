@@ -4,14 +4,16 @@ import re
 from typing import Any
 
 from ....store import save_result
-from ... import nl2sql
+from ... import nl2sql, plan_contract
 from ...react_repair import build_failure
 from ..observation import normalize_week_label, observation
 from ..registry import tool
 
 
 def _verification_failure(
-    question: str, payload: dict[str, Any]
+    question: str,
+    payload: dict[str, Any],
+    contract: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     sql = str(payload.get("sql") or "")
     if not sql:
@@ -33,6 +35,25 @@ def _verification_failure(
             },
         )
     rows = list(payload.get("rows") or [])
+    contract_issue = plan_contract.contract_issue_for_result(
+        contract or {},
+        rows,
+        list(payload.get("columns") or []),
+    )
+    if contract_issue:
+        return build_failure(
+            "result_shape_mismatch",
+            stage="contract",
+            reason=contract_issue["message"],
+            evidence={
+                "step_question": question,
+                "sql": sql,
+                "columns": list(payload.get("columns") or []),
+                "rows": rows[:10],
+                "contract": contract,
+                "contract_issue": contract_issue,
+            },
+        )
     reply = str(payload.get("reply") or "")
     if str(payload.get("shape") or "") in {"distribution", "trend"} and len(rows) <= 10:
         numeric_values = {
@@ -124,6 +145,7 @@ def _verification_failure(
             "want_images": {"type": "boolean", "default": False},
             "produces": {"type": "array", "items": {"type": "object"}},
             "repair_feedback": {"type": ["object", "null"]},
+            "contract": {"type": ["object", "null"]},
         },
         "required": ["question"],
     },
@@ -139,6 +161,7 @@ def query_data(
     want_images: bool = False,
     produces: list[dict[str, Any]] | None = None,
     repair_feedback: dict[str, Any] | None = None,
+    contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from ... import agent, clarify
     from ....config import settings
@@ -234,7 +257,9 @@ def query_data(
         else row
         for row in rows[:10]
     ]
-    failure = _verification_failure(filled_question, payload) if ok else None
+    failure = (
+        _verification_failure(filled_question, payload, contract) if ok else None
+    )
     if payload.get("presentation_repair") and result_id:
         save_result(result_id, payload)
     accepted = ok and failure is None
