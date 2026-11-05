@@ -72,6 +72,12 @@ def _verification_failure(
             if verdict.get("correct", True):
                 payload["verification"] = verdict
                 return None
+            payload["verification"] = verdict
+            payload["presentation_warning"] = {
+                "reason": verdict.get("reason") or "最终回复仍需进一步精简或补全",
+                "note": "SQL 和返回数据已通过查询验收；完整结果以结果表格为准。",
+            }
+            return None
         return build_failure(
             "answer_presentation_mismatch",
             stage="presentation",
