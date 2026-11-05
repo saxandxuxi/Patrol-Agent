@@ -392,6 +392,15 @@ def _observation_fingerprint(obs: dict[str, Any]) -> str:
     )
 
 
+def _observation_has_data(obs: dict[str, Any]) -> bool:
+    data = obs.get("data") or {}
+    return bool(
+        int(data.get("row_count") or 0)
+        or data.get("preview_rows")
+        or data.get("answer")
+    )
+
+
 def _run_structured_repair(
     blackboard: ReactBlackboard,
     step: dict[str, Any],
@@ -480,6 +489,30 @@ def _run_structured_repair(
                 f"上次原因：{previous_observation['failure'].get('reason') or '未知'}；"
                 f"本次原因：{current.get('reason') or '未知'}"
             )
+            if _observation_has_data(next_obs):
+                warning = {
+                    "reason": reason,
+                    "previous_observation": previous_observation,
+                    "current_observation": {
+                        "summary": str(next_obs.get("summary") or ""),
+                        "failure": dict(next_obs.get("failure") or {}),
+                    },
+                    "note": "查询仍有语义警告，但已有可用结果，继续后续工作流。",
+                }
+                accepted_obs = dict(next_obs)
+                accepted_obs.update(
+                    {
+                        "ok": True,
+                        "accepted": True,
+                        "failure": None,
+                        "verification_warning": warning,
+                    }
+                )
+                state["history"][-1]["accepted"] = True
+                return accepted_obs, next_args, {
+                    "action": "accept",
+                    "message": reason,
+                }
             current["reason"] = reason
             evidence = dict(current.get("evidence") or {})
             evidence["previous_observation"] = previous_observation
@@ -551,6 +584,7 @@ def _section(step: dict[str, Any], obs: dict[str, Any]) -> dict[str, Any]:
         "produces": plan_step["produces"],
         "plan": plan_step,
         "risk_warnings": list((cached or {}).get("risk_warnings") or data.get("risk_warnings") or []),
+        "verification_warning": obs.get("verification_warning"),
         "wants_images": bool(step.get("wants_images")),
     }
 
@@ -700,6 +734,7 @@ def run(
     )
     sections: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
+    failed_step_ids: set[int] = set()
     index = 0
     retry_count = 0
     last_decision: dict[str, Any] = {}
@@ -711,6 +746,31 @@ def run(
     try:
         while index < len(steps) and len(blackboard.observations) < blackboard.max_steps:
             step = steps[index]
+            blocked_by = [
+                item for item in _dependency_ids(step) if item in failed_step_ids
+            ]
+            if blocked_by:
+                reason = (
+                    "前置步骤 "
+                    + "、".join(str(item) for item in blocked_by)
+                    + " 未完成，当前步骤未执行。"
+                )
+                failed_step_ids.add(int(step.get("id") or 0))
+                failures.append(
+                    {
+                        "step_id": int(step.get("id") or 0),
+                        "question": str(step.get("question") or ""),
+                        "failure": react_repair.build_failure(
+                            "missing_dependency",
+                            stage="dependency",
+                            reason=reason,
+                            evidence={"blocked_by": blocked_by},
+                        ),
+                        "decision": {"action": "abort", "message": reason},
+                    }
+                )
+                index += 1
+                continue
             event_bus.emit_event(
                 "phase",
                 title=f"步骤 {index + 1}/{len(steps)}：{_tool_for_step(step)}",
@@ -800,22 +860,7 @@ def run(
                     "decision": decision,
                 }
                 failures.append(failure_entry)
-                if _has_dependent_steps(steps, index):
-                    payload = _failure_payload(
-                        blackboard,
-                        sections,
-                        step,
-                        repaired,
-                        decision,
-                    )
-                    payload.update(
-                        {
-                            "partial": True,
-                            "repair_history": list(repair_state["history"]),
-                            "failures": failures,
-                        }
-                    )
-                    return payload
+                failed_step_ids.add(int(step.get("id") or 0))
                 blackboard.used_plan_steps.add(int(step.get("id") or 0))
                 index += 1
                 continue
