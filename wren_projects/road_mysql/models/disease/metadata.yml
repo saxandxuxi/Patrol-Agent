@@ -1,0 +1,328 @@
+name: disease
+properties:
+  description: 病害记录（一行一条病害）。只有 del_flag = 0 才是有效数据。
+ref_sql: "SELECT ai_problem.*,\n       CAST(JSON_EXTRACT(pic_position, '$.confidence') AS DECIMAL(10,6)) AS confidence,\n       (SELECT r.short_name FROM basic_facilities_routes r\n         WHERE r.id =\
+  \ ai_problem.routes_id LIMIT 1) AS route_name,\n       (SELECT b.problem_type FROM ai_problem_base b\n         WHERE b.id = ai_problem.problem_base_id AND b.problem_type IS NOT NULL LIMIT 1) AS problem_type_name,\n\
+  \       (CASE ai_problem.categories_type\n                 WHEN '0' THEN '路面病害' WHEN '5' THEN '路基病害'\n                 WHEN '10' THEN '沿路设施' WHEN '15' THEN '交安事件'\n                 ELSE ai_problem.categories_type\
+  \ END) AS category_name\nFROM ai_problem\n"
+columns:
+- name: id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: id
+  is_primary_key: true
+- name: problem_status
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: '病害状态: 0待转工单,10已转工单,15忽略病害'
+- name: operate_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: '病害操作: 0待转工单,3病害恢复,5删除工单,10转工单,15忽略病害'
+- name: problem_source
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: '病害来源: 0.手动新增 5.车辆巡检 10.人工巡检 15.新增历史工单 20.路长转养护 25.路政转养护'
+- name: mission_flag
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 是否绑定巡查任务(0.未绑定1.已绑定)
+- name: patrol_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 巡查任务id
+- name: routes_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 路线id
+- name: sections_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 路段id
+- name: section_version
+  type: INTEGER
+  is_calculated: false
+  properties:
+    description: 路段信息版本
+- name: pile_number
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 桩号
+- name: pile_distance
+  type: INTEGER
+  is_calculated: false
+  properties:
+    description: 桩号米数（K0+887 → 887），桩号区间过滤用这一列
+- name: pile_meter
+  type: INTEGER
+  is_calculated: false
+  properties:
+    description: 距离路段起点米数
+- name: meter_total
+  type: INTEGER
+  is_calculated: false
+  properties:
+    description: 未用到
+- name: up_or_down
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 上下行(0.全部1.上行2.下行)
+- name: pic_position
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 图片定位 JSON（含 confidence 置信度、画框坐标）。 过滤置信度要写成 CAST(JSON_EXTRACT(pic_position,'$.confidence') AS DECIMAL(10,6))， 不能做成模型计算字段——Wren 的模型表达式校验不支持 json_extract / ->>
+- name: map_position
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 病害位置
+- name: lng
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 病害经度
+- name: lat
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 病害纬度
+- name: problem_base_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 病害类型外键，关联 ai_problem_base.id。
+- name: problem_url
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 病害原始图片地址
+- name: preview_url
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 后台缓存画框后的缓存图片地址
+- name: patrol_number
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 巡查编号
+- name: categories_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 病害大类编码：0=路面病害、5=路基病害、10=沿路设施、15=交安事件 （直接用 category_name 更省事；不要拿 damage_type 去关联字典算大类，那样只有 936 条能算出来）
+- name: problem_number
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 病害编号
+- name: inspection_user_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 巡检用户id
+- name: collection_time
+  type: TIMESTAMP
+  is_calculated: false
+  properties:
+    description: 病害采集时间
+- name: vehicle_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 车辆id
+- name: memo
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 备注
+- name: track_problem
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 关注病害
+- name: area_height
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 高度
+- name: area_width
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 宽度
+- name: disease_length
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 实际病害长度：areaHeight>areaWidth?areaHeight:areaWidth（单位：米）
+- name: damage_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 损坏程度（历史字段，当前值 0/5/10/NULL）。 它不是病害类型，不得用它关联 ai_problem_base；病害类型统一走 problem_base_id。
+- name: area
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 面积
+- name: history_damage_interval
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 历史损坏程度区间——**当前库里 1702 条全为空** （问"损坏程度"时优先用 damage_type 的类型编码语义，查这个字段只会得 0，要如实说明无数据）
+- name: create_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 创建时间
+- name: create_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 创建人
+- name: del_flag
+  type: CHAR
+  is_calculated: false
+  properties:
+    description: 删除标记，查询恒定为 0
+- name: tenant_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属租户id
+- name: update_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 更新
+- name: update_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 修改人
+- name: start_num
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 最近路段起点桩号
+- name: end_num
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 最近路段终点桩号
+- name: device_code
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 设备code
+- name: collect
+  type: CHAR
+  is_calculated: false
+  properties:
+    description: 收藏：0否，1是
+- name: work_order_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: problem_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: problem_describe
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: unit_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: luge_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 路格
+- name: luge_length
+  type: INTEGER
+  is_calculated: false
+  properties:
+    description: 路格长度
+- name: file_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 文件名称
+- name: inspection_obj_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 巡检主体id
+- name: inspection_obj_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 巡检主体类型
+- name: road_surface_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 璺?潰绫诲瀷锛堝?锛氭播闈掋?姘存偿銆佺爞鐭崇瓑锛
+- name: lane_index
+  type: INTEGER
+  is_calculated: false
+  properties:
+    description: 鎵?睘杞﹂亾锛?,1,2,3锛
+- name: lane_count
+  type: INTEGER
+  is_calculated: false
+  properties:
+    description: 杞﹂亾鏁
+- name: effective_disease_length
+  type: DECIMAL
+  is_calculated: true
+  expression: CASE WHEN disease_length IS NOT NULL AND disease_length > 0 THEN disease_length ELSE GREATEST(COALESCE(area_height, 0), COALESCE(area_width, 0)) END
+  properties:
+    description: 病害实际长度（米）。原长度有正值时优先使用；空值或 0 时取高度和宽度的较大值。
+- name: has_image
+  type: BOOLEAN
+  is_calculated: true
+  expression: problem_url IS NOT NULL AND problem_url <> ''
+  properties:
+    description: 是否采集到了现场图片
+- name: confidence
+  type: DOUBLE
+  is_calculated: false
+  properties:
+    description: AI 识别置信度（0~1），已从 pic_position JSON 取出，直接过滤
+- name: route_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 路线名称（已关联好，不要再 JOIN basic_facilities_routes）
+- name: problem_type_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 病害类型中文名（已关联好，不要再 JOIN ai_problem_base）
+- name: category_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 病害大类中文名（路面病害/路基病害/沿路设施/交安事件）
+primary_key: id
+cached: false

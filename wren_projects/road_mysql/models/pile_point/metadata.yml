@@ -1,0 +1,76 @@
+name: pile_point
+properties:
+  description: 里程桩点（路段上标注的桩号点位），问"标了多少个里程桩点"用这张表。
+table_reference:
+  catalog: ''
+  schema: new_four_road_base_ai
+  table: basic_facilities_sections_pile_detail
+columns:
+- name: id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: id
+  is_primary_key: true
+- name: sections_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 路段id
+- name: pile_map_position
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 桩号坐标点
+- name: lng
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 经度
+- name: lat
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 纬度
+- name: sort
+  type: INTEGER
+  is_calculated: false
+  properties:
+    description: 排序
+- name: pile_map_position_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 桩号名称
+- name: meter
+  type: INTEGER
+  is_calculated: false
+  properties:
+    description: 米
+- name: create_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 创建时间
+- name: create_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: del_flag
+  type: CHAR
+  is_calculated: false
+  properties:
+    description: 删除标记
+- name: update_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 更新
+- name: update_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+primary_key: id
+cached: false

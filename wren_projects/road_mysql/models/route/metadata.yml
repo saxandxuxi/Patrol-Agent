@@ -1,0 +1,201 @@
+name: route
+properties:
+  description: 路线台账（路线名、技术等级、车道数、路面宽度、起止桩号）。路线过滤走这里。
+ref_sql: "SELECT *,\n       COALESCE(\n         NULLIF(\n           (\n             CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(end_num, '+', 1), 'K', -1) AS UNSIGNED) * 1000\n             + CAST(SUBSTRING_INDEX(end_num,\
+  \ '+', -1) AS UNSIGNED)\n             - CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(start_num, '+', 1), 'K', -1) AS UNSIGNED) * 1000\n             - CAST(SUBSTRING_INDEX(start_num, '+', -1) AS UNSIGNED)\n  \
+  \         ) / 1000.0,\n           0\n         ),\n         NULLIF(\n           (\n             SELECT SUM(s.end_meter_total - s.start_meter_total) / 1000.0\n             FROM basic_facilities_sections\
+  \ s\n             WHERE s.route_id = basic_facilities_routes.id AND s.del_flag = 0\n           ),\n           0\n         ),\n         0\n       ) AS route_length_km\nFROM basic_facilities_routes\n"
+columns:
+- name: id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: id
+  is_primary_key: true
+- name: full_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 路线全称
+- name: short_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 路线简称
+- name: level
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 行政级别（0国道 1省道 2县道 3乡道 4村道）
+- name: code
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 路线代码
+- name: built
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 是否内置(0.否(不内置)1.是(内置))
+- name: start_num
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 起点桩号
+- name: start_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 起点名称
+- name: start_lnt
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 起点经度
+- name: start_lat
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 起点纬度
+- name: end_num
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 终点桩号
+- name: end_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 终点名称
+- name: end_lnt
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 终点经度
+- name: end_lat
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 终点纬度
+- name: distance
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 公路里程（km）原始值。台账填写值，**实测不准**（西乡段写 5.60、按起止桩号算 只有 5.10；恒明珠是 NULL）。用户点名要看这一列时原样返回；算长度/密度/每公里 一律用 route_length_km，不要用这一列做除法。
+- name: speed_limit
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 最高限速(千米/小时)
+- name: lane_count
+  type: INTEGER
+  is_calculated: false
+  properties:
+    description: 车道数
+- name: open_date
+  type: DATE
+  is_calculated: false
+  properties:
+    description: 通车日期
+- name: region
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所在地区
+- name: route_type
+  type: CHAR
+  is_calculated: false
+  properties:
+    description: 路线类型(dict:route_type)
+- name: remark
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 描述
+- name: memo
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 备注
+- name: manage_dept
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 管理单位
+- name: manage_contact_person
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 管理单位联系人
+- name: manage_contact_phone
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 管理单位联系电话
+- name: maintain_dept
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 养护单位
+- name: maintain_contact_person
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 养护单位联系人
+- name: maintain_contact_phone
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 养护单位联系电话
+- name: picture
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 路线图片
+- name: picture_cover
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 路线封面
+- name: blueprint
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 设计图纸
+- name: create_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 创建时间
+- name: create_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: del_flag
+  type: CHAR
+  is_calculated: false
+  properties:
+    description: 删除标记
+- name: tenant_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属租户id
+- name: update_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 更新
+- name: update_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: route_length_km
+  type: DOUBLE
+  is_calculated: false
+  properties:
+    description: 路线实际长度（公里），优先按路线自身起止桩号差，桩号差为 0 时才按所属路段起止米数求和兜底。每公里密度、平均间距都用它。
+primary_key: id
+cached: false

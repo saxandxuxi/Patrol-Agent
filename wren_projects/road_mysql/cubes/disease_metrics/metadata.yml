@@ -1,0 +1,38 @@
+name: disease_metrics
+base_object: disease
+measures:
+  - name: disease_count
+    expression: COUNT(*)
+    type: BIGINT
+    properties: {description: 病害数量}
+  - name: total_area
+    expression: SUM(area)
+    type: DOUBLE
+    properties: {description: 总面积（㎡）}
+  - name: avg_area
+    expression: AVG(area)
+    type: DOUBLE
+    properties: {description: 平均面积（㎡）}
+  - name: distinct_pile_count
+    expression: COUNT(DISTINCT pile_number)
+    type: BIGINT
+    properties: {description: 不同桩号数}
+dimensions:
+  - name: route_name
+    expression: route.short_name
+    type: VARCHAR
+    properties: {description: 按路线}
+  - name: damage_type_name
+    expression: damage_dict.problem_type
+    type: VARCHAR
+    properties: {description: 按病害类型}
+  - name: day
+    expression: DATE(collection_time)
+    type: DATE
+    properties: {description: 按天}
+  - name: month
+    expression: DATE_FORMAT(collection_time, '%Y-%m')
+    type: VARCHAR
+    properties: {description: 按月}
+properties:
+  description: 病害常用指标与维度（问"多少处/总面积/平均面积/按路线/按类型/按天"时用这个 cube）

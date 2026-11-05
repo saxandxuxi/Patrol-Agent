@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>巡检平台 · 小助手嵌入预览</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { min-height: 100%; margin: 0; }
+      body {
+        color: #1e2c44;
+        font-family: Inter, "Microsoft YaHei", sans-serif;
+        background:
+          linear-gradient(rgba(6, 27, 52, 0.72), rgba(7, 31, 59, 0.68)),
+          radial-gradient(circle at 52% 38%, #285d62, #0b2436 58%, #071a2d);
+      }
+      .topbar {
+        display: flex; align-items: center; gap: 18px; height: 68px; padding: 0 26px;
+        color: #fff; border-bottom: 1px solid rgba(140, 190, 255, 0.26);
+        background: linear-gradient(90deg, #07192e, #0c315c 60%, #0b294d);
+      }
+      .brand { display: flex; align-items: center; gap: 12px; min-width: 290px; }
+      .brand-mark {
+        width: 38px; height: 38px; border: 1px solid rgba(255,255,255,.45); border-radius: 12px;
+        background: linear-gradient(90deg, transparent 0 46%, rgba(255,255,255,.9) 46% 54%, transparent 54%);
+      }
+      .brand strong { display: block; font-size: 17px; }
+      .brand small { color: rgba(255,255,255,.55); font-size: 10px; letter-spacing: .12em; }
+      .nav { display: flex; gap: 8px; color: rgba(255,255,255,.72); font-size: 13px; }
+      .nav span { padding: 8px 13px; border-radius: 999px; }
+      .nav .active { color: #102b52; background: #fff; }
+      .right-label { margin-left: auto; color: #78e5a7; font-size: 12px; }
+      .canvas {
+        display: grid; grid-template-columns: 330px 1fr 330px; gap: 18px;
+        min-height: calc(100vh - 68px); padding: 20px;
+      }
+      .card {
+        border: 1px solid rgba(154, 201, 255, 0.22); border-radius: 14px;
+        background: rgba(8, 28, 51, 0.82); box-shadow: 0 12px 34px rgba(0,0,0,.18);
+        backdrop-filter: blur(6px);
+      }
+      .left { display: flex; flex-direction: column; gap: 16px; }
+      .card-head { padding: 14px 16px; color: #dbeaff; font-size: 14px; font-weight: 700; border-bottom: 1px solid rgba(150,195,250,.18); }
+      .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 14px; }
+      .metric { padding: 12px; text-align: center; border-radius: 10px; background: rgba(255,255,255,.055); }
+      .metric strong { display: block; color: #fff; font: 700 24px/1.2 Consolas, monospace; }
+      .metric span { color: #8faac6; font-size: 11px; }
+      .table { padding: 12px; color: #b8cce1; font-size: 12px; }
+      .row { display: grid; grid-template-columns: 1.4fr .8fr .7fr; padding: 10px; border-bottom: 1px solid rgba(255,255,255,.07); }
+      .center { display: grid; place-items: center; position: relative; min-height: 620px; overflow: hidden; }
+      .road {
+        position: absolute; inset: 8% 8%; opacity: .65;
+        background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1000' height='700'%3E%3Cpath d='M130 610 C260 390 370 570 490 330 S700 220 860 70' fill='none' stroke='%23b7e6ff' stroke-width='9' stroke-linecap='round'/%3E%3Cpath d='M130 610 C260 390 370 570 490 330 S700 220 860 70' fill='none' stroke='%232b76bd' stroke-width='2' stroke-dasharray='8 12'/%3E%3C/svg%3E") center/contain no-repeat;
+      }
+      .center-copy { position: relative; z-index: 1; padding: 22px 26px; text-align: center; border-radius: 14px; background: rgba(7,24,43,.62); }
+      .center-copy h1 { margin: 0 0 8px; color: #fff; font-size: 26px; }
+      .center-copy p { margin: 0; color: #a7bfd7; font-size: 13px; }
+      .right { display: flex; flex-direction: column; gap: 16px; }
+      .donut { width: 150px; height: 150px; margin: 18px auto; border-radius: 50%; background: conic-gradient(#7157dc 0 55%, #49b8df 55% 70%, #34b879 70% 86%, #f4bf37 86% 100%); }
+      .tip { margin: 10px 14px 16px; padding: 12px; color: #a8bed4; font-size: 12px; line-height: 1.7; border: 1px dashed rgba(115,167,230,.32); border-radius: 10px; }
+      @media (max-width: 900px) {
+        .canvas { grid-template-columns: 1fr; }
+        .left, .right { display: none; }
+        .center { min-height: calc(100vh - 96px); }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <div><strong>AI 智能巡检平台</strong><small>LOCAL EMBED PREVIEW</small></div>
+      </div>
+      <nav class="nav"><span class="active">首页</span><span>车载 AI 巡检</span><span>统计分析</span></nav>
+      <span class="right-label">● 服务在线</span>
+    </header>
+
+    <main class="canvas">
+      <section class="left">
+        <div class="card">
+          <div class="card-head">巡检概览</div>
+          <div class="metric-grid">
+            <div class="metric"><strong>1215</strong><span>路段总数</span></div>
+            <div class="metric"><strong>1127</strong><span>近 3 月已巡</span></div>
+            <div class="metric"><strong>88</strong><span>近期未巡</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head">巡检记录</div>
+          <div class="table">
+            <div class="row"><b>2026-11-02 15:29</b><span>50.91 km</span><span>1433 处</span></div>
+            <div class="row"><b>2026-11-02 12:40</b><span>4.43 km</span><span>0 处</span></div>
+            <div class="row"><b>2026-11-02 08:50</b><span>6.44 km</span><span>0 处</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="center">
+        <div class="road"></div>
+        <div class="center-copy">
+          <h1>AI 智能巡检平台</h1>
+          <p>右下角为本项目的巡检助手小e</p>
+        </div>
+      </section>
+
+      <section class="right">
+        <div class="card">
+          <div class="card-head">病害类型统计</div>
+          <div class="donut"></div>
+          <div class="tip">点击右下角蓝色小e按钮 → 选择“问助手” → 直接试几条数据库问题。</div>
+        </div>
+        <div class="card">
+          <div class="card-head">嵌入说明</div>
+          <div class="tip">
+            本页只是本地宿主页演示。助手运行在独立 iframe 中，宿主只负责悬浮球和菜单，不共享 Vue 状态与 CSS。
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/embed.js?v=xiao-e-drag-v1"></script>
+    <script>
+      InspectionAssistant.init({
+        assistantUrl: '/',
+        fullAssistantUrl: '/',
+      })
+    </script>
+  </body>
+</html>

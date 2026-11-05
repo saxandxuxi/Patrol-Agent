@@ -1,0 +1,101 @@
+name: maintenance_project
+properties:
+  description: 养护_项目管理
+table_reference:
+  catalog: ''
+  schema: new_four_road_base_ai
+  table: maintenance_project
+columns:
+- name: id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: id
+  is_primary_key: true
+- name: project_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 项目名称
+- name: project_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: '项目类型: 1.新建项目 2.扩建项目 3.改建项目 4.迁建项目 5.恢复项目'
+- name: route_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属路线
+- name: maintain_distance
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 养护里程（千米）
+- name: org_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属单位
+- name: contract_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属合同
+- name: executor_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 执行人
+- name: responsible_person
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 负责人
+- name: contact_phone
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 联系电话
+- name: start_date
+  type: DATE
+  is_calculated: false
+  properties:
+    description: 开始日期
+- name: end_date
+  type: DATE
+  is_calculated: false
+  properties:
+    description: 结束日期
+- name: create_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 创建时间
+- name: create_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 创建人
+- name: del_flag
+  type: CHAR
+  is_calculated: false
+  properties:
+    description: 删除标记
+- name: tenant_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属租户id
+- name: update_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 更新
+- name: update_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 修改人
+primary_key: id
+cached: false

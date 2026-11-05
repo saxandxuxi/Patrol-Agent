@@ -1,0 +1,51 @@
+# Wren AI 语义层（可选依赖；已在本机装好，见下方"当前环境"）
+#
+# 作用：「LLM 写 MDL-SQL → Wren 编译成物理 SQL」，是模板弃权后的主路径。
+# 不装也不影响现有链路：NL2SQL 自动回退到「确定性模板 → 内置 LLM」。
+#
+# 前置条件：Python >= 3.11（Wren 引擎要求）。
+#
+# ── 当前环境（2026-09-16 已装好）──────────────────────────────
+#   backend\.venv        ← Python 3.11.15，含本项目依赖 + wrenai 0.14.0
+#   .python\             ← uv 下载的 CPython 3.11（.venv 的底座，删了 venv 就跑不起来）
+#   .env: WREN_ENABLED=true
+# 启动后端用 backend\.venv\Scripts\python.exe run.py 即可。
+#
+# ── 什么时候需要管这个 PYTHONUTF8 ─────────────────────────────
+#   只有跑 `wren ...` 命令行时才需要（context build / validate / show / query / dry-plan）：
+#   CLI 用系统默认编码读 wren_projects 里的 YAML，中文在 GBK 环境下会 UnicodeDecodeError。
+#   后端 run.py 不受影响——wren_engine 读 YAML 显式带了 encoding="utf-8"，
+#   拿到的 mdl.json 也是按 base64 喂给引擎的，跟系统编码无关。
+#
+# ── 重建步骤（换机器 / 升级时）─────────────────────────────────
+#   1) 装 3.11+ 并建 venv（本机用 uv，缓存/解释器都放在项目内，避免写系统目录）：
+#        $env:UV_CACHE_DIR="$PWD\.uvcache"; $env:UV_PYTHON_INSTALL_DIR="$PWD\.python"
+#        uv python install 3.11
+#        uv venv --python 3.11 --seed backend\.venv
+#        uv pip install --python backend\.venv\Scripts\python.exe `
+#            -r requirements.txt -r backend\requirements-wren.txt
+#      （没有 uv 就用 py -3.11 -m venv backend\.venv + python -m pip install）
+#   2) 构建 MDL（**必须带 PYTHONUTF8=1**：wren CLI 读 YAML 用的是系统默认编码，
+#      中文 MDL 在 GBK 环境下会直接 UnicodeDecodeError）：
+#        $env:PYTHONUTF8="1"
+#        cd wren_projects\road_mysql; ..\..\backend\.venv\Scripts\wren.exe context build
+#        cd ..\road_pg;                 ..\..\backend\.venv\Scripts\wren.exe context build
+#      产物：wren_projects\<project>\target\mdl.json
+#   3) .env 打开开关：WREN_ENABLED=true（可选 WREN_USE_MDL_CONTEXT=true）
+#
+# ── 改 MDL 时注意 ─────────────────────────────────────────────
+#   * wren_projects/<项目>/models/ 和 wren_project.yml 是**代码生成**的（不要手改，
+#     下次生成会被覆盖）：backend\.venv\Scripts\python.exe sync_wren_mdl.py
+#     它会按 information_schema 重写 models/、再合并 overrides.yml、最后跑 wren context build。
+#   * 人工只需要维护三样：overrides.yml（模型名/业务描述/计算字段/ref_sql/hide）、
+#     relationships.yml（JOIN 路径）、cubes/（业务指标）。库里没有的语义只能人来定。
+#   * 库结构变了 → sync_wren_mdl.py；只想体检 → check_mdl_drift.py（[X]/[!]/[i] 三档）
+#   * 计算字段的 expression 必须是**列级字段**，不能塞进 properties：
+#       - name: confidence
+#         type: DOUBLE
+#         is_calculated: true
+#         expression: CAST(JSON_UNQUOTE(JSON_EXTRACT(pic_position,'$.confidence')) AS DECIMAL(10,6))
+#   * expression 里只能引用**本模型声明过的列**（没暴露的物理列不可见），
+#     且不要写物理表别名（p./d.），直接写列名。
+#   * 改完必须重新 `wren context build`，否则 target/mdl.json 是旧的。
+wrenai==0.14.0

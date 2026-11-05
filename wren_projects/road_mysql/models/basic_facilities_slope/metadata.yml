@@ -1,0 +1,166 @@
+name: basic_facilities_slope
+properties:
+  description: 基本设施_边坡表
+table_reference:
+  catalog: ''
+  schema: new_four_road_base_ai
+  table: basic_facilities_slope
+columns:
+- name: id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: id
+  is_primary_key: true
+- name: name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 边坡名称
+- name: code
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 边坡编码
+- name: is_vegetated
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 是否绿化（0 是 1否）
+- name: routes_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: sections_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: map_position
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: height
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 高度（米）
+- name: length
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 长度（米）
+- name: start_num
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 起点桩号
+- name: end_num
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 止点桩号
+- name: nature_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 性质（1路堤 2路堑）
+- name: slope_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 类型（1岩质边坡 2土质边坡 3土石混合）
+- name: protection_project
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: build_year
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 修建年度
+- name: construction_dept
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 施工单位
+- name: manag_dept
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 管理单位名称
+- name: maintenance_dept
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 养护单位名称
+- name: picture
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: picture_cover
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: report_dept
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 填报单位名称
+- name: reporter
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 填报人
+- name: reviewer
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 审核人
+- name: contact_phone
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 联系电话
+- name: remark
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: create_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 创建时间
+- name: create_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: del_flag
+  type: CHAR
+  is_calculated: false
+  properties:
+    description: 删除标记
+- name: update_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 更新
+- name: update_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: tenant_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属租户ID
+primary_key: id
+cached: false

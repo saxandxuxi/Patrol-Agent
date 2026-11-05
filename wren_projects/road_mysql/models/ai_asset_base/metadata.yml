@@ -1,0 +1,126 @@
+name: ai_asset_base
+properties:
+  description: 资产基础表
+table_reference:
+  catalog: ''
+  schema: new_four_road_base_ai
+  table: ai_asset_base
+columns:
+- name: id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: id
+  is_primary_key: true
+- name: asset_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 资产类型
+- name: asset_code
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 资产代码
+- name: enable_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 资产基础状态(0启用、1禁用）
+- name: categories_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属大类（0、 条状资产，1、点状资产）
+- name: main_focus
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 是否主要关注类型(0.否1.是)
+- name: asset_alias
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 别名
+- name: asset_description
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 资产描述
+- name: is_built
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 是否内置不可删除(0.否1.是)
+- name: length_unit
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 单位
+- name: memo
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 备注
+- name: asset_icon
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 资产图标
+- name: asset_sample_image
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 资产样图
+- name: asset_color
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 资产颜色
+- name: confidence
+  type: DOUBLE
+  is_calculated: false
+  properties:
+    description: 置信度阈值
+- name: create_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 创建时间
+- name: create_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 创建人
+- name: del_flag
+  type: CHAR
+  is_calculated: false
+  properties:
+    description: 删除标记
+- name: tenant_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属租户id
+- name: update_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 更新
+- name: update_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 修改人
+- name: init_icon_image
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 内置图标图片
+- name: init_image
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 内置图片
+primary_key: id
+cached: false

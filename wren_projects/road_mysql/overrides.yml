@@ -1,0 +1,176 @@
+# 人工维护的语义覆盖 —— 生成器（backend/sync_wren_mdl.py）读它，其余全部自动生成。
+#
+# models.<物理表名> 下可写：
+#   name          模型名（默认=表名）
+#   description   业务描述（默认用库里的表注释）
+#   primary_key   主键（默认取库里 PRIMARY KEY）
+#   columns       {列名: 说明} 覆盖/补充库侧缺失的字段注释
+#   calculated    [{name, type, expression, description}] 计算字段（库里的 JSON 取值、枚举翻译等）
+#   ref_sql       用 SQL 代替物理表（去重、派生表）
+models:
+  ai_problem:
+    name: disease
+    core: true
+    description: 病害记录（一行一条病害）。只有 del_flag = 0 才是有效数据。
+    primary_key: id
+    # ref_sql 预抽业务字段：LLM 只用选字段，JSON 提取/字典关联/路线关联全部在语义层里做完。
+    # 实测（wrenai 0.14.0）：模型表达式层不支持 JSON_EXTRACT / JSON_UNQUOTE / ->>，
+    # 但 ref_sql 里可以（这就把"算不出来的计算字段"变成普通列）。
+    ref_sql: |
+      SELECT ai_problem.*,
+             CAST(JSON_EXTRACT(pic_position, '$.confidence') AS DECIMAL(10,6)) AS confidence,
+             (SELECT r.short_name FROM basic_facilities_routes r
+               WHERE r.id = ai_problem.routes_id LIMIT 1) AS route_name,
+             (SELECT b.problem_type FROM ai_problem_base b
+               WHERE b.id = ai_problem.problem_base_id AND b.problem_type IS NOT NULL LIMIT 1) AS problem_type_name,
+             (CASE ai_problem.categories_type
+                       WHEN '0' THEN '路面病害' WHEN '5' THEN '路基病害'
+                       WHEN '10' THEN '沿路设施' WHEN '15' THEN '交安事件'
+                       ELSE ai_problem.categories_type END) AS category_name
+      FROM ai_problem
+    extra_columns:
+      - name: confidence
+        type: DOUBLE
+        description: AI 识别置信度（0~1），已从 pic_position JSON 取出，直接过滤
+      - name: route_name
+        type: VARCHAR
+        description: 路线名称（已关联好，不要再 JOIN basic_facilities_routes）
+      - name: problem_type_name
+        type: VARCHAR
+        description: 病害类型中文名（已关联好，不要再 JOIN ai_problem_base）
+      - name: category_name
+        type: VARCHAR
+        description: 病害大类中文名（路面病害/路基病害/沿路设施/交安事件）
+    columns:
+      categories_type: 病害大类编码：0=路面病害、5=路基病害、10=沿路设施、15=交安事件
+        （直接用 category_name 更省事；不要拿 damage_type 去关联字典算大类，那样只有 936 条能算出来）
+      damage_type: 损坏程度（历史字段，当前值 0/5/10/NULL）。
+        它不是病害类型，不得用它关联 ai_problem_base；病害类型统一走 problem_base_id。
+      problem_base_id: 病害类型外键，关联 ai_problem_base.id。
+      history_damage_interval: 历史损坏程度区间——**当前库里 1702 条全为空**
+        （问"损坏程度"时优先用 damage_type 的类型编码语义，查这个字段只会得 0，要如实说明无数据）
+      pile_distance: 桩号米数（K0+887 → 887），桩号区间过滤用这一列
+      pic_position: 图片定位 JSON（含 confidence 置信度、画框坐标）。
+        过滤置信度要写成 CAST(JSON_EXTRACT(pic_position,'$.confidence') AS DECIMAL(10,6))，
+        不能做成模型计算字段——Wren 的模型表达式校验不支持 json_extract / ->>
+      del_flag: 删除标记，查询恒定为 0
+    calculated:
+      - name: effective_disease_length
+        type: DECIMAL
+        expression: CASE WHEN disease_length IS NOT NULL AND disease_length > 0
+          THEN disease_length ELSE GREATEST(COALESCE(area_height, 0), COALESCE(area_width, 0)) END
+        description: 病害实际长度（米）。原长度有正值时优先使用；空值或 0 时取高度和宽度的较大值。
+      - name: has_image
+        type: BOOLEAN
+        expression: problem_url IS NOT NULL AND problem_url <> ''
+        description: 是否采集到了现场图片
+
+  ai_problem_base:
+    name: damage_dict
+    core: true
+    description: 病害类型字典。病害表按 problem_base_id = id 精确关联，按 id 保留每条记录，
+      避免 problem_code 重复时把病害数量放大。
+    primary_key: id
+    ref_sql: |
+      SELECT id, problem_code, problem_type, disease_categories_type,
+             length_unit, formula, del_flag
+      FROM ai_problem_base
+      WHERE problem_type IS NOT NULL
+        AND (del_flag = 0 OR del_flag IS NULL)
+    calculated:
+      - name: category_name
+        type: VARCHAR
+        expression: CASE disease_categories_type WHEN '0' THEN '路面病害' WHEN '5' THEN '路基病害'
+          WHEN '10' THEN '沿路设施' WHEN '15' THEN '交安事件' ELSE disease_categories_type END
+        description: 病害大类（路面病害/路基病害/沿路设施/交安事件）
+
+  basic_facilities_routes:
+    name: route
+    core: true
+    description: 路线台账（路线名、技术等级、车道数、路面宽度、起止桩号）。路线过滤走这里。
+    primary_key: id
+    # 路线实际长度优先按路线自身起止桩号相减（同名多版本路段不能累加）；
+    # 桩号差为 0 时才用所属路段 end_meter_total - start_meter_total 求和兜底。
+    # 坑：桩号带 "K" 前缀，CAST('K5' AS UNSIGNED) = 0，必须先 SUBSTRING_INDEX(...,'K',-1)
+    # 把 K 去掉，否则长度算成 0.1（实测过：密度跟着错 10 倍，911/0.1 = 9110）。
+    ref_sql: |
+      SELECT *,
+             COALESCE(
+               NULLIF(
+                 (
+                   CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(end_num, '+', 1), 'K', -1) AS UNSIGNED) * 1000
+                   + CAST(SUBSTRING_INDEX(end_num, '+', -1) AS UNSIGNED)
+                   - CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(start_num, '+', 1), 'K', -1) AS UNSIGNED) * 1000
+                   - CAST(SUBSTRING_INDEX(start_num, '+', -1) AS UNSIGNED)
+                 ) / 1000.0,
+                 0
+               ),
+               NULLIF(
+                 (
+                   SELECT SUM(s.end_meter_total - s.start_meter_total) / 1000.0
+                   FROM basic_facilities_sections s
+                   WHERE s.route_id = basic_facilities_routes.id AND s.del_flag = 0
+                 ),
+                 0
+               ),
+               0
+             ) AS route_length_km
+      FROM basic_facilities_routes
+    extra_columns:
+      - name: route_length_km
+        type: DOUBLE
+        description: 路线实际长度（公里），优先按路线自身起止桩号差，桩号差为 0 时才按所属路段起止米数求和兜底。每公里密度、平均间距都用它。
+    # distance 要暴露：用户点名要"台账里的公路里程"时必须能原样返回（实测 612 字段题里
+    # 这一列因为被藏了，模型只能拿 route_length_km 顶替 → 字段查不到）。
+    # 靠下面的列说明 + 长度口径校验挡住"拿它当长度算"，而不是把它藏起来。
+    columns:
+      distance: 公路里程（km）原始值。台账填写值，**实测不准**（西乡段写 5.60、按起止桩号算
+        只有 5.10；恒明珠是 NULL）。用户点名要看这一列时原样返回；算长度/密度/每公里
+        一律用 route_length_km，不要用这一列做除法。
+
+  basic_facilities_sections:
+    name: section
+    core: true
+    description: 路段（一条路线拆成多个路段，带起止桩号、路面类型、技术等级、宽度）。
+    primary_key: id
+    # 和 route 一样：路段长度只能按起止桩号相减，台账的 distance 不准
+    # （西乡段那唯一一段写 5.60，按 K5+100-K0+000 算只有 5.10）。
+    # 不修这条，按路段算密度就会得出第二个数（911/5.60=162.68 vs 911/5.10=178.63）。
+    ref_sql: |
+      SELECT *,
+             (
+               CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(end_num, '+', 1), 'K', -1) AS UNSIGNED) * 1000
+               + CAST(SUBSTRING_INDEX(end_num, '+', -1) AS UNSIGNED)
+               - CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(start_num, '+', 1), 'K', -1) AS UNSIGNED) * 1000
+               - CAST(SUBSTRING_INDEX(start_num, '+', -1) AS UNSIGNED)
+             ) / 1000.0 AS section_length_km
+      FROM basic_facilities_sections
+    extra_columns:
+      - name: section_length_km
+        type: DOUBLE
+        description: 路段实际长度（公里），由起止桩号相减算出。按路段算密度/间距用这一列，
+          不要用距离/里程字段。
+    columns:
+      distance: 公路实际里程（km）原始值。台账填写值，**实测不准**（西乡段写 5.60、按起止
+        桩号算只有 5.10）。用户点名要看这一列时原样返回；算长度/密度用 section_length_km。
+
+  basic_facilities_sections_pile_detail:
+    name: pile_point
+    core: true
+    description: 里程桩点（路段上标注的桩号点位），问"标了多少个里程桩点"用这张表。
+    primary_key: id
+    columns:
+      # 物理列注释写成了"精度"（库里的笔误），会造成取经纬度时选不到 lng
+      lng: 经度
+
+  ai_maintain_patrol:
+    name: patrol
+    core: true
+    description: 巡检任务（一次巡查 = 一条记录，含巡查类型、状态、起止时间）。
+    primary_key: id
+
+  ai_maintain_routes_patrol:
+    name: patrol_route
+    core: true
+    description: 巡查任务实际覆盖的路线（patrol_id → routes_id）。路线巡查次数必须从这里统计，不能经病害表回连。
+    primary_key: id

@@ -1,0 +1,32 @@
+# 人工维护的语义覆盖 —— 生成器读它，其余自动生成。
+# PG 这两张表库里没写列注释（只有表注释），所以这里补的就是"库里没有的那部分"。
+models:
+  gps_points:
+    name: gps_point
+    description: GPS 轨迹点（当前为空表，查询会返回 0 行，需如实说明是"该业务尚未采集"）。
+    columns:
+      create_time: 上报时间（设备端）
+      recv_time: 服务端接收时间
+      device_id: 设备号
+      lat: 纬度
+      lon: 经度
+      speed: 速度
+      satellites: 卫星数
+      direct: 方向角
+      data: 原始上报数据
+
+  inclination_points:
+    name: inclination_point
+    description: 倾角监测点（当前为空表，查询会返回 0 行，需如实说明是"该业务尚未采集"）。
+    columns:
+      create_time: 上报时间（设备端）
+      recv_time: 服务端接收时间
+      device_id: 设备号
+      vertical_distance: 垂直位移
+      horizontal_distance: 水平位移
+      x: X 坐标
+      y: Y 坐标
+      now_gps: 当次 GPS（json）
+      last_gps: 上次 GPS（json）
+      raw_data: 原始监测数据
+      collect_time: 采集时间

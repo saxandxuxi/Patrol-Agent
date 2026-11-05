@@ -1,0 +1,141 @@
+name: patrol
+properties:
+  description: 巡检任务（一次巡查 = 一条记录，含巡查类型、状态、起止时间）。
+table_reference:
+  catalog: ''
+  schema: new_four_road_base_ai
+  table: ai_maintain_patrol
+columns:
+- name: id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: id
+  is_primary_key: true
+- name: task_number
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 任务编号
+- name: patrol_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 巡查名称
+- name: device_code
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 设备编号
+- name: vehicle_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 车辆id
+- name: patrol_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: '巡查类型: 0:定期巡查 5.日常巡查 10.专项巡查 15.复核考评 20.重点抽查'
+- name: patrol_status
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: '巡查状态: 0未开始,5进行中,10暂停,15已完成 20.逾期'
+- name: patrol_method_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: ai巡查方式
+- name: patrol_number
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 巡查编号
+- name: up_or_down
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 上下行(0.全部1.上行2.下行)
+- name: end_date
+  type: DATE
+  is_calculated: false
+  properties:
+    description: 截至日期
+- name: valid_task
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 是否有效
+- name: patrol_partner
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 同行人
+- name: unit_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 单位id
+- name: patroller_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 实际巡查人id
+- name: equipment_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 设备id
+- name: memo
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 备注
+- name: patrol_mileage
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 巡检里程
+- name: scope_record_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 去重配置记录id
+- name: create_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 创建时间
+- name: create_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 创建人
+- name: del_flag
+  type: CHAR
+  is_calculated: false
+  properties:
+    description: 删除标记
+- name: tenant_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属租户id
+- name: update_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 更新
+- name: update_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 修改人
+- name: over_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 结束时间
+primary_key: id
+cached: false

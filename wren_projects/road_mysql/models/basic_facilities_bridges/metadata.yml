@@ -1,0 +1,151 @@
+name: basic_facilities_bridges
+properties:
+  description: 基本设施_桥梁表
+table_reference:
+  catalog: ''
+  schema: new_four_road_base_ai
+  table: basic_facilities_bridges
+columns:
+- name: id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: id
+  is_primary_key: true
+- name: name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: code
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 桥梁代码
+- name: routes_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: sections_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: map_position
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: middle_num
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 桥梁中心桩号
+- name: tech_level
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: route_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所在路线类型（1左线 2右线 3跨线 4匝道 5线外）
+- name: drive_direction
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 桥梁行车方向（1上行 2下行 3双向）
+- name: span_category
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 跨径分类（1特大桥 2大桥 3中桥 4小桥）
+- name: use_years_category
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 使用年限分类 (1永久性 2半永久性 3临时性)
+- name: is_rail_road
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 是否公铁两用（0否 1是）
+- name: crossing_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: crossing_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 跨越地物名称
+- name: maintenance_dept
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 养护单位名称
+- name: underpass_no
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: underpass_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 下穿通道名称
+- name: underpass_pile_num
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 下穿通道桩号
+- name: picture
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: picture_cover
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: remark
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: create_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 创建时间
+- name: create_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: del_flag
+  type: CHAR
+  is_calculated: false
+  properties:
+    description: 删除标记
+- name: update_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 更新
+- name: update_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: tenant_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属租户ID
+primary_key: id
+cached: false

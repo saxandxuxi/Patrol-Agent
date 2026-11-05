@@ -1,0 +1,141 @@
+name: ai_work_order
+properties:
+  description: 养护_任务工单
+table_reference:
+  catalog: ''
+  schema: new_four_road_base_ai
+  table: ai_work_order
+columns:
+- name: id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: id
+  is_primary_key: true
+- name: order_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 工单名称
+- name: problem_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 病害id
+- name: order_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 工单类型:0.小修1.大中修2.改善3.路政执法4.沿线设施养护5.绿化养护6.路面养护7.路基养护
+- name: order_number
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 工单编号
+- name: order_status
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: '工单状态: 0.待下发 5.待整改  15.待复查 20.已闭合'
+- name: order_operate_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: '工单操作: 0.创建5.下发10.整改15.复查20.闭合'
+- name: order_source
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: '工单来源: 0.手动新增历史工单 5.手动选择病害10.手动新增病害15.AI巡检转工单 20.人工养护转工单 25.路长转工单 30.路政转工单'
+- name: is_history
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: （库侧没写 COMMENT，待补）
+- name: is_close
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 是否直接关闭(0.否1.是)
+- name: assign_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 下发操作人
+- name: assign_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 下发时间
+- name: unit_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 下发单位
+- name: rectify_deadline
+  type: DATE
+  is_calculated: false
+  properties:
+    description: 整改期限
+- name: rectify_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 整改人
+- name: rectify_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 已整改时间
+- name: review_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 已复查时间
+- name: close_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 闭合时间
+- name: review_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 复查人id
+- name: memo
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 整改备注
+- name: create_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 创建时间
+- name: create_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 创建人
+- name: del_flag
+  type: CHAR
+  is_calculated: false
+  properties:
+    description: 删除标记
+- name: tenant_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属租户id
+- name: update_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 更新
+- name: update_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 修改人
+primary_key: id
+cached: false

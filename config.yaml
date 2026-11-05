@@ -1,0 +1,57 @@
+app:
+  host: 127.0.0.1
+  port: 18730
+
+query:
+  max_rows: 500
+  default_confidence: 0.40
+  retry_limit: 2
+
+knowledge:
+  root_dir: 知识库文件
+  datasets:
+    养护行业规范:
+      kind: standards
+      file_patterns:
+        - "*.pdf"
+     mysql语句知识:
+      kind: sql_mysql
+      file_patterns:
+        - "*.md"
+        - "*.txt"
+     postgresql语句知识:
+      kind: sql_postgresql
+      file_patterns:
+        - "*.md"
+        - "*.txt"
+     seaweedfs语句知识:
+      kind: sql_seaweedfs
+      file_patterns:
+        - "*.md"
+        - "*.txt"
+
+mysql:
+  allowed_tables:
+    - ai_problem
+    - ai_problem_base
+    - ai_asset_main
+    - ai_asset_base
+    - ai_distance_capture
+    - basic_facilities_routes
+    - basic_facilities_sections
+    - basic_facilities_sections_pile_detail
+    - basic_facilities_bridges
+    - basic_facilities_tunnels
+    - basic_facilities_slope
+    - project_manage_project_main
+    - maintenance_project
+    - maintenance_road_work_record
+    - ai_work_order
+    - maintenance_work_order
+    - ai_maintain_patrol
+    - ai_maintain_routes_patrol
+
+postgresql:
+  allowed_tables:
+    - gps_points
+    - inclination_points

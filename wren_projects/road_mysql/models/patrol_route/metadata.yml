@@ -1,0 +1,56 @@
+name: patrol_route
+properties:
+  description: 巡查任务实际覆盖的路线（patrol_id → routes_id）。路线巡查次数必须从这里统计，不能经病害表回连。
+table_reference:
+  catalog: ''
+  schema: new_four_road_base_ai
+  table: ai_maintain_routes_patrol
+columns:
+- name: id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: id
+  is_primary_key: true
+- name: patrol_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 巡查id
+- name: routes_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 路线id
+- name: create_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 创建时间
+- name: create_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 创建人
+- name: del_flag
+  type: CHAR
+  is_calculated: false
+  properties:
+    description: 删除标记
+- name: tenant_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属租户id
+- name: update_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 更新
+- name: update_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 修改人
+primary_key: id
+cached: false

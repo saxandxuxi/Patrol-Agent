@@ -1,0 +1,54 @@
+name: gps_point
+properties:
+  description: GPS 轨迹点（当前为空表，查询会返回 0 行，需如实说明是"该业务尚未采集"）。
+table_reference:
+  catalog: ''
+  schema: public
+  table: gps_points
+columns:
+- name: create_time
+  type: TIMESTAMP
+  is_calculated: false
+  properties:
+    description: 上报时间（设备端）
+- name: recv_time
+  type: TIMESTAMP
+  is_calculated: false
+  properties:
+    description: 服务端接收时间
+- name: device_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 设备号
+- name: lat
+  type: DOUBLE
+  is_calculated: false
+  properties:
+    description: 纬度
+- name: lon
+  type: DOUBLE
+  is_calculated: false
+  properties:
+    description: 经度
+- name: speed
+  type: DOUBLE
+  is_calculated: false
+  properties:
+    description: 速度
+- name: satellites
+  type: INTEGER
+  is_calculated: false
+  properties:
+    description: 卫星数
+- name: direct
+  type: DOUBLE
+  is_calculated: false
+  properties:
+    description: 方向角
+- name: data
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 原始上报数据
+cached: false

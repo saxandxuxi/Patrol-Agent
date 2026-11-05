@@ -1,0 +1,110 @@
+# 结果解读 / 总结用词表（docs/代码结构重构与模板外置方案.md §5.3）
+# agent 侧：指标词映射、字段中文标签、分组域、可修复问题、追问关键词等。改说法只改这里。
+metric_term_map:
+- words:
+  - 病害
+  - 问题
+  terms:
+  - disease
+  - problem
+- words:
+  - 车道
+  terms:
+  - lane
+- words:
+  - 面积
+  terms:
+  - area
+- words:
+  - 桩号
+  - 里程
+  terms:
+  - pile
+  - meter
+- words:
+  - 长度
+  - 公里
+  - 间距
+  terms:
+  - length
+  - km
+  - 长度
+- words:
+  - 置信度
+  - 可信度
+  terms:
+  - confidence
+  - conf
+- words:
+  - 巡查
+  - 巡检
+  terms:
+  - patrol
+- words:
+  - 设备
+  terms:
+  - device
+- words:
+  - 路段
+  terms:
+  - section
+- words:
+  - 方向
+  - 上下行
+  terms:
+  - direction
+  - up_or_down
+result_labels:
+  interval: '平均间距 '
+  distance_m: '路线长度（米） '
+  distance_km: '路线长度（公里） '
+  route_length_km: '路线长度（公里） '
+  length_m: '路线长度（米） '
+  length_km: '路线长度（公里） '
+  per_km: '每公里处数 '
+  density: '病害密度 '
+  count: '共 '
+  cnt: '共 '
+  total_area: '总面积 '
+  avg_area: '平均面积 '
+  avg_metric: '平均值 '
+known_group_domains:
+  direction:
+  - 上行
+  - 下行
+  image_presence:
+  - 有图片
+  - 无图片
+domain_loose_labels:
+- ''
+- 其他
+- 无方向
+- 未填写
+- 未知
+- 未知类型
+refinable_issues:
+- missing_condition
+- missing_dimensions
+- no_aggregation
+- no_grouping
+- reasoning_insufficient
+- wrong_metric
+- wrong_metric_scope
+- wrong_subject
+clarify_needs_user:
+- 没有找到路线
+- 没有识别到病害类型
+- 可比较的对象
+- 请确认路线
+- 哪几个数据库
+measure_words:
+- 工程量
+- 计量
+- 定额
+- 单价
+- 合价
+- 清单
+- 造价
+- 预算
+- 多少钱
+- 费用

@@ -1,0 +1,271 @@
+metric_expressions:
+# 同 dimensions 的约定：`fallback_words` 是**降级用**的词表（语义层给的指标字段名 → 表达式
+# 走 nl2sql._METRIC_COLUMNS），不要靠这里的词去命中问法。
+- fallback_words:
+  - 置信度
+  - 可信度
+  - 信度
+  expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.confidence')) AS DECIMAL(10,6))
+# pic_position JSON 里的标注尺寸（docs/pic_position_JSON字段全量支持方案.md）：
+# **必须带限定词**（标注/图片/AI/框）——裸的"宽度/高度"要和表列语义（面积宽度）区分开。
+- fallback_words:
+  - 标注宽度
+  - 图片宽度
+  - AI 宽度
+  expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.width')) AS DECIMAL(10,2))
+- fallback_words:
+  - 标注高度
+  - 图片高度
+  - AI 高度
+  expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.height')) AS DECIMAL(10,2))
+- fallback_words:
+  - 面积
+  expr: p.area
+- fallback_words:
+  - 长度
+  expr: CASE WHEN p.disease_length IS NOT NULL AND p.disease_length > 0 THEN p.disease_length
+    ELSE GREATEST(COALESCE(p.area_height, 0), COALESCE(p.area_width, 0)) END
+dimensions:
+# `key` = **字段名**：语义层 JSON 的 `group_by` 按它来查本节的 `expr`（主映射）。
+# `fallback_words` 只在语义层不可用（LLM 没跑/报错）时用 —— **不许拿它当命中问法的主路径**：
+# 关键词是"问题里出现这个词就分组"，而"7月上旬有多少处"那种**过滤**题会被它带偏。
+- key: week
+  fallback_words:
+  - 哪几周
+  - 按周
+  - 第几周
+  - 周维度
+  - 每周
+  # 分组**标签**必须是人能读的 `2026年第31周`：以前直接用 YEARWEEK 当分组表达式，结果列是
+  # `202631` 这种裸数字——人看不懂，链式题第二步拿它当时间条件也认不出来（实测第一步答案
+  # 写成"202631年第31周"）。ISO 口径（%x/%v）与 mode=3 一致。
+  expr: CONCAT(DATE_FORMAT(p.collection_time, '%x'), '年第', DATE_FORMAT(p.collection_time,
+    '%v'), '周')
+- key: half_month
+  fallback_words:
+  - 半个月
+  - 上半月
+  - 下半月
+  - 每半个月
+  expr: CONCAT(DATE_FORMAT(p.collection_time, '%Y年%m月'), IF(DAY(p.collection_time) <= 15,
+    '上半月', '下半月'))
+- key: dow
+  fallback_words:
+  - 星期几
+  - 周几
+  - 星期
+  - 工作日
+  expr: CASE DAYOFWEEK(p.collection_time) WHEN 1 THEN '周日' WHEN 2 THEN '周一' WHEN 3
+    THEN '周二' WHEN 4 THEN '周三' WHEN 5 THEN '周四' WHEN 6 THEN '周五' ELSE '周六' END
+- key: hour
+  fallback_words:
+  - 几点
+  - 时段
+  - 时间段
+  - 小时
+  expr: HOUR(p.collection_time)
+- key: day
+  fallback_words:
+  - 哪天
+  - 每天
+  - 按日
+  - 单日
+  - 每日
+  - 最近一次
+  - 最近
+  expr: DATE(p.collection_time)
+- key: month
+  fallback_words:
+  - 哪个月
+  - 按月
+  - 每月的
+  - 月份
+  expr: DATE_FORMAT(p.collection_time, '%Y-%m')
+- key: route
+  fallback_words:
+  - 哪条路
+  - 各条路
+  - 每条路
+  - 哪条路线
+  - 分布在哪
+  - 按路线
+  - 分路线
+  expr: r.short_name
+- key: damage_type
+  fallback_words:
+  - 什么类型
+  - 各类型
+  - 按类型
+  - 哪些类型
+  - 什么病害
+  - 病害类型
+  - 哪种病害
+  - 哪种类型
+  expr: COALESCE(b.problem_type, '未知类型')
+- key: direction
+  fallback_words:
+  - 上行还是下行
+  - 上下行
+  - 什么方向
+  - 方向分布
+  - 上行和下行
+  - 上行、下行
+  - 各方向
+  expr: CASE p.up_or_down WHEN '1' THEN '上行' WHEN '2' THEN '下行' WHEN '0' THEN '全部'
+    WHEN '' THEN '未填' ELSE CONCAT('未知(', p.up_or_down, ')') END
+- key: device
+  fallback_words:
+  - 哪台设备
+  - 每台设备
+  - 按设备
+  expr: p.device_code
+time_buckets:
+  day:
+  - DATE({alias}.collection_time)
+  - DATE({alias}.collection_time)
+  week:
+  # 周：标签给中文可读写法（`2026年第31周`），不要 YEARWEEK 的裸数字（`202631`）；
+  # `%x`=ISO 年、`%v`=ISO 周，和 mode=3 口径一致（docs/周数计算模式不一致与链式复合问题执行修复方案.md §1.2）。
+  - CONCAT(DATE_FORMAT({alias}.collection_time, '%x'), '年第', DATE_FORMAT({alias}.collection_time, '%v'), '周')
+  # 第 2 项是**展示/分组值**：必须同样是人能读的写法。以前这里放 YEARWEEK，于是走"内置物理 LLM"
+  # 那条路时结果列又变成 `202631`（Wren 与模板两条路都是可读的，只有这条路是裸数字）。
+  - CONCAT(DATE_FORMAT({alias}.collection_time, '%x'), '年第', DATE_FORMAT({alias}.collection_time, '%v'), '周')
+  # 第 3 项是**排序表达式**：中文标签按字典序排会得到"第31周、第3周"这种错顺序，必须按 ISO 周数排。
+  - YEARWEEK({alias}.collection_time, 3)
+  half_month:
+  - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y年%m月'), IF(DAY({alias}.collection_time) <= 15, '上半月', '下半月'))
+  - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y年%m月'), IF(DAY({alias}.collection_time) <= 15, '上半月', '下半月'))
+  month:
+  - DATE_FORMAT({alias}.collection_time, '%Y-%m')
+  - DATE_FORMAT({alias}.collection_time, '%Y-%m')
+  hour:
+  - HOUR({alias}.collection_time)
+  - HOUR({alias}.collection_time)
+  # ── 其余时间粒度（从粗到细）───────────────────────────────────────────────
+  # 约定：第 1 个表达式给 MDL（模型照抄），第 2 个给物理 SQL / 模板。
+  # **两个都必须是"人能读、也能被第二步反解"的写法**：只给裸数字（`202631` 那种）人看不懂、
+  # 链式题第二步也没法把它当时间条件（详见 week 那段的说明）。所以季度写成
+  # `2026年第3季度`、季节带上年份（"冬"跨年，不带年份会歧义）、旬写 `2026年07月上旬`。
+  year:
+  - CONCAT(YEAR({alias}.collection_time), '年')
+  - CONCAT(YEAR({alias}.collection_time), '年')
+  half_year:
+  - CONCAT(YEAR({alias}.collection_time), '年', IF(MONTH({alias}.collection_time) <= 6, '上半年', '下半年'))
+  - CONCAT(YEAR({alias}.collection_time), '年', IF(MONTH({alias}.collection_time) <= 6, '上半年', '下半年'))
+  quarter:
+  - CONCAT(YEAR({alias}.collection_time), '年第', QUARTER({alias}.collection_time), '季度')
+  - CONCAT(YEAR({alias}.collection_time), '年第', QUARTER({alias}.collection_time), '季度')
+  season:
+  # 冬季跨年：1、2 月属于**上一年**的冬天（2026年12月 + 2027年1月 = 2026年冬季），
+  # 所以年份要按"冬季归属"算，不能直接用 YEAR(collection_time)（否则 2026年1月 会被写成
+  # "2026年冬季"，和 2026年12月 混成一个不该合并的分档）。
+  - CONCAT(IF(MONTH({alias}.collection_time) <= 2, YEAR({alias}.collection_time) - 1, YEAR({alias}.collection_time)), '年', CASE WHEN MONTH({alias}.collection_time) IN (3,4,5) THEN '春季' WHEN MONTH({alias}.collection_time) IN (6,7,8) THEN '夏季' WHEN MONTH({alias}.collection_time) IN (9,10,11) THEN '秋季' ELSE '冬季' END)
+  - CONCAT(IF(MONTH({alias}.collection_time) <= 2, YEAR({alias}.collection_time) - 1, YEAR({alias}.collection_time)), '年', CASE WHEN MONTH({alias}.collection_time) IN (3,4,5) THEN '春季' WHEN MONTH({alias}.collection_time) IN (6,7,8) THEN '夏季' WHEN MONTH({alias}.collection_time) IN (9,10,11) THEN '秋季' ELSE '冬季' END)
+  # 排序按"冬季归属年 + 季节序号"：2026春(1) < 2026夏(2) < 2026秋(3) < 2026冬(4)=2026年12月+2027年1月。
+  - CONCAT(IF(MONTH({alias}.collection_time) <= 2, YEAR({alias}.collection_time) - 1, YEAR({alias}.collection_time)), CASE WHEN MONTH({alias}.collection_time) IN (3,4,5) THEN '1' WHEN MONTH({alias}.collection_time) IN (6,7,8) THEN '2' WHEN MONTH({alias}.collection_time) IN (9,10,11) THEN '3' ELSE '4' END)
+  ten_day:
+  - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y年%m月'), CASE WHEN DAY({alias}.collection_time) <= 10 THEN '上旬' WHEN DAY({alias}.collection_time) <= 20 THEN '中旬' ELSE '下旬' END)
+  - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y年%m月'), CASE WHEN DAY({alias}.collection_time) <= 10 THEN '上旬' WHEN DAY({alias}.collection_time) <= 20 THEN '中旬' ELSE '下旬' END)
+  # 排序按"月份 + 上/中/下旬序号"：中文按码点排是"上旬、下旬、中旬"，顺序是错的。
+  - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y%m'), CASE WHEN DAY({alias}.collection_time) <= 10 THEN '1' WHEN DAY({alias}.collection_time) <= 20 THEN '2' ELSE '3' END)
+  dow:
+  - CASE DAYOFWEEK({alias}.collection_time) WHEN 1 THEN '周日' WHEN 2 THEN '周一' WHEN 3 THEN '周二' WHEN 4 THEN '周三' WHEN 5 THEN '周四' WHEN 6 THEN '周五' ELSE '周六' END
+  - CASE DAYOFWEEK({alias}.collection_time) WHEN 1 THEN '周日' WHEN 2 THEN '周一' WHEN 3 THEN '周二' WHEN 4 THEN '周三' WHEN 5 THEN '周四' WHEN 6 THEN '周五' ELSE '周六' END
+  # 排序按 `WEEKDAY`（0=周一 … 6=周日）：中文标签按码点排是"周五、周日、周三…"；而 `DAYOFWEEK`
+  # 是 1=周日在前。国内习惯**周一在前**，所以用 WEEKDAY。
+  - WEEKDAY({alias}.collection_time)
+  workday:
+  - CASE WHEN WEEKDAY({alias}.collection_time) <= 4 THEN '工作日' ELSE '周末' END
+  - CASE WHEN WEEKDAY({alias}.collection_time) <= 4 THEN '工作日' ELSE '周末' END
+  - WEEKDAY({alias}.collection_time) <= 4
+  time_of_day:
+  - CASE WHEN HOUR({alias}.collection_time) < 6 THEN '凌晨' WHEN HOUR({alias}.collection_time) < 12 THEN '上午' WHEN HOUR({alias}.collection_time) < 18 THEN '下午' ELSE '晚上' END
+  - CASE WHEN HOUR({alias}.collection_time) < 6 THEN '凌晨' WHEN HOUR({alias}.collection_time) < 12 THEN '上午' WHEN HOUR({alias}.collection_time) < 18 THEN '下午' ELSE '晚上' END
+  - CASE WHEN HOUR({alias}.collection_time) < 6 THEN '1' WHEN HOUR({alias}.collection_time) < 12 THEN '2' WHEN HOUR({alias}.collection_time) < 18 THEN '3' ELSE '4' END
+  minute:
+  - DATE_FORMAT({alias}.collection_time, '%Y-%m-%d %H:%i')
+  - DATE_FORMAT({alias}.collection_time, '%Y-%m-%d %H:%i')
+numeric_fields:
+# 数值条件的**降级**识别（`nl2sql.numeric_conditions` 的正则）：语义层 JSON 的
+# `conditions: [{field, op, value}]` 才是主路径，字段名→物理列在 `_CONDITION_FIELDS` 那张表。
+- fallback_words:
+  - 面积
+  expr: p.area
+- fallback_words:
+  - 置信度
+  - 可信度
+  - 信度
+  expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.confidence')) AS DECIMAL(10,6))
+- fallback_words:
+  - 标注宽度
+  - 图片宽度
+  - AI 宽度
+  - 标注框宽
+  expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.width')) AS DECIMAL(10,2))
+- fallback_words:
+  - 标注高度
+  - 图片高度
+  - AI 高度
+  - 标注框高
+  expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.height')) AS DECIMAL(10,2))
+- fallback_words:
+  - 标注经度
+  - 图片经度
+  - 标注框经度
+  expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.lng')) AS DECIMAL(12,8))
+- fallback_words:
+  - 标注纬度
+  - 图片纬度
+  - 标注框纬度
+  expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.lat')) AS DECIMAL(12,8))
+- fallback_words:
+  - 长度
+  expr: CASE WHEN p.disease_length IS NOT NULL AND p.disease_length > 0 THEN p.disease_length
+    ELSE GREATEST(COALESCE(p.area_height, 0), COALESCE(p.area_width, 0)) END
+- fallback_words:
+  - 桩号
+  - 里程
+  expr: p.pile_distance
+numeric_ops:
+- - 大于等于
+  - '>='
+- - 不小于
+  - '>='
+- - 不超过
+  - <=
+- - 不高于
+  - <=
+- - 等于
+  - '='
+- - 正好
+  - '='
+- - 恰好
+  - '='
+- - 刚好
+  - '='
+- - 为
+  - '='
+- - 超过
+  - '>'
+- - 大于
+  - '>'
+- - 小于
+  - <
+- - 低于
+  - <
+- - 高于
+  - '>'
+- - '>='
+  - '>='
+- - <=
+  - <=
+- - ≥
+  - '>='
+- - ≤
+  - <=
+- - '>'
+  - '>'
+- - <
+  - <
+- - '='
+  - '='

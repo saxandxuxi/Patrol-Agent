@@ -1,0 +1,291 @@
+name: project_manage_project_main
+properties:
+  description: 工程管理_工程项目总表
+table_reference:
+  catalog: ''
+  schema: new_four_road_base_ai
+  table: project_manage_project_main
+columns:
+- name: id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: id
+  is_primary_key: true
+- name: project_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 项目名称
+- name: project_short_name
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 简称
+- name: project_code
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 项目编号
+- name: project_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 项目类型（0新建项目 5扩建项目 10改建项目 15迁建项目 20恢复项目）
+- name: project_mode
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 项目模式（0施工总承包 5项目管理城堡PMC 10设计-建造DB 15平行发包DBB 20施工管理城堡CM 25建造-运营-移交BOT 30公共部门与私人企业合作PPP）
+- name: legal_representative
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 法定代表人
+- name: project_total_investment
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 项目总投资（万元）
+- name: project_land_scale
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 用地规模（平方米）
+- name: tech_level
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 技术等级
+- name: road_length
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 公路长度（km）
+- name: construct_unit_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 建设单位
+- name: plan_start_date
+  type: DATE
+  is_calculated: false
+  properties:
+    description: 计划开工日期
+- name: plan_end_date
+  type: DATE
+  is_calculated: false
+  properties:
+    description: 计划结束日期
+- name: region
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属区域
+- name: map_position
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 标识地图
+- name: project_overview
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 项目概述
+- name: plan_path
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 计划轨迹
+- name: project_picture
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 项目照片
+- name: design_estimate_amount
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 设计概算金额（万元）
+- name: tech_response_person
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 技术负责人
+- name: bids_mode
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 招标方式（0公开招标 5询价招标 10邀请招标 15竞争性谈判 20必选）
+- name: bids_agency_org
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 招标代理机构
+- name: build_open_date
+  type: DATE
+  is_calculated: false
+  properties:
+    description: 施工开标日期
+- name: build_bids_winner_unit_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 施工中标单位
+- name: build_bids_winner_amount
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 施工中标金额（万元）
+- name: supervisor_open_bids_date
+  type: DATE
+  is_calculated: false
+  properties:
+    description: 监理开标日期
+- name: supervisor_bids_winner_unit_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 监理中标单位
+- name: supervisor_bids_winner_amount
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 监理中标金额（万元）
+- name: estimate_unit_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 概算编制单位
+- name: estimate_file
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 概算编制相关文件
+- name: bids_list_unit_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 招标清单编制单位
+- name: appraisal_date
+  type: DATE
+  is_calculated: false
+  properties:
+    description: 评审日期
+- name: appraisal_unit_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 评审单位
+- name: appraisal_result
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 评审结果
+- name: bids_list_file
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 招标清单相关文件
+- name: build_start_date
+  type: DATE
+  is_calculated: false
+  properties:
+    description: 开工日期
+- name: build_end_date
+  type: DATE
+  is_calculated: false
+  properties:
+    description: 完工日期
+- name: build_manage_person_num
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 管理人数（人）
+- name: build_worker_num
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 劳务人数（人）
+- name: machine_num
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 机械设备（台套）
+- name: current_value_amount
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 当前产值（万元）
+- name: build_path
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 施工轨迹
+- name: build_contract_duration_start
+  type: DATE
+  is_calculated: false
+  properties:
+    description: 施工合同工期开始
+- name: build_contract_duration_end
+  type: DATE
+  is_calculated: false
+  properties:
+    description: 施工合同工期结束
+- name: build_approval
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 施工许可批复
+- name: build_file
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 施工许可相关文件
+- name: build_overview
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 施工概况
+- name: delivery_amount
+  type: DECIMAL
+  is_calculated: false
+  properties:
+    description: 交工结算金额（万元）
+- name: reply_status
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 批复状态（0待批复 5已批复）
+- name: create_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 创建时间
+- name: create_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 创建人
+- name: del_flag
+  type: CHAR
+  is_calculated: false
+  properties:
+    description: 删除标记
+- name: tenant_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属租户id
+- name: update_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 更新
+- name: update_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 修改人
+primary_key: id
+cached: false

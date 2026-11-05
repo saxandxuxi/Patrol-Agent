@@ -1,0 +1,86 @@
+name: maintenance_road_work_record
+properties:
+  description: 养护_道路作业记录
+table_reference:
+  catalog: ''
+  schema: new_four_road_base_ai
+  table: maintenance_road_work_record
+columns:
+- name: id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: id
+  is_primary_key: true
+- name: work_type
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 作业类型(清扫路面0、绿化保洁5、路灯维护10)
+- name: work_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 作业时间
+- name: route_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 作业路线id
+- name: unit_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 作业公司id
+- name: user_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 负责人id
+- name: work_situation
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 作业情况
+- name: map_position
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 标识地图
+- name: work_picture
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 作业图片
+- name: create_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 创建时间
+- name: create_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 创建人
+- name: del_flag
+  type: CHAR
+  is_calculated: false
+  properties:
+    description: 删除标记
+- name: tenant_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 所属租户id
+- name: update_time
+  type: DATETIME
+  is_calculated: false
+  properties:
+    description: 更新
+- name: update_by
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 修改人
+primary_key: id
+cached: false

@@ -1,0 +1,62 @@
+# SQL 谓词 → 语义槽位 的归类规则（docs/RAG示例直达与AI直答旁路方案.md §2.3）。
+#
+# 这里只做"把一条已验证 SQL 里的谓词归类成带类型的槽位"，**不做自然语言关键词判断**：
+# 自然语言理解在 query_semantic/intent/planning 那几层，本文件只服务离线挖槽。
+# 字段本身的事实源仍然是 schema_catalog（读 COLUMN_COMMENT），本文件只写它表达不了的例外。
+version: 1
+
+# 固定业务常量：这些列上的等值条件不算"业务过滤"，原样保留、不挖槽。
+fixed_columns:
+  - del_flag
+  - tenant_id
+  - create_by
+  - update_by
+  - version
+
+# 自由文本 / 一次性主键：出现这类列上的过滤（尤其是 LIKE）一律放弃模板化，
+# 避免把"某条具体病害"泛化成模板后反复答错。
+free_text_columns:
+  - memo
+  - problem_name
+  - problem_describe
+  - remark
+  - description
+  - content
+
+# 数值阈值允许的比较符（比较符与数值分开存："面积>5"和"面积>10"才是同模板换值）。
+numeric_ops:
+  - "="
+  - ">"
+  - ">="
+  - "<"
+  - "<="
+
+# LIMIT 的白名单范围。
+limit_range: [1, 50]
+
+# 桩号区间的米数列（区间条件用 between 表达）。
+pile_columns:
+  - pile_distance
+  - pile_meter
+
+# 运行时才算出来的动态分界：出现这些写法说明分档是数据驱动的，不能静态模板化。
+dynamic_markers:
+  - percentile
+  - ntile
+  - percentile_cont
+  - median
+
+# Wren MDL 生成的 SQL（`wren_src_*` 逻辑表）第一期不参与模板化：
+# 它要走 Wren 编译，和物理模板不是一套执行方式。
+wren_table_prefix: wren_src_
+
+# 字段里出现这些片段的一律不做模板化（含跨库/看图/多步的复合结构）。
+max_slots: 8
+
+# 实体槽的下拉取值来源：能用现成"业务上有意义的取值域"就不用整表（路线有 3600+ 条，
+# 整表前 300 条会把真正在用的路线挤出下拉框）。
+entity_sources:
+  basic_facilities_routes:
+    source: routes_with_data
+    value_column: id
+    label_column: short_name

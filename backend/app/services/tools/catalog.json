@@ -1,0 +1,578 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "name": "extract_produced",
+      "layer": "atomic",
+      "domain": "chain",
+      "description": "按 produces.from_column 从前序结果行提取回填值；多行时拼成可读标签列表。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "item": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "rows",
+          "item"
+        ]
+      },
+      "wraps": "agent._extract_produced:2475"
+    },
+    {
+      "name": "fill_placeholders",
+      "layer": "atomic",
+      "domain": "chain",
+      "description": "把 {{key}} 占位符替换成前序步骤真实产出值，并返回缺失键。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "values": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "question",
+          "values"
+        ]
+      },
+      "wraps": "agent._fill_placeholders:2460"
+    },
+    {
+      "name": "code_map_from_comment",
+      "layer": "atomic",
+      "domain": "enum",
+      "description": "从数据库列注释中提取 code→中文映射；少于两个编码对时返回空对象。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "comment": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "comment"
+        ]
+      },
+      "wraps": "schema_catalog._code_map_from_comment:282"
+    },
+    {
+      "name": "field_code_map",
+      "layer": "atomic",
+      "domain": "enum",
+      "description": "读取语义字段对应的 code→中文映射；该字段不是枚举时返回空对象。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field"
+        ]
+      },
+      "wraps": "nl2sql._field_code_map:897"
+    },
+    {
+      "name": "normalize_damage_code_sql",
+      "layer": "atomic",
+      "domain": "enum",
+      "description": "把病害类型旧关联 damage_type=problem_code 修正为 problem_base_id=id；修不了时拒绝执行。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "sql": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sql"
+        ]
+      },
+      "wraps": "sql_engine.normalize_damage_code_joins:112"
+    },
+    {
+      "name": "resolve_damage_type",
+      "layer": "atomic",
+      "domain": "enum",
+      "description": "把病害中文口语按现有字典缓存解析成标准类型和 problem_code；解析不到返回空列表。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "damage_text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "damage_text"
+        ]
+      },
+      "wraps": "route_resolver._resolve_damage_type:115"
+    },
+    {
+      "name": "format_pile",
+      "layer": "atomic",
+      "domain": "pile",
+      "description": "把桩号米数格式化成 K 形式；空值返回空字符串。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "distance": {
+            "type": [
+              "integer",
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "distance"
+        ]
+      },
+      "wraps": "calibrate.fmt_pile:24"
+    },
+    {
+      "name": "parse_pile_range",
+      "layer": "atomic",
+      "domain": "pile",
+      "description": "把“K1+200~K1+800”换算成米区间；单点默认转成向后 999 米的查询区间。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "wraps": "parsers.parse_pile_range:32"
+    },
+    {
+      "name": "parse_pile_side",
+      "layer": "atomic",
+      "domain": "pile",
+      "description": "把“K1+200 以西/以东”换算成别名、标签和 SQL 过滤片段。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "wraps": "parsers.parse_pile_side:157"
+    },
+    {
+      "name": "pile_bucket_meters",
+      "layer": "atomic",
+      "domain": "pile",
+      "description": "从“每 100 米一段/每 1 公里一段”里读取分桶米数。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "wraps": "nl2sql._pile_bucket_meters:685"
+    },
+    {
+      "name": "iso_week_range",
+      "layer": "atomic",
+      "domain": "time",
+      "description": "把“某年第几周”换算成 ISO 周一到周日的左闭右开区间。日常查询无需调用，只有链式回填或区间纠错时使用。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "now": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 参照时间，省略则用当前时间"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "wraps": "parsers._iso_week_range:359"
+    },
+    {
+      "name": "month_range",
+      "layer": "atomic",
+      "domain": "time",
+      "description": "把“某年某月/某月”换算成整月左闭右开区间。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "now": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "wraps": "parsers.parse_month_range:378"
+    },
+    {
+      "name": "parse_time_range",
+      "layer": "atomic",
+      "domain": "time",
+      "description": "按现有规则从自然语言中解析时间区间；语义层已给出结构时优先用 time_range_from_spec。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "now": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "wraps": "parsers.parse_time_range:396"
+    },
+    {
+      "name": "quarter_range",
+      "layer": "atomic",
+      "domain": "time",
+      "description": "把“某年第 N 季度”换算成正好三个月的左闭右开区间。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "now": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "wraps": "parsers._quarter_range:339"
+    },
+    {
+      "name": "time_range_from_spec",
+      "layer": "atomic",
+      "domain": "time",
+      "description": "把语义层给出的结构化 time spec 做纯算术换算，结果可能是 null。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "spec": {
+            "type": "object"
+          },
+          "now": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "spec"
+        ]
+      },
+      "wraps": "parsers.time_range_from_spec:180"
+    },
+    {
+      "name": "ask_user",
+      "layer": "big",
+      "domain": "clarify",
+      "description": "信息不足或无法继续获取时结束当前链路，生成明确追问；这是终止型工具。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "default": "mysql"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "lead": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "show_fields": {
+            "type": "boolean",
+            "default": true
+          },
+          "subject": {
+            "type": "string",
+            "default": ""
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "wraps": "clarify.ClarifyNeeded:12"
+    },
+    {
+      "name": "analyze",
+      "layer": "big",
+      "domain": "compose",
+      "description": "把前序数据查询和规范依据放在一起做综合判断、原因分析或养护建议，不重新查库。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "object"
+          },
+          "results": {
+            "type": "object"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "task",
+          "results"
+        ]
+      },
+      "wraps": "agent._analysis_payload:2328"
+    },
+    {
+      "name": "post_calc",
+      "layer": "big",
+      "domain": "compose",
+      "description": "对前序结果做差值、大小比较、求和、占比等纯计算，不查询数据库。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "object"
+          },
+          "results": {
+            "type": "object",
+            "description": "步骤 id → 前序 payload"
+          }
+        },
+        "required": [
+          "task",
+          "results"
+        ]
+      },
+      "wraps": "agent._post_calc_payload:2411"
+    },
+    {
+      "name": "check_coverage",
+      "layer": "big",
+      "domain": "coverage",
+      "description": "用现有校准器核对计划中的时间、桩号和路线覆盖范围；只判断范围，不执行查询。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "plan"
+        ]
+      },
+      "wraps": "calibrate.check:158"
+    },
+    {
+      "name": "query_data",
+      "layer": "big",
+      "domain": "data",
+      "description": "按一句自然语言子问题查询业务数据，内部复用现有模板、Wren、SQL 校验和执行链路。需要精确换算时，先让本工具完成；只有观察异常才调用原子工具纠偏。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "intent": {
+            "type": "string",
+            "default": "data"
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "plan": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "values": {
+            "type": "object",
+            "description": "占位符需要回填的键值"
+          },
+          "wren_first": {
+            "type": "boolean",
+            "default": false
+          },
+          "want_images": {
+            "type": "boolean",
+            "default": false
+          },
+          "produces": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "repair_feedback": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "question"
+        ]
+      },
+      "wraps": "agent._build_query_result:1636"
+    },
+    {
+      "name": "resolve_entity",
+      "layer": "big",
+      "domain": "entity",
+      "description": "把路线、路段、桥梁、隧道、边坡名称解析成标准 id，并补齐所属路段/路线关联链；禁止把资产 id 直接当 sections_id 查病害。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "entity_text": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "default": "mysql"
+          }
+        },
+        "required": [
+          "subject",
+          "entity_text"
+        ]
+      },
+      "wraps": "asset_resolver.resolve:106"
+    },
+    {
+      "name": "fetch_images",
+      "layer": "big",
+      "domain": "image",
+      "description": "按自然语言子问题取一批现场图片及其出处；只负责找图和路径核验，不读取图片二进制。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "force_ai": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "question"
+        ]
+      },
+      "wraps": "agent._image_result:3472"
+    },
+    {
+      "name": "query_knowledge",
+      "layer": "big",
+      "domain": "knowledge",
+      "description": "查询养护规范、定额、评定标准和制度说明；系统数据源配置类问题也可用，不查业务明细表。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ]
+      },
+      "wraps": "agent._answer_knowledge:169"
+    },
+    {
+      "name": "profile_metadata",
+      "layer": "big",
+      "domain": "metadata",
+      "description": "回答表/字段清单、字段空值率、完整度和数据画像问题，不进入业务 NL2SQL 主链。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "default": "mysql"
+          }
+        },
+        "required": [
+          "question"
+        ]
+      },
+      "wraps": "generic.profiling_reply:819"
+    }
+  ]
+}

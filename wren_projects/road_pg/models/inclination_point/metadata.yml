@@ -1,0 +1,64 @@
+name: inclination_point
+properties:
+  description: 倾角监测点（当前为空表，查询会返回 0 行，需如实说明是"该业务尚未采集"）。
+table_reference:
+  catalog: ''
+  schema: public
+  table: inclination_points
+columns:
+- name: create_time
+  type: TIMESTAMP
+  is_calculated: false
+  properties:
+    description: 上报时间（设备端）
+- name: recv_time
+  type: TIMESTAMP
+  is_calculated: false
+  properties:
+    description: 服务端接收时间
+- name: device_id
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 设备号
+- name: vertical_distance
+  type: DOUBLE
+  is_calculated: false
+  properties:
+    description: 垂直位移
+- name: horizontal_distance
+  type: DOUBLE
+  is_calculated: false
+  properties:
+    description: 水平位移
+- name: x
+  type: DOUBLE
+  is_calculated: false
+  properties:
+    description: X 坐标
+- name: y
+  type: DOUBLE
+  is_calculated: false
+  properties:
+    description: Y 坐标
+- name: now_gps
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 当次 GPS（json）
+- name: last_gps
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 上次 GPS（json）
+- name: raw_data
+  type: VARCHAR
+  is_calculated: false
+  properties:
+    description: 原始监测数据
+- name: collect_time
+  type: TIMESTAMP
+  is_calculated: false
+  properties:
+    description: 采集时间
+cached: false

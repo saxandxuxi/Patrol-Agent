@@ -1,0 +1,165 @@
+# Wren MDL 关系定义：编译器据此自动加 JOIN，LLM 不需要写 JOIN
+relationships:
+  # source: manual 人工维护
+- name: disease_route
+  models:
+  - disease
+  - route
+  join_type: MANY_TO_ONE
+  condition: disease.routes_id = route.id
+  # source: manual 人工维护
+- name: disease_section
+  models:
+  - disease
+  - section
+  join_type: MANY_TO_ONE
+  condition: disease.sections_id = section.id
+  # source: manual 人工维护
+- name: disease_damage_dict
+  models:
+  - disease
+  - damage_dict
+  join_type: MANY_TO_ONE
+  condition: disease.problem_base_id = damage_dict.id
+  # source: manual 人工维护
+- name: disease_patrol
+  models:
+  - disease
+  - patrol
+  join_type: MANY_TO_ONE
+  condition: disease.patrol_id = patrol.id
+  # source: manual 人工维护
+- name: section_route
+  models:
+  - section
+  - route
+  join_type: MANY_TO_ONE
+  condition: section.route_id = route.id
+  # source: manual 人工维护
+- name: pile_point_section
+  models:
+  - pile_point
+  - section
+  join_type: MANY_TO_ONE
+  condition: pile_point.sections_id = section.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: ai_asset_main_ai_asset_base
+  models:
+  - ai_asset_main
+  - ai_asset_base
+  join_type: MANY_TO_ONE
+  condition: ai_asset_main.asset_details_id = ai_asset_base.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: ai_asset_main_patrol
+  models:
+  - ai_asset_main
+  - patrol
+  join_type: MANY_TO_ONE
+  condition: ai_asset_main.patrol_id = patrol.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: ai_asset_main_route
+  models:
+  - ai_asset_main
+  - route
+  join_type: MANY_TO_ONE
+  condition: ai_asset_main.route_id = route.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: ai_asset_main_section
+  models:
+  - ai_asset_main
+  - section
+  join_type: MANY_TO_ONE
+  condition: ai_asset_main.section_id = section.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: ai_distance_capture_patrol
+  models:
+  - ai_distance_capture
+  - patrol
+  join_type: MANY_TO_ONE
+  condition: ai_distance_capture.patrol_id = patrol.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: ai_distance_capture_route
+  models:
+  - ai_distance_capture
+  - route
+  join_type: MANY_TO_ONE
+  condition: ai_distance_capture.routes_id = route.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: ai_distance_capture_section
+  models:
+  - ai_distance_capture
+  - section
+  join_type: MANY_TO_ONE
+  condition: ai_distance_capture.sections_id = section.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: basic_facilities_bridges_route
+  models:
+  - basic_facilities_bridges
+  - route
+  join_type: MANY_TO_ONE
+  condition: basic_facilities_bridges.routes_id = route.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: basic_facilities_bridges_section
+  models:
+  - basic_facilities_bridges
+  - section
+  join_type: MANY_TO_ONE
+  condition: basic_facilities_bridges.sections_id = section.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: basic_facilities_slope_route
+  models:
+  - basic_facilities_slope
+  - route
+  join_type: MANY_TO_ONE
+  condition: basic_facilities_slope.routes_id = route.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: basic_facilities_slope_section
+  models:
+  - basic_facilities_slope
+  - section
+  join_type: MANY_TO_ONE
+  condition: basic_facilities_slope.sections_id = section.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: basic_facilities_tunnels_route
+  models:
+  - basic_facilities_tunnels
+  - route
+  join_type: MANY_TO_ONE
+  condition: basic_facilities_tunnels.belong_route_id = route.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: basic_facilities_tunnels_section
+  models:
+  - basic_facilities_tunnels
+  - section
+  join_type: MANY_TO_ONE
+  condition: basic_facilities_tunnels.belong_section_id = section.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: maintenance_project_route
+  models:
+  - maintenance_project
+  - route
+  join_type: MANY_TO_ONE
+  condition: maintenance_project.route_id = route.id
+  # source: auto 生成器草稿（人工可覆盖）
+- name: maintenance_road_work_record_route
+  models:
+  - maintenance_road_work_record
+  - route
+  join_type: MANY_TO_ONE
+  condition: maintenance_road_work_record.route_id = route.id
+
+# source: manual 人工维护
+- name: patrol_route_patrol
+  models:
+  - patrol_route
+  - patrol
+  join_type: MANY_TO_ONE
+  condition: patrol_route.patrol_id = patrol.id
+
+# source: manual 人工维护
+- name: patrol_route_route
+  models:
+  - patrol_route
+  - route
+  join_type: MANY_TO_ONE
+  condition: patrol_route.routes_id = route.id
