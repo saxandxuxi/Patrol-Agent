@@ -6,6 +6,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+class QuerySpecError(ValueError):
+    """Raised when model output cannot become a trustworthy QuerySpec."""
+
+
 @dataclass(frozen=True)
 class ValueBinding:
     field: str
