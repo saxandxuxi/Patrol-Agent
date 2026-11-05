@@ -3135,12 +3135,39 @@ def _post_calc_payload(
         log_error("agent", "post_calc_failed", exc, question=question[:120])
         reply = ""
     if not reply:
-        reply = "这一步需要基于前面的结果做计算，但数据不足，算不出来。"
+        reason = "后置计算没有返回可用结果"
+        failure = react_repair.build_failure(
+            "post_calc_empty",
+            stage="post_calc",
+            reason=reason,
+            evidence={
+                "step_id": task.get("id"),
+                "step_question": question,
+                "depends_on": list(task.get("depends_on") or []),
+                "upstream": [
+                    {
+                        "step_id": step_id,
+                        "question": str(dep.get("question") or ""),
+                        "reply": str(dep.get("reply") or ""),
+                    }
+                    for step_id, dep in sorted((results or {}).items())
+                ],
+            },
+        )
+        return {
+            "reply": "这一步需要基于前面的结果做计算，但数据不足，算不出来。",
+            "source": "error",
+            "engine": "post_calc",
+            "accepted": False,
+            "failure": failure,
+            "columns": [],
+            "rows": [],
+        }
     return {
         "reply": reply,
         "source": "calc",
         "engine": "post_calc",
-        "accepted": bool(reply),
+        "accepted": True,
         "columns": [],
         "rows": [],
     }
