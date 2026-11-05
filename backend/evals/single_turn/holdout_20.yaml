@@ -1,0 +1,83 @@
+version: 1
+source_document: docs/archive/巡查业务问题.md
+cases:
+  - id: holdout_01
+    category: 资产角度
+    question: 从资产账看，上行方向共检出多少处病害，合计面积是多少平方米？
+    focus: 检查上下行范围、数量、面积和单位是否正确。
+  - id: holdout_02
+    category: 资产角度
+    question: 下行方向按病害类型分组，每类病害分别有多少处？
+    focus: 检查方向过滤、类型分组和数量。
+  - id: holdout_03
+    category: 资产角度
+    question: 按路面类型统计病害数量，并列出各路面类型标签。
+    focus: 检查路面类型维度、存储值到展示值的映射。
+  - id: holdout_04
+    category: 资产角度
+    question: 按道路等级汇总病害数量，找出病害最多的等级。
+    focus: 检查道路等级字段、分组和安全比较。
+  - id: holdout_05
+    category: 分段查询
+    question: 长沙－芷江高速公路K10+000到K20+000范围内，各类病害分别有多少处？
+    focus: 检查路线和桩号区间过滤，以及病害类型分组。
+  - id: holdout_06
+    category: 病害规模
+    question: 面积大于5平方米的病害有多少处，并把具体明细调出来。
+    focus: 检查面积阈值、精确数量和明细输出。
+  - id: holdout_07
+    category: 病害类型
+    question: 裂缝类病害在上行和下行分别有多少处？
+    focus: 检查裂缝类字典展开、方向分组和数量。
+  - id: holdout_08
+    category: 路线排名
+    question: 病害数量最多的前5条路线分别有多少处、总面积多少平方米？
+    focus: 检查Top 5、数量和面积是否来自同一分组范围。
+  - id: holdout_09
+    category: 病害类型
+    question: 长沙－芷江高速公路最常见的5种病害类型及各自数量和总面积是什么？
+    focus: 检查路线过滤、类型排名、数量和面积。
+  - id: holdout_10
+    category: 时间维度
+    question: 2026年10月检出的病害按路线分布，各路线多少处？
+    focus: 检查月份起止边界、路线分组和数量。
+  - id: holdout_11
+    category: 时间趋势
+    question: 长沙－芷江高速公路最近三个月的病害数量变化趋势如何？
+    focus: 检查相对时间、路线过滤、月份分组和趋势结论。
+  - id: holdout_12
+    category: 病害分布
+    question: 泛油病害主要分布在哪些路线和方向？
+    focus: 检查泛油过滤、路线和方向维度。
+  - id: holdout_13
+    category: 病害位置
+    question: 长沙－芷江高速公路上行方向的裂缝类病害分布在哪些桩号？
+    focus: 检查路线、方向、裂缝字典展开和桩号输出。
+  - id: holdout_14
+    category: 高发路段
+    question: 长沙－芷江高速公路按500米桩号分段，病害数量最多的前10段是哪些？
+    focus: 检查500米分桶、分段数量排名和路线范围。
+  - id: holdout_15
+    category: 超出能力
+    question: 2号车道上的病害类型和数量分别是什么？
+    focus: 若当前车道数据不可用，必须明确说明缺失能力，不能猜测。
+  - id: holdout_16
+    category: 设备和任务
+    question: 2026年11月每台巡检设备分别完成了哪些路线、各多少次任务？
+    focus: 检查设备维度、路线关联和任务计数；能力不足时必须说明原因。
+  - id: holdout_17
+    category: 设备和任务
+    question: 包头-茂名在2026年各月的巡检次数分别是多少？
+    focus: 检查路线过滤、月份边界和巡检任务计数。
+  - id: holdout_18
+    category: 设备和任务
+    question: 最近的巡检任务中，巡检完成里程最高的是哪一次？
+    focus: 检查完成里程字段、排序和任务身份；若数据不可用必须如实说明。
+  - id: holdout_19
+    category: 管养维度
+    question: 按管养单位统计病害数量和面积，并给出排名。
+    focus: 必须使用真实管养单位信息；没有单位名称或关联能力时不得猜测。
+  - id: holdout_20
+    category: 长期变化
+    question: 比较最近两次巡检，哪些路线的病害面积增长最快？
+    focus: 必须能够可靠配对同一路线的前后巡检；无法配对时必须明确说明限制。

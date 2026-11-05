@@ -252,6 +252,38 @@ class ServiceTests(unittest.TestCase):
         )
         self.assertIn("路线11", answer)
 
+    @patch("app.query.service.verify_result")
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    @patch("app.query.service.resolve_templates", return_value=empty_candidate_set())
+    @patch("app.query.service.analyze_single_turn")
+    def test_answer_sections_expose_sql_and_engine_for_semantic_review(
+        self,
+        analyze,
+        _resolve,
+        _compile,
+        _execute,
+        _verify,
+    ):
+        analyze.return_value = count_plan()
+        _compile.return_value = CompiledQuery(
+            "SELECT COUNT(*) AS n FROM ai_problem",
+            "wren",
+            "wren",
+        )
+        _execute.return_value = count_observation()
+        _verify.return_value = VerificationReport(status="accepted")
+
+        result = start_single_turn(
+            "泛油有多少处？",
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+
+        section = result.answer.sections[0]
+        self.assertEqual(section["sql"], "SELECT COUNT(*) AS n FROM ai_problem")
+        self.assertEqual(section["engine"], "wren")
+
     def test_large_distribution_reports_hidden_rows(self):
         answer = _answer_text(
             QuerySpec(
