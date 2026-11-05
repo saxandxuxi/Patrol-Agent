@@ -14,6 +14,7 @@ from app.query.fields import FieldReachSet, PhysicalSchemaView
 from app.query.service import (
     _answer_text,
     _default_post_calc_executor,
+    _default_template_executor,
     _default_wren_executor,
     _scope_key,
     _simple_spec_mdl,
@@ -251,6 +252,39 @@ class ServiceTests(unittest.TestCase):
         )
         self.assertIn("路线11", answer)
 
+    def test_large_distribution_reports_hidden_rows(self):
+        answer = _answer_text(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("route_name",),
+                filters=(),
+                output_projection=("route_name", "count"),
+                order_by=(),
+                limit=None,
+                required_assertions=("preserve_user_scope",),
+            ),
+            ExecutionObservation(
+                node_id="q1",
+                ok=True,
+                engine="wren",
+                sql="SELECT route_name, COUNT(*)",
+                columns=("路线名称", "数量"),
+                row_count=60,
+                preview_rows=({"路线名称": "A", "数量": "1"},),
+                result_rows=tuple(
+                    {"路线名称": f"路线{index}", "数量": str(index)}
+                    for index in range(60)
+                ),
+                rows_fetched=60,
+            ),
+        )
+        self.assertIn("共 60 行", answer)
+        self.assertIn("当前展示前 10 行", answer)
+
     def test_scope_key_accepts_list_valued_filters(self):
         spec = count_plan().nodes[0].spec.__class__(
             **{
@@ -356,6 +390,62 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("SUM(disease.area)", sql)
         self.assertIn("route.route_length_km", sql)
         self.assertNotIn("LIMIT 1", sql)
+
+    @patch("app.query.service.nl2sql.build_template_sql_for", return_value="SELECT 1")
+    @patch("app.query.service.nl2sql.build_query_plan", return_value={
+        "kind": "mysql",
+        "subject": "disease",
+        "slots": {},
+        "required_conditions": [],
+    })
+    def test_builtin_template_uses_registered_builder(
+        self,
+        _build_plan,
+        build_sql,
+    ):
+        contract = TemplateContract(
+            id="threshold_count",
+            version=1,
+            source="builtin",
+            status="active",
+            kind="mysql",
+            adapter_id="builtin",
+            native_id="threshold_count",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            fixed_conditions=(),
+        )
+        candidate = TemplateCandidate(
+            candidate_id="c1",
+            node_id="q1",
+            contract=contract,
+            spec_fingerprint="fp",
+            bound_parameters=(),
+            covered_constraints=(),
+            fixed_conditions=(),
+            warnings=(),
+            requires_confirmation=True,
+            confirmation_token="token",
+            confirmation_card=ConfirmationCard(
+                source="builtin",
+                title="threshold",
+                version=1,
+                scope_summary="",
+                bound_parameters=(),
+                fixed_conditions=(),
+                warnings=(),
+            ),
+        )
+        sql = _default_template_executor(candidate, {}, count_plan().nodes[0].spec)
+        self.assertEqual(sql, "SELECT 1")
+        build_sql.assert_called_once()
+        self.assertEqual(
+            build_sql.call_args.args[1],
+            "_build_threshold_count_template",
+        )
 
     def test_route_trend_compiles_route_filter_and_month_bucket(self):
         spec = QuerySpec(

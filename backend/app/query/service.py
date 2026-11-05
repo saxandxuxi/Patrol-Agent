@@ -5,7 +5,15 @@ import os
 from dataclasses import dataclass, replace
 from typing import Any
 
-from ..services import nl2sql, preset_lib, schema_catalog, sql_engine, wren_engine
+from ..services import (
+    nl2sql,
+    preset_lib,
+    schema_catalog,
+    sql_engine,
+    templatizer,
+    wren_engine,
+)
+from ..services.resource_loader import load_yaml
 from .analysis import analyze_single_turn
 from .compiler import CompiledQuery, compile_query
 from .confirmations import (
@@ -62,6 +70,7 @@ def _default_template_executor(
     overrides: dict[str, Any],
     spec: Any,
 ) -> str:
+    override_values = {key: str(value) for key, value in overrides.items()}
     if candidate.contract.adapter_id == "preset":
         query = preset_lib.query_by_id(candidate.contract.native_id)
         if not query:
@@ -70,8 +79,53 @@ def _default_template_executor(
             item.field: str(item.storage_value)
             for item in spec.filters
         }
-        values.update({key: str(value) for key, value in overrides.items()})
+        values.update(override_values)
         sql, _reason = preset_lib.bind(query, values)
+        return sql or ""
+    if candidate.contract.adapter_id == "builtin":
+        registry = load_yaml("sql_templates/_index.yaml", {}) or {}
+        declaration = next(
+            (
+                item
+                for item in registry.get("templates") or []
+                if isinstance(item, dict)
+                and str(item.get("id") or "") == candidate.contract.native_id
+            ),
+            None,
+        )
+        if not declaration:
+            return ""
+        builder = str(declaration.get("builder") or "")
+        if not builder:
+            return ""
+        plan = nl2sql.build_query_plan(spec.question, spec.kind)
+        _apply_spec_to_plan(plan, spec)
+        return nl2sql.build_template_sql_for(plan, builder) or ""
+    if candidate.contract.adapter_id == "auto":
+        template = next(
+            (
+                item
+                for item in templatizer.list_templates()
+                if str(item.get("id") or "") == candidate.contract.native_id
+            ),
+            None,
+        )
+        if not template:
+            return ""
+        values = override_values
+        for name, parameter in (template.get("params") or {}).items():
+            if not isinstance(parameter, dict):
+                continue
+            declare = str(parameter.get("declare") or "")
+            column = str(parameter.get("column") or "")
+            for binding in spec.filters:
+                if binding.field == declare or binding.field == column:
+                    values[name] = str(binding.storage_value)
+                    break
+                if declare == "route" and binding.field == "route_name":
+                    values[name] = str(binding.storage_value)
+                    break
+        sql, _reason = templatizer.bind(template, values)
         return sql or ""
     raise RuntimeError(
         f"template compiler adapter not configured: {candidate.contract.adapter_id}"
@@ -680,7 +734,8 @@ def _answer_text(spec: Any, observation: Any) -> str:
             text = f"明细返回 {observation.rows_fetched} 条"
         return text
     result_rows = list(observation.result_rows or observation.preview_rows)
-    preview = result_rows if len(result_rows) <= 50 else result_rows[:10]
+    hidden_rows = len(result_rows) > 50
+    preview = result_rows[:10] if hidden_rows else result_rows
     if preview and isinstance(preview[0], dict):
         if spec.view in {"count", "sum", "avg"}:
             first = preview[0]
@@ -722,7 +777,12 @@ def _answer_text(spec: Any, observation: Any) -> str:
         lines = []
         for row in preview:
             lines.append("，".join(f"{key} {value}" for key, value in row.items()))
-        return "；".join(lines)
+        text = "；".join(lines)
+        if hidden_rows:
+            return (
+                f"共 {observation.rows_fetched} 行，当前展示前 10 行；{text}"
+            )
+        return text
     return f"查询返回 {observation.rows_fetched} 行"
 
 
