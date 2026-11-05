@@ -168,6 +168,27 @@ def _sanitize_pseudo_types(question: str) -> str:
     return text
 
 
+def _query_data_over_prior_result(question: str) -> bool:
+    """只有“纯计算前序结果”才必须走 post_calc；按前序 ID 补查字段仍是数据查询。"""
+    text = str(question or "")
+    prior_pattern = (
+        r"根据(?:步骤|前序)|基于[^，。；]{0,8}(?:前序查询结果|步骤)|"
+        r"前序查询结果|步骤\s*\d+"
+    )
+    has_prior = bool(re.search(prior_pattern, text))
+    has_calc = bool(
+        re.search(r"计算|比较|求差|求和|占比|比例|平均|合计|排序|取最大|取第一条", text)
+    )
+    query_text = re.sub(r"前序查询结果|步骤\s*\d+", "", text)
+    has_new_query = bool(
+        re.search(
+            r"查询|补查|关联(?:查询)?|明细|记录|字段|图片|是否有",
+            query_text,
+        )
+    )
+    return has_prior and has_calc and not has_new_query
+
+
 def build_step_contract(
     original_message: str,
     step: dict[str, Any],
@@ -232,10 +253,7 @@ def build_step_contract(
                 "message": "规划步骤只能写自然语言子问题，不能直接写 SQL。",
             }
         )
-    if step_type == "data" and re.search(
-        r"根据(?:步骤|前序)|基于[^，。；]{0,8}(?:前序查询结果|步骤)|前序查询结果|步骤\s*\d+",
-        question,
-    ):
+    if step_type == "data" and _query_data_over_prior_result(question):
         violations.append(
             {
                 "code": "query_data_over_prior_result",

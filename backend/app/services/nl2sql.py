@@ -1753,6 +1753,17 @@ def expand_question_for_planning(question: str) -> dict[str, Any] | None:
     original = str(question or "").strip()
     if not original:
         return None
+    if re.search(
+        r"(?:具体(?:的)?数据|明细|全部(?:都)?(?:调出来|列出来|列出)|逐条)",
+        original,
+    ):
+        log_event(
+            "nl2sql",
+            "INFO",
+            "expand_question_skipped_self_contained_detail",
+            question=original[:80],
+        )
+        return None
     optimization_scope = question_optimization_context(original, "mysql")
     try:
         reply = chat(

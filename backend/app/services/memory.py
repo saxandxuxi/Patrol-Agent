@@ -562,9 +562,19 @@ def contextualize(
 ) -> tuple[str, list[str]]:
     """沿用上一条条件。返回 (拼好的问题, 沿用了哪些条件)。"""
     context = load_session(session_id)
-    if not context:
+    if context and _context_expired(context):
         return message, []
-    if _context_expired(context):
+    if re.search(r"具体(?:的)?数据|明细|调出来|列出来|继续|接着|详情", message):
+        previous = last_question(session_id)
+        if previous:
+            return (
+                previous.rstrip("。；; ")
+                + "；"
+                + message.strip()
+                + "（沿用上一问的筛选条件和查询口径）",
+                [previous],
+            )
+    if not context:
         return message, []
 
     # ── 补全交给 LLM（docs/项目智能化升级方案.md：判断权从规则拿给 LLM）──
@@ -572,6 +582,18 @@ def contextualize(
     # ——它理解不了就原样返回，不在代码里补关键词规则。
     understood = _llm_complete_followup(message, session_id)
     if not understood:
+        previous = last_question(session_id)
+        if previous and re.search(
+            r"具体(?:的)?数据|明细|调出来|列出来|继续|接着|详情",
+            message,
+        ):
+            return (
+                previous.rstrip("。；; ")
+                + "；"
+                + message.strip()
+                + "（沿用上一问的筛选条件和查询口径）",
+                [previous],
+            )
         return message, []
     rewritten = str(understood.get("question") or "").strip()
     if understood.get("relation") == "new_topic":
