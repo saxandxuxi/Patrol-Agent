@@ -5,9 +5,33 @@ from typing import Any
 
 from ....store import save_result
 from ... import nl2sql, plan_contract
+from ...logging_service import log_event
 from ...react_repair import build_failure
 from ..observation import normalize_week_label, observation
 from ..registry import tool
+
+
+def _empty_ledger_table(payload: dict[str, Any], kind: str = "mysql") -> str:
+    """空结果是否来自一张整表为空的单表台账（额外 COUNT 只用于无数据结果）。"""
+    tables = list((payload.get("lineage") or {}).get("tables") or [])
+    tables = [str(item) for item in tables if str(item)]
+    if len(tables) != 1:
+        return ""
+    table = tables[0]
+    from ....config import settings
+    from ...db import db_manager
+
+    allowed = set(
+        settings.mysql_allowed_tables if kind == "mysql" else settings.pg_allowed_tables
+    )
+    if table not in allowed:
+        return ""
+    try:
+        quoted = f"`{table}`" if kind == "mysql" else f'"{table}"'
+        rows = db_manager.query(kind, f"SELECT COUNT(*) AS n FROM {quoted}")["rows"]
+    except Exception:  # noqa: BLE001
+        return ""
+    return table if rows and int(rows[0].get("n") or 0) == 0 else ""
 
 
 def _verification_failure(
@@ -23,6 +47,17 @@ def _verification_failure(
     if str(payload.get("engine") or "") in agent._DETERMINISTIC_ENGINES:
         return None
     if not list(payload.get("rows") or []):
+        ledger_table = _empty_ledger_table(
+            payload,
+            str((payload.get("lineage") or {}).get("db") or "mysql"),
+        )
+        if ledger_table:
+            payload["empty_ledger"] = {
+                "table": ledger_table,
+                "row_count": 0,
+                "source": "database",
+            }
+            return None
         return build_failure(
             "empty_unexpected",
             stage="verify",
@@ -71,6 +106,58 @@ def _verification_failure(
         payload,
         str(payload.get("reply") or ""),
     )
+    reason = str(verdict.get("reason") or "")
+    if (
+        not verdict.get("correct", True)
+        and re.search(r"排序|order\s+by|升序|降序", reason, re.I)
+        and re.search(r"排序|升序|降序", question)
+        and re.search(r"\border\s+by\b", sql, re.I)
+    ):
+        log_event(
+            "query_data",
+            "INFO",
+            "verifier_order_by_false_negative",
+            question=question[:80],
+            reason=reason[:120],
+        )
+        verdict = {
+            **verdict,
+            "correct": True,
+            "issue_type": "none",
+            "reason": "",
+            "repair_target": "none",
+            "deterministic_override": "order_by_present",
+        }
+    type_filter_present = any(
+        damage_type in question
+        and re.search(
+            rf"(?:problem_type|damage_type)[^\n]{{0,100}}{re.escape(damage_type)}"
+            rf"|{re.escape(damage_type)}[^\n]{{0,100}}(?:problem_type|damage_type)",
+            sql,
+            re.I,
+        )
+        for damage_type in nl2sql.known_problem_types()
+    )
+    if (
+        not verdict.get("correct", True)
+        and type_filter_present
+        and re.search(r"过滤条件|口径范围|缺少.*条件|wrong_metric_scope", reason, re.I)
+    ):
+        log_event(
+            "query_data",
+            "INFO",
+            "verifier_type_filter_false_negative",
+            question=question[:80],
+            reason=reason[:120],
+        )
+        verdict = {
+            **verdict,
+            "correct": True,
+            "issue_type": "none",
+            "reason": "",
+            "repair_target": "none",
+            "deterministic_override": "type_filter_present",
+        }
     if verdict.get("correct", True):
         return None
     issue = str(verdict.get("issue_type") or "other")
@@ -260,6 +347,7 @@ def query_data(
     failure = (
         _verification_failure(filled_question, payload, contract) if ok else None
     )
+    empty_ledger = dict(payload.get("empty_ledger") or {})
     if payload.get("presentation_repair") and result_id:
         save_result(result_id, payload)
     accepted = ok and failure is None
@@ -281,6 +369,7 @@ def query_data(
             "answer": str(payload.get("reply") or ""),
             "question": filled_question,
             "risk_warnings": list(payload.get("risk_warnings") or []),
+            "empty_ledger": empty_ledger,
         },
         coverage=coverage,
         error=(
@@ -292,5 +381,9 @@ def query_data(
                 or "查询没有通过验收"
             )
         ),
-        next_hint="" if accepted and rows else "结果为空或未通过验收，先核对失败证据。",
+        next_hint=(
+            ""
+            if accepted and (rows or empty_ledger)
+            else "结果为空或未通过验收，先核对失败证据。"
+        ),
     )

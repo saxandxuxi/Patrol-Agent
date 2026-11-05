@@ -398,7 +398,7 @@ def ground(
     unavailable_fields: list[str] = []
     pending_fields: list[str] = []
     field_tables: dict[str, list[str]] = {}
-    semantic = plan.get("semantic") or {}
+    semantic = (plan or {}).get("semantic") or {}
     # 点名字段 = 目录能识别的 + **目录里没有的**（"桥在哪个省" → province）：后者全库都表达不了，
     # 会被下面的 unavailable_fields 收住，交给下游如实回答。
     # 两个来源都要收（output_fields 是"要看的列"，unknown_output_fields 是"模型确认列清单里

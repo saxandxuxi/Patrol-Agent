@@ -676,11 +676,17 @@ def _grounded_answer(sections: list[dict[str, Any]]) -> str:
         return analyses[-1]
     parts: list[str] = []
     for section in sections:
-        if not section.get("row_count") and str(section.get("type") or "") not in {
+        section_type = str(section.get("type") or "")
+        has_empty_data_explanation = bool(
+            not section.get("row_count")
+            and section_type == "data"
+            and str(section.get("reply") or "").strip()
+        )
+        if not section.get("row_count") and section_type not in {
             "analysis",
             "post_calc",
             "knowledge",
-        }:
+        } and not has_empty_data_explanation:
             continue
         text = (
             str(section.get("reply") or "")
@@ -705,7 +711,7 @@ def _payload(
             if text and text not in risk_warnings:
                 risk_warnings.append(text)
     return {
-        "reply": answer or "已完成查询。",
+        "reply": answer or "查询完成，但没有可展示的数据。",
         "source": "database",
         "sections": sections,
         "references": [],

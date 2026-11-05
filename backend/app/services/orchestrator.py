@@ -50,6 +50,20 @@ def _normalize_needs(value: Any) -> tuple[list[dict[str, Any]], list[int]]:
     return needs, dependency_ids
 
 
+def _should_execute_as_post_calc(question: str) -> bool:
+    """行级遍历/分组取极值是计算事实，不能只交给 analyze 模型心算。"""
+    text = str(question or "")
+    if any(word in text for word in ("为什么", "建议", "原因", "判断依据", "综合说明")):
+        return False
+    return bool(
+        re.search(
+            r"(?:遍历|每(?:一)?(?:条|个|组)|组内).{0,30}(?:最多|最大|取第一条|Top)",
+            text,
+            re.I,
+        )
+    )
+
+
 def _plan_from_model_data(
     data: dict[str, Any],
     message: str,
@@ -128,6 +142,14 @@ def _plan_from_model_data(
             "image",
         }:
             task_type = "data"
+        if task_type == "analysis" and _should_execute_as_post_calc(question):
+            log_event(
+                "orchestrator",
+                "INFO",
+                "analysis_promoted_to_post_calc",
+                question=question[:100],
+            )
+            task_type = "post_calc"
         declared = [
             int(item)
             for item in task.get("_declared_dependencies") or []

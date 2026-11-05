@@ -652,7 +652,7 @@ def _spec_group_by(spec: dict[str, Any] | None) -> str:
 
 
 # 只有"可加总的计数/面积"才谈"合计"：长度、密度、比例加起来没有意义
-_SUMMABLE_UNITS = {"处", "条", "个", "㎡", "元", "张"}
+_SUMMABLE_UNITS = {"处", "条", "个", "次", "㎡", "元", "张"}
 
 
 def _unit_by_words(text: str) -> str | None:
@@ -666,10 +666,14 @@ def _unit_by_words(text: str) -> str | None:
         return "㎡"
     if "公里" in text or "km" in text.lower():
         return "公里"
+    if re.search(r"(?:路线|路段).{0,4}长度", text):
+        return "公里"
     if any(word in text for word in ("长度", "宽度", "高度", "间距", "距离", "里程")):
         return "米"
     if "车道" in text:
         return "条"
+    if "次数" in text or "巡查" in text or "巡检" in text:
+        return "次"
     if "等级" in text or "类型" in text:
         return ""
     # 经纬度/坐标是数值但不是"处数"，加"处"会闹笑话（实测"最小经度 1.1处"）
@@ -732,7 +736,8 @@ def _grouped_summary(
         )
     parts: list[str] = []
     pairs: list[tuple[str, float]] = []
-    for row in rows[:10]:
+    shown_rows = rows if len(rows) <= 30 else rows[:10]
+    for row in shown_rows:
         value = row.get(metric)
         if value in (None, "", "NULL"):
             continue
@@ -875,6 +880,8 @@ def _multi_metric_summary(
         if total_unit in _SUMMABLE_UNITS:
             total_text = f"，总计 {total:g}{total_unit}"
     groups_text = f"，共 {len(kept)} 组" if len(rows) > len(parts) else ""
+    if len(parts) < len(kept):
+        groups_text += f"（正文列出前 {len(parts)} 组，完整明细见结果表）"
 
     # 结论：先给二维信息（哪个维度各分组全是 0），再给主要指标的排名
     zero_note = ""
@@ -1262,6 +1269,11 @@ def _summarize_rows(message: str, result: dict[str, Any]) -> str:
     spec = result.get("spec") or {}
     needs_conclusion = spec.get("needs_conclusion")
     if needs_conclusion is True:
+        if len(rows) <= 30 and not re.search(
+            r"为什么|原因|好不好|严重|建议|判断|评价|趋势",
+            message,
+        ):
+            return _summarize_rows_core(message, result)
         return _llm_result_summary(message, result)
     note = _month_gap_note(message, rows)
     text = _summarize_rows_core(message, result)
@@ -1278,6 +1290,62 @@ def _summarize_rows(message: str, result: dict[str, Any]) -> str:
     return f"{note}。{text}"
 
 
+def _small_grouped_rows_summary(result: dict[str, Any]) -> str:
+    """小结果集（≤30 行）按真实分组列确定性渲染，避免 LLM 只看到前 10 行。"""
+    rows = list(result.get("rows") or [])
+    if not (1 < len(rows) <= 30):
+        return ""
+    numeric = _numeric_columns(rows)
+    if not numeric:
+        return ""
+    columns = [str(item) for item in result.get("columns") or rows[0].keys()]
+    labels = [
+        column
+        for column in columns
+        if column not in numeric
+        and any(str(row.get(column) or "").strip() for row in rows)
+    ]
+    if not labels:
+        return ""
+    metric_labels = result.get("metric_labels") or {}
+    lines: list[str] = []
+    for row in rows:
+        label = " / ".join(
+            str(row.get(column) or "").strip()
+            for column in labels
+            if str(row.get(column) or "").strip()
+        )
+        values = []
+        for metric in numeric:
+            value = row.get(metric)
+            if value in (None, ""):
+                continue
+            name = str(metric_labels.get(metric) or metric)
+            values.append(f"{name} {value}{_metric_unit(name, value)}")
+        if label and values:
+            lines.append(f"{label}：" + "，".join(values))
+    if not lines:
+        return ""
+    suffix = f"。共 {len(lines)} 组"
+    if len(numeric) == 1:
+        try:
+            total = sum(float(row.get(numeric[0]) or 0) for row in rows)
+            unit = _metric_unit(str(metric_labels.get(numeric[0]) or numeric[0]), total)
+            if unit in _SUMMABLE_UNITS:
+                suffix += f"，合计 {total:g}{unit}"
+        except (TypeError, ValueError):
+            pass
+    return "；".join(lines) + suffix + "，完整明细见结果表。"
+
+
+def _time_scope_label(message: str) -> str:
+    match = re.search(
+        r"(?:20\d{2}年)?第[一二三四]季度(?:[（(][^）)]*[）)])?",
+        str(message or ""),
+    )
+    return match.group(0) if match else ""
+
+
 def _summarize_rows_core(message: str, result: dict[str, Any]) -> str:
     rows = result.get("rows", [])
     if not rows:
@@ -1286,6 +1354,13 @@ def _summarize_rows_core(message: str, result: dict[str, Any]) -> str:
         _sql_is_row_query(result.get("sql")) and not _numeric_columns(rows)
     ):
         return f"共 {len(rows)} 条明细记录，请在结果工作台查看表格与图表。"
+    if " group by " in f" {str(result.get('sql') or '').lower()} ":
+        small = _small_grouped_rows_summary(result)
+        if small:
+            scope = _time_scope_label(message)
+            if scope:
+                small = f"{scope}病害分布：{small}"
+            return small
 
     # 一问多个口径（6月/7月/7月29日/K1以西）时，逐项列出来，别让模型自由发挥。
     labels = result.get("metric_labels") or {}
@@ -1320,14 +1395,17 @@ def _summarize_rows_core(message: str, result: dict[str, Any]) -> str:
                 row_label_keys = [guess]
         # 分组多行（每条路的多个指标）逐行列出；单行多口径则一行内列出。
         if len(rows) > 1 and row_label_keys:
+            shown_rows = rows if len(rows) <= 30 else rows[:10]
             lines = [
                 f"{row.get(row_label_keys[0])}：{row_text(row)}"
-                for row in rows[:10]
+                for row in shown_rows
                 if row.get(row_label_keys[0]) not in (None, "")
                 if row_text(row)
             ]
             if lines:
                 text = "；".join(lines)
+                if len(shown_rows) < len(rows):
+                    text += f"（仅列前 {len(shown_rows)} 组，完整明细见结果表）"
                 # 只有一个计数列时顺手给合计（"有多少条、分布在哪"这类问题要的就是这个数）
                 count_like = [
                     alias
@@ -2706,7 +2784,11 @@ def _per_group_max_rows(
     deps: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
     """从“路线 × 类型 × 数量”结果中确定性地取每条路线数量最大的一行。"""
-    if not re.search(r"每条|每个|每一组|各组|每组", question):
+    if not re.search(r"每条|每个|每一组|各组|每组", question) or not re.search(
+        r"最多|最大|Top|数量最大|主要病害",
+        question,
+        re.I,
+    ):
         return None
     source_rows = [
         dict(row)
@@ -2820,6 +2902,14 @@ def _density_rows(
         ),
         "",
     )
+    area_column = next(
+        (
+            column
+            for column in columns
+            if re.search(r"总面积|面积总和|^面积$", column)
+        ),
+        "",
+    )
     length_column = next(
         (
             column
@@ -2842,6 +2932,7 @@ def _density_rows(
     )
     if not (count_column and length_column and label_column):
         return None
+    area_density = bool(re.search(r"面积\s*[/÷]\s*长度|面积密度", question))
     out: list[dict[str, Any]] = []
     for row in rows:
         try:
@@ -2851,29 +2942,124 @@ def _density_rows(
             continue
         if length <= 0:
             continue
-        out.append(
-            {
-                label_column: row.get(label_column),
-                count_column: row.get(count_column),
-                length_column: row.get(length_column),
-                "密度_处_per_km": round(count / length, 4),
-            }
-        )
+        item = {
+            label_column: row.get(label_column),
+            count_column: row.get(count_column),
+            length_column: row.get(length_column),
+            "密度_处_per_km": round(count / length, 4),
+        }
+        if area_column:
+            try:
+                area = float(str(row.get(area_column)))
+            except (TypeError, ValueError):
+                area = None
+            item[area_column] = row.get(area_column)
+            item["面积密度_㎡_per_km"] = (
+                round(area / length, 4) if area is not None else None
+            )
+        out.append(item)
     if not out:
         return None
-    out.sort(key=lambda item: float(item["密度_处_per_km"]), reverse=True)
+    metric = "面积密度_㎡_per_km" if area_density and area_column else "密度_处_per_km"
+    out.sort(
+        key=lambda item: float(item.get(metric) or 0),
+        reverse=True,
+    )
     top = out[0]
+    reply = (
+        f"密度最高的是{top[label_column]}，"
+        f"{top['密度_处_per_km']} 处/公里"
+        f"（{top[count_column]} 处 ÷ {top[length_column]} 公里）"
+    )
+    if area_column:
+        reply += f"；面积密度 {top['面积密度_㎡_per_km']} ㎡/公里"
+    reply += "。"
+    selected = [label_column, count_column]
+    if area_column:
+        selected.append(area_column)
+    selected.extend([length_column, "密度_处_per_km"])
+    if area_column:
+        selected.append("面积密度_㎡_per_km")
+    return {
+        "reply": reply,
+        "source": "calc",
+        "engine": "post_calc",
+        "accepted": True,
+        "columns": selected,
+        "rows": out,
+    }
+
+
+def _per_group_average_rows(
+    question: str,
+    deps: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """按现有分组行计算“面积 / 数量”的平均值，避免再让 LLM 猜。"""
+    if "平均" not in question or not re.search(
+        r"每(?:一)?条|各路线|按路线|每个路线",
+        question,
+    ):
+        return None
+    rows = [
+        dict(row)
+        for dep in deps
+        for row in (dep.get("rows") or [])
+        if isinstance(row, dict) and row
+    ]
+    if not rows:
+        return None
+    columns = list(rows[0])
+    numerator = next(
+        (
+            column
+            for column in columns
+            if re.search(r"总面积|面积总和|^面积$", column)
+        ),
+        "",
+    )
+    denominator = next(
+        (
+            column
+            for column in columns
+            if re.search(r"病害总数|总数|数量|处数|count", column, re.I)
+        ),
+        "",
+    )
+    if not (numerator and denominator):
+        return None
+    output_column = "平均单处病害面积"
+    output_rows: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            total = float(str(row.get(numerator)))
+        except (TypeError, ValueError):
+            total = None
+        try:
+            count = float(str(row.get(denominator)))
+        except (TypeError, ValueError):
+            count = None
+        output_rows.append(
+            {
+                **row,
+                output_column: (
+                    round(total / count, 4)
+                    if total is not None and count
+                    else None
+                ),
+            }
+        )
+    if not output_rows:
+        return None
     return {
         "reply": (
-            f"密度最高的是{top[label_column]}，"
-            f"{top['密度_处_per_km']} 处/公里"
-            f"（{top[count_column]} 处 ÷ {top[length_column]} 公里）。"
+            f"已按 {numerator} ÷ {denominator} 计算 {output_column}，"
+            f"共 {len(output_rows)} 条路线，完整结果见表格。"
         ),
         "source": "calc",
         "engine": "post_calc",
         "accepted": True,
-        "columns": [label_column, count_column, length_column, "密度_处_per_km"],
-        "rows": out,
+        "columns": columns + [output_column],
+        "rows": output_rows,
     }
 
 
@@ -2892,6 +3078,9 @@ def _post_calc_payload(
     density = _density_rows(question, deps)
     if density:
         return density
+    average_rows = _per_group_average_rows(question, deps)
+    if average_rows:
+        return average_rows
     arithmetic = _ratio_and_average_conclusion(question, task, deps)
     if arithmetic:
         return {

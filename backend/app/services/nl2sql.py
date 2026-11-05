@@ -532,6 +532,160 @@ _CAPABILITY_HINT = (
     "- 计划巡检里程 / 任务完成率：当前没有计划里程字段\n"
 )
 
+
+_OPTIMIZER_INTERNAL_COLUMNS = {
+    "id",
+    "tenant_id",
+    "del_flag",
+    "create_by",
+    "update_by",
+}
+_OPTIMIZER_GENERIC_DIMENSIONS = (
+    "数量",
+    "处数",
+    "总数",
+    "时间",
+    "日期",
+    "状态",
+    "类型",
+    "来源",
+    "时间范围",
+)
+
+
+def question_optimization_context(
+    question: str,
+    kind: str = "mysql",
+) -> dict[str, Any]:
+    """给问题优化器的最小字段上下文：只列字段触达命中的主表。
+
+    字段触达列、完整物理列目录、可用展示字段分别输出，不能混成一个全局字段清单。
+    """
+    from . import field_grounding
+
+    grounded = field_grounding.ground(kind, question)
+    table_name = str(grounded.get("table") or "")
+    entry = schema_catalog.table_entry(kind, table_name) if table_name else None
+    if not entry:
+        return {
+            "text": (
+                _CAPABILITY_HINT
+                + "\n本轮没有可靠命中具体台账：只能补充通用的分组和指标口径，"
+                "不得臆造列名、状态名、来源名或跨表属性。"
+            ),
+            "source": "global_capability",
+            "table": "",
+            "subject": "",
+            "touched_columns": [],
+            "physical_columns": [],
+            "display_columns": [],
+        }
+
+    columns = list(entry.get("columns") or [])
+    touched = [
+        {
+            "column": str(item.get("column") or ""),
+            "label": str(item.get("label") or ""),
+            "source": "field_grounding",
+        }
+        for item in grounded.get("columns") or []
+        if str(item.get("table") or "") == table_name
+    ]
+    physical_columns = [
+        {
+            "column": str(item.get("name") or ""),
+            "label": str(item.get("label") or item.get("name") or ""),
+            "type": str(item.get("type") or ""),
+            "code_map": dict(item.get("code_map") or {}),
+            "internal": str(item.get("name") or "") in _OPTIMIZER_INTERNAL_COLUMNS,
+            "source": "schema_catalog",
+        }
+        for item in columns
+        if item.get("name")
+    ]
+    display_columns = [
+        item for item in physical_columns if not item["internal"]
+    ]
+    lines = [
+        "字段上下文来源：field_grounding + schema_catalog；以下内容只针对本轮主表。",
+        f"主表：{table_name}（{entry.get('label') or table_name}）",
+        "字段触达列（用户这句话实际命中的列）：",
+        *[
+            f"- {item['column']}（{item['label']}）"
+            for item in touched
+        ],
+        "完整物理列目录（只包含这张主表，可用于判断字段是否存在）：",
+        *[
+            f"- {item['column']}（{item['label']}）"
+            for item in physical_columns
+        ],
+        "可用展示字段（内部 id/租户/删除标记等不作为业务字段展示）：",
+        *[
+            f"- {item['column']}（{item['label']}）"
+            for item in display_columns
+        ],
+        "存储/展示约束：code 只用于 SQL 执行和比较；扩写问题与最终展示只能使用中文标签。",
+        "禁止把其他表的字段名或属性塞进本题；确需跨表关系时交给下游规划器处理。",
+        "指标约束：只允许使用本表字段和通用汇总词（数量/总数/平均/最大/最小/占比/变化）；"
+        "不得引入其他表的维度或指标。",
+    ]
+    # 给枚举列补 code→中文，来源明确标成字段目录；同一列多值在目录里不会重复。
+    storage_lines = [
+        f"- {item['column']}（{item['label']}）："
+        + "，".join(f"{code}={label}" for code, label in item["code_map"].items())
+        for item in physical_columns
+        if item["code_map"]
+    ]
+    if storage_lines:
+        insert_at = lines.index("可用展示字段（内部 id/租户/删除标记等不作为业务字段展示）：")
+        lines[insert_at:insert_at] = ["枚举存储值（执行用 code，展示用中文）：", *storage_lines]
+    return {
+        "text": "\n".join(lines),
+        "source": "field_grounding",
+        "table": table_name,
+        "subject": str(grounded.get("subject") or ""),
+        "touched_columns": touched,
+        "physical_columns": physical_columns,
+        "display_columns": display_columns,
+    }
+
+
+def _optimizer_dimension_supported(
+    dimension: str,
+    display_columns: list[dict[str, Any]],
+) -> bool:
+    text = _squash_text(dimension)
+    if not text or any(word in text for word in _OPTIMIZER_GENERIC_DIMENSIONS):
+        return True
+    for item in display_columns:
+        label = _squash_text(str(item.get("label") or ""))
+        column = _squash_text(str(item.get("column") or ""))
+        for candidate in (label, column):
+            if len(candidate) >= 2 and (
+                candidate in text
+                or text in candidate
+                or any(
+                    text[index : index + 2] in candidate
+                    for index in range(max(0, len(text) - 1))
+                )
+            ):
+                return True
+    return False
+
+
+def _explicit_landing_subject(
+    kind: str,
+    message: str,
+    grounded: dict[str, Any],
+) -> str:
+    """用户原话明确点名某张台账时，字段触达主体优先于语义模型的泛主体判断。"""
+    table = str((grounded or {}).get("table") or "")
+    subject = str((grounded or {}).get("subject") or "")
+    if not table or subject not in _SEMANTIC_SUBJECTS:
+        return ""
+    label = _squash_text(schema_catalog.table_label(kind, table))
+    return subject if label and label in _squash_text(message) else ""
+
 _VERIFY_CACHE: dict[str, dict[str, Any]] = {}
 _VERIFY_CACHE_LIMIT = settings.cache_max_entries
 
@@ -543,6 +697,8 @@ _PROTECTED_NOUNS = (
     "工单",
     "里程桩",
     "桩点",
+    "路线",
+    "道路",
     "路段",
     "巡查",
     "巡检",
@@ -1538,6 +1694,10 @@ def refine_question(
     改写丢了用户说过的实体就作废（复用 _lost_entities），返回空串让调用方用原问题。
     """
     rows = (result.get("rows") or [])[:10]
+    optimization_scope = question_optimization_context(
+        question,
+        str((plan or {}).get("kind") or "mysql"),
+    )
     try:
         reply = chat(
             prompts.messages(
@@ -1549,7 +1709,7 @@ def refine_question(
                 sql=(sql or "")[:1200],
                 rows=json.dumps(rows, ensure_ascii=False, default=str)[:800],
                 plan=json.dumps(plan, ensure_ascii=False, default=str)[:800] if plan else "（无）",
-                capability=_CAPABILITY_HINT,
+                capability=optimization_scope["text"],
             ),
             temperature=0,
             # 问题优化同样是"读懂人话"的活，跟着裁判模型走，没配再用语义理解模型。
@@ -1593,6 +1753,7 @@ def expand_question_for_planning(question: str) -> dict[str, Any] | None:
     original = str(question or "").strip()
     if not original:
         return None
+    optimization_scope = question_optimization_context(original, "mysql")
     try:
         reply = chat(
             prompts.messages(
@@ -1604,7 +1765,7 @@ def expand_question_for_planning(question: str) -> dict[str, Any] | None:
                 sql="（无）",
                 rows="（无）",
                 plan="（尚未规划）",
-                capability=_CAPABILITY_HINT,
+                capability=optimization_scope["text"],
             ),
             temperature=0,
             model=role_model("verify") or role_model("semantic") or sql_model(),
@@ -1637,6 +1798,24 @@ def expand_question_for_planning(question: str) -> dict[str, Any] | None:
             for item in payload.get("required_dimensions") or []
             if str(item).strip()
         ]
+        unsupported_dimensions = [
+            item
+            for item in dimensions
+            if not _optimizer_dimension_supported(
+                item,
+                list(optimization_scope.get("display_columns") or []),
+            )
+        ]
+        if unsupported_dimensions and optimization_scope.get("table"):
+            log_event(
+                "nl2sql",
+                "INFO",
+                "expand_question_rejected_unsupported_fields",
+                fields="、".join(unsupported_dimensions)[:80],
+                table=str(optimization_scope.get("table") or ""),
+                question=original[:80],
+            )
+            return None
     else:
         lines = [
             re.sub(r"^(优化后|补全后|输出)[:：]\s*", "", line.strip())
@@ -1648,8 +1827,11 @@ def expand_question_for_planning(question: str) -> dict[str, Any] | None:
     if len(expanded) < 4:
         return None
     # 预规划补全只能增加汇总维度；用户没要明细时，扩写不得把查询变成全表逐条记录。
+    requests_detail = bool(
+        re.search(r"全部(?:都)?(?:调出来|列出来|列出)|都调出来|逐条|明细|清单", original)
+    )
     for term in ("明细", "全部记录", "逐条", "每条病害"):
-        if term in expanded and term not in original:
+        if term in expanded and term not in original and not requests_detail:
             log_event(
                 "nl2sql",
                 "INFO",
@@ -1674,6 +1856,16 @@ def expand_question_for_planning(question: str) -> dict[str, Any] | None:
         "source": "question_optimizer",
         "mode": "preplan",
         "required_dimensions": list(dict.fromkeys(dimensions)),
+        "optimization_scope": {
+            "source": optimization_scope["source"],
+            "table": optimization_scope["table"],
+            "subject": optimization_scope["subject"],
+            "touched_columns": optimization_scope["touched_columns"],
+            "display_fields": [
+                str(item.get("column") or "")
+                for item in optimization_scope.get("display_columns") or []
+            ],
+        },
     }
 
 
@@ -2369,6 +2561,26 @@ def _build_query_plan_uncached(message: str, kind: str = "mysql") -> dict[str, A
         plan["grounded"] = field_grounding.ground(kind, message, plan=plan)
     except Exception as exc:  # noqa: BLE001
         log_error("nl2sql", "field_grounding_failed", exc, question=message[:80])
+    explicit_subject = _explicit_landing_subject(
+        kind,
+        message,
+        plan.get("grounded") or {},
+    )
+    if explicit_subject and explicit_subject != str(plan.get("subject") or ""):
+        previous = str(plan.get("subject") or "")
+        plan["subject"] = explicit_subject
+        if isinstance(semantics, dict):
+            semantics["subject"] = explicit_subject
+        slots["semantic"] = semantics
+        log_event(
+            "nl2sql",
+            "INFO",
+            "subject_from_explicit_table",
+            frm=previous,
+            to=explicit_subject,
+            table=str((plan.get("grounded") or {}).get("table") or ""),
+            question=message[:80],
+        )
     # 语义层没给主体时，用**字段触达的落点表**反哺主体（表名 → 主体名，只做前缀剥离）。
     # 模型有时因为 <<grounding>> 已经写明落点就省略了 subject，plan["subject"] 于是退回规则默认的
     # disease——实测"宝安大道西乡段的基本情况是什么样的"因此被当成病害题，内置模板 route_info
@@ -6911,6 +7123,7 @@ def plan_to_spec(plan: dict[str, Any]) -> dict[str, Any]:
             "original_question": str(optimization.get("original_question") or ""),
             "expanded_question": str(optimization.get("question") or ""),
             "required_dimensions": list(optimization.get("required_dimensions") or []),
+            "scope": dict(optimization.get("optimization_scope") or {}),
         }
     # 分组维度也要进 spec：示例复用要靠它判断"按类型分布"和"按状态分布"不是同一题
     if (plan.get("slots") or {}).get("group_by"):
