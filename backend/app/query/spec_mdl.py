@@ -51,12 +51,24 @@ _FIELD_ALIASES = {
     "pile_number_segment": "pile_segment_500m",
     "pile_number_segment_500m": "pile_segment_500m",
     "pile_segment": "pile_segment_500m",
+    "pile_number_segment_1000m": "pile_segment_1000m",
+    "kilometer_segment": "pile_segment_1000m",
 }
 
 
 def _base_field(field: str) -> str:
     name = str(field).rsplit(".", 1)[-1]
     return _FIELD_ALIASES.get(name, name)
+
+
+def _pile_segment_expression(meters: int) -> str:
+    bucket = f"FLOOR(disease.pile_distance / {meters}) * {meters}"
+    return (
+        f"CONCAT('K', FLOOR({bucket} / 1000), '+', "
+        f"LPAD(MOD({bucket}, 1000), 3, '0'), '~K', "
+        f"FLOOR(({bucket} + {meters}) / 1000), '+', "
+        f"LPAD(MOD({bucket} + {meters}, 1000), 3, '0'))"
+    )
 
 
 def _pile_meter(value: Any) -> int:
@@ -299,14 +311,9 @@ def _disease_dimension(
     if normalized == "pile_number":
         return "disease.pile_number", "桩号"
     if normalized == "pile_segment_500m":
-        bucket = "FLOOR(disease.pile_distance / 500) * 500"
-        return (
-            f"CONCAT('K', FLOOR({bucket} / 1000), '+', "
-            f"LPAD(MOD({bucket}, 1000), 3, '0'), '~K', "
-            f"FLOOR(({bucket} + 500) / 1000), '+', "
-            f"LPAD(MOD({bucket} + 500, 1000), 3, '0'))",
-            "桩号分段",
-        )
+        return _pile_segment_expression(500), "桩号分段"
+    if normalized == "pile_segment_1000m":
+        return _pile_segment_expression(1000), "桩号分段"
     if normalized == "unit_id":
         return "disease.unit_id", "管养单位"
     if normalized == "lane_index":

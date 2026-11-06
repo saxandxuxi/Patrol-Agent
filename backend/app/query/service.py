@@ -1213,6 +1213,20 @@ def start_single_turn(
             registry=registry,
             subject=subject_resolution.subject,
         )
+    except nl2sql.QueryPlanError as exc:
+        return TurnStart(
+            plan=QueryPlan(question=question, nodes=()),
+            answer=AnswerPackage(
+                f"该查询无法执行：{exc}",
+                (
+                    {
+                        "status": "unsupported",
+                        "failure_code": "query_scope_not_found",
+                        "answer": str(exc),
+                    },
+                ),
+            ),
+        )
     except LLMError:
         return TurnStart(
             plan=QueryPlan(question=question, nodes=()),

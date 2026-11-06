@@ -85,3 +85,10 @@ dimensions:
     - 每台设备
     - 按设备
     expr: p.device_code
+  - key: pile_segment_1000m
+    fallback_words:
+    - 每段1公里
+    - 每公里
+    - 1公里分段
+    - 一公里分段
+    expr: "CONCAT('K', FLOOR(FLOOR(p.pile_distance / 1000) * 1000 / 1000), '+', LPAD(MOD(FLOOR(p.pile_distance / 1000) * 1000, 1000), 3, '0'), '~K', FLOOR((FLOOR(p.pile_distance / 1000) * 1000 + 1000) / 1000), '+000')"

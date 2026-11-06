@@ -30,6 +30,7 @@ from app.query.service import (
 )
 from app.query.spec_mdl import UnsupportedQuerySpec
 from app.services.llm import LLMError
+from app.services.nl2sql import QueryPlanError
 from app.query.templates import (
     CandidateSet,
     ConfirmationCard,
@@ -104,6 +105,25 @@ def count_observation() -> ExecutionObservation:
 
 
 class ServiceTests(unittest.TestCase):
+    @patch("app.query.service.analyze_single_turn")
+    def test_unresolved_route_returns_structured_unsupported_answer(self, analyze):
+        analyze.side_effect = QueryPlanError(
+            "没有找到路线“S20外环高速”，请确认路线编码或名称。"
+        )
+
+        result = start_single_turn(
+            "S20外环高速过去六个月病害面积趋势",
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+
+        self.assertIn("没有找到路线", result.answer.text)
+        self.assertEqual(result.answer.sections[0]["status"], "unsupported")
+        self.assertEqual(
+            result.answer.sections[0]["failure_code"],
+            "query_scope_not_found",
+        )
+
     def test_section_identity_names_the_sub_question(self):
         spec = count_plan().nodes[0].spec
         node = PlanNode(

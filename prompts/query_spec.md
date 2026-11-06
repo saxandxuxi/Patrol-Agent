@@ -112,6 +112,9 @@
     不得发明 `confidence_bucket` 等未注册分组字段。
 27. 所有 `post_calc` 必须二选一：需要算术时声明 `calculation`；只解释已有值、
     不产生新数字时，在 `required_assertions` 中声明 `analysis_only`。
+28. 用户明确要求把道路划分成固定长度区间统计时，必须使用注册分段维度，不能直接按原始
+    `pile_number` 字符串分组。500 米使用 `pile_segment_500m`，1 公里使用
+    `pile_segment_1000m`；输出标签统一为“桩号分段”。
 
 允许的 view：
 count / sum / avg / distribution / list / detail / top / trend / bucket_compare / photo / data

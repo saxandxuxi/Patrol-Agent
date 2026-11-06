@@ -241,6 +241,28 @@ class SpecMdlTests(unittest.TestCase):
         self.assertIn("DATE(disease.collection_time) AS 日期", sql)
         self.assertIn("GROUP BY DATE(disease.collection_time)", sql)
 
+    def test_disease_one_kilometer_bucket_compiles(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="top_groups",
+                metrics=("count",),
+                dimensions=("pile_segment_1000m",),
+                filters=(),
+                output_projection=(),
+                order_by=({"field": "count", "direction": "desc"},),
+                limit=5,
+                required_assertions=(),
+                question="每1公里一段统计病害高发区间",
+            )
+        )
+
+        self.assertIn("FLOOR(disease.pile_distance / 1000) * 1000", sql)
+        self.assertIn("AS 桩号分段", sql)
+        self.assertIn("GROUP BY CONCAT(", sql)
+
     def test_month_dimension_aliases_compile_consistently(self):
         sql = compile_spec_mdl(
             QuerySpec(

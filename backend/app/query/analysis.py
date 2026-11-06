@@ -435,6 +435,7 @@ def _analyze_once(
             ),
         ),
         model=role_model("semantic"),
+        max_tokens=4096,
     )
     if not isinstance(data, dict):
         raise QuerySpecError("模型没有返回 QuerySpec JSON")

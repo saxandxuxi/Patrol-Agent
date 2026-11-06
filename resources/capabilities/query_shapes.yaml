@@ -59,6 +59,8 @@ query_shapes:
     - confidence
     - area_bucket
     - pile_bucket
+    - pile_segment_500m
+    - pile_segment_1000m
     - manage_dept
     - problem_status
     - problem_source
