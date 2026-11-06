@@ -11,6 +11,7 @@ from .capability_registry import CapabilityIssue, CapabilityRegistry
 from .contracts import (
     InputBinding,
     IntentContract,
+    PlanNode,
     QueryPlan,
     QuerySpec,
     QuerySpecAmbiguity,
@@ -192,6 +193,75 @@ def _canonicalize_input_bindings(specs: list[QuerySpec]) -> None:
         )
 
 
+def _plan_subject_issue(plan: QueryPlan, subject: str) -> str:
+    if not subject:
+        return ""
+    nodes_by_id = {node.id: node for node in plan.nodes}
+    consumed = {
+        dependency
+        for node in plan.nodes
+        for dependency in node.depends_on
+    }
+    consumed.update(
+        binding.from_node
+        for node in plan.nodes
+        for binding in node.spec.input_bindings
+    )
+    for node in plan.nodes:
+        if node.id in consumed:
+            continue
+        effective_subject = node.spec.subject
+        if node.node_type == "post_calc":
+            dependency_subjects = {
+                nodes_by_id[dependency].spec.subject
+                for dependency in node.depends_on
+                if dependency in nodes_by_id
+            }
+            if len(dependency_subjects) == 1:
+                effective_subject = next(iter(dependency_subjects))
+        if effective_subject != subject:
+            return (
+                f"最终回答主体 {effective_subject} 与已确定主体 {subject} 不一致"
+            )
+    return ""
+
+
+def _plan_intent_issue(plan: QueryPlan, intent_family: str) -> str:
+    if intent_family != "trend":
+        return ""
+    trend_nodes = [
+        node
+        for node in plan.nodes
+        if node.node_type == "post_calc" and node.spec.view == "trend"
+    ]
+    if trend_nodes:
+        return ""
+    return "趋势问题必须增加一个消费数据结果的 post_calc 节点，并使用 view=trend"
+
+
+def _complete_trend_dependencies(plan: QueryPlan) -> QueryPlan:
+    data_ids = tuple(node.id for node in plan.nodes if node.node_type == "query_data")
+    if not data_ids:
+        return plan
+    nodes = []
+    for node in plan.nodes:
+        if node.node_type == "post_calc" and node.spec.view == "trend":
+            node = PlanNode(
+                id=node.id,
+                spec=node.spec,
+                depends_on=tuple(
+                    dict.fromkeys((*data_ids, *node.depends_on))
+                ),
+                node_type=node.node_type,
+            )
+        nodes.append(node)
+    return QueryPlan(
+        question=plan.question,
+        nodes=tuple(nodes),
+        response_mode=plan.response_mode,
+    )
+
+
 def _analyze_once(
     question: str,
     kind: str,
@@ -264,10 +334,6 @@ def _analyze_once(
             continue
         spec_id = str(raw.get("id") or f"q{index}").strip()
         selected_subject = str(raw.get("subject") or subject or "disease").strip()
-        if subject and selected_subject != subject:
-            raise QuerySpecError(
-                f"规划主体 {selected_subject} 与已确定主体 {subject} 不一致"
-            )
         filters = []
         for item in raw.get("filters") or []:
             if not isinstance(item, dict):
@@ -287,12 +353,25 @@ def _analyze_once(
             limit = int(raw["limit"]) if raw.get("limit") is not None else None
         except (TypeError, ValueError) as exc:
             raise QuerySpecError("limit 必须是整数") from exc
+        action = str(raw.get("action") or "query_data").strip()
+        if action == "analysis":
+            action = "post_calc"
+        node_type = (
+            action
+            if action in {"query_data", "post_calc", "analysis"}
+            else "query_data"
+        )
         metrics = _metric_tuple(raw.get("metrics"))
         dimensions = _canonical_dimensions(
             selected_subject,
             _string_tuple(raw.get("dimensions")),
         )
         view = _canonical_view(raw.get("view"), metrics, dimensions)
+        if (
+            node_type == "post_calc"
+            and view in {"metrics", "derived_metrics", "post_calc"}
+        ):
+            view = "data"
         if view in {"list", "detail"} and limit is None:
             limit = 500
         output_projection = _canonical_dimensions(
@@ -329,16 +408,9 @@ def _analyze_once(
             )
         )
         dependencies[spec_id] = _string_tuple(raw.get("depends_on"))
-        action = str(raw.get("action") or "query_data").strip()
-        if action == "analysis":
-            action = "post_calc"
-        node_types[spec_id] = (
-            action
-            if action in {"query_data", "post_calc", "analysis"}
-            else "query_data"
-        )
+        node_types[spec_id] = node_type
     _canonicalize_input_bindings(specs)
-    return build_query_plan(
+    plan = build_query_plan(
         contract,
         tuple(specs),
         schema,
@@ -346,9 +418,19 @@ def _analyze_once(
         dependencies,
         node_types,
         response_mode=(
-            "analysis" if contract.intent_family == "analysis" else "data"
+            "analysis"
+            if contract.intent_family in {"analysis", "trend"}
+            else "data"
         ),
     )
+    plan = _complete_trend_dependencies(plan)
+    subject_issue = _plan_subject_issue(plan, subject)
+    if subject_issue:
+        raise QuerySpecError(subject_issue)
+    intent_issue = _plan_intent_issue(plan, contract.intent_family)
+    if intent_issue:
+        raise QuerySpecError(intent_issue)
+    return plan
 
 
 def _apply_audit_patches(plan: QueryPlan, verdict: dict[str, Any]) -> QueryPlan:
@@ -477,6 +559,131 @@ def _query_plan_compile_error(plan: QueryPlan) -> CapabilityIssue | None:
     return None
 
 
+def _node_outputs(spec: QuerySpec) -> set[str]:
+    return {
+        *spec.metrics,
+        *spec.dimensions,
+        *spec.output_projection,
+    }
+
+
+def _query_plan_derived_metric_issue(
+    plan: QueryPlan,
+    registry: CapabilityRegistry | None,
+) -> CapabilityIssue | None:
+    if registry is None:
+        return None
+    nodes_by_id = {node.id: node for node in plan.nodes}
+    for node in plan.nodes:
+        if node.node_type != "post_calc":
+            continue
+        dependency_subjects = {
+            nodes_by_id[dependency].spec.subject
+            for dependency in node.depends_on
+            if dependency in nodes_by_id
+        }
+        capability_subject = (
+            next(iter(dependency_subjects))
+            if len(dependency_subjects) == 1
+            else node.spec.subject
+        )
+        allowed_atomic = tuple(
+            registry.snapshot.metrics.get(capability_subject, {})
+        )
+        allowed_derived = tuple(
+            registry.snapshot.derived_metrics.get(capability_subject, {})
+        )
+        declared_derived = any(
+            registry.derived_metric(capability_subject, metric_id) is not None
+            for metric_id in node.spec.metrics
+        )
+        if (
+            "lower_is_better" in node.spec.required_assertions
+            and allowed_derived
+            and not declared_derived
+        ):
+            return CapabilityIssue(
+                code="missing_derived_metric",
+                original_value=node.id,
+                reason=(
+                    f"节点 {node.id} 声明了越低越好的评价，"
+                    "但没有声明使用的派生指标"
+                ),
+                allowed_values=allowed_derived,
+                suggested_repair=(
+                    "从 allowed_values 中选择一个派生指标写入 post_calc.metrics，"
+                    "并确保它的 operands 全部由依赖节点产出。"
+                ),
+                node_id=node.id,
+                evidence={
+                    "capability_subject": capability_subject,
+                    "post_calc_subject": node.spec.subject,
+                    "required_assertions": list(node.spec.required_assertions),
+                    "available_derived_metrics": {
+                        metric_id: {
+                            "expression": metric.expression,
+                            "operands": list(metric.operands),
+                        }
+                        for metric_id, metric in registry.snapshot.derived_metrics[
+                            capability_subject
+                        ].items()
+                    },
+                },
+            )
+        produced: set[str] = set()
+        for dependency in node.depends_on:
+            upstream = nodes_by_id.get(dependency)
+            if upstream is not None:
+                produced.update(_node_outputs(upstream.spec))
+        for metric_id in node.spec.metrics:
+            if registry.metric(capability_subject, metric_id) is not None:
+                continue
+            derived = registry.derived_metric(capability_subject, metric_id)
+            if derived is None:
+                return CapabilityIssue(
+                    code="unknown_metric",
+                    original_value=metric_id,
+                    reason=(
+                        f"节点 {node.id} 使用了未注册的指标 {metric_id}"
+                    ),
+                    allowed_values=allowed_atomic + allowed_derived,
+                    suggested_repair=(
+                        "只使用 allowed_values 中的指标；派生指标必须由 post_calc 计算。"
+                    ),
+                    node_id=node.id,
+                )
+            missing = tuple(
+                operand for operand in derived.operands if operand not in produced
+            )
+            if missing:
+                return CapabilityIssue(
+                    code="missing_derived_operand",
+                    original_value=metric_id,
+                    reason=(
+                        f"派生指标 {metric_id} 缺少上游操作数："
+                        + "、".join(missing)
+                    ),
+                    allowed_values=missing,
+                    suggested_repair=(
+                        f"在依赖节点 {', '.join(node.depends_on) or '（未声明）'} "
+                        f"的 metrics 中加入 {'、'.join(missing)}，"
+                        f"再由 post_calc 计算 {derived.expression}。"
+                    ),
+                    node_id=node.id,
+                    evidence={
+                        "capability_subject": capability_subject,
+                        "post_calc_subject": node.spec.subject,
+                        "derived_metric": metric_id,
+                        "operands": list(derived.operands),
+                        "missing_operands": list(missing),
+                        "dependency_node_ids": list(node.depends_on),
+                        "produced_values": sorted(produced),
+                        "expression": derived.expression,
+                    },
+                )
+    return None
+
+
 def _capability_issue_from_compile_error(
     node_id: str,
     message: str,
@@ -558,14 +765,21 @@ def analyze_single_turn(
                 )
                 continue
             raise
-        except QuerySpecError as exc:
+        except QuerySpecAmbiguity as exc:
             if attempt == 0:
                 feedback = f"上一轮 QuerySpec 解析失败：{exc}"
+                continue
+            raise
+        except QuerySpecError as exc:
+            feedback = f"上一轮 QuerySpec 解析失败：{exc}"
+            if attempt < 2:
                 continue
             raise
         if not audit:
             return plan
         compile_issue = _query_plan_compile_error(plan)
+        if compile_issue is None:
+            compile_issue = _query_plan_derived_metric_issue(plan, registry)
         if compile_issue:
             feedback = json.dumps(
                 compile_issue.to_feedback(),
@@ -574,6 +788,10 @@ def analyze_single_turn(
             )
             if attempt < 2:
                 continue
+            if compile_issue.code == "missing_derived_operand":
+                raise QuerySpecError(
+                    "缺少派生指标操作数：" + compile_issue.reason
+                )
             raise QuerySpecError(
                 "当前数据能力不支持：" + compile_issue.reason
             )

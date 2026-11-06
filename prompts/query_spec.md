@@ -86,7 +86,13 @@
     `post_calc`。不要输出不存在的 `disease_density` 指标；密度由 `post_calc` 用
     数量或面积除以 `route_length_km` 计算。用户没有要求病害类型时，不要额外生成
     路线 × 病害类型的分布节点。表示“越少/越低越好”的评价题，`post_calc` 的
-    `required_assertions` 必须包含 `lower_is_better`。
+    `required_assertions` 必须包含 `lower_is_better` 和 `multi_metric_comparison`。
+23. `post_calc` 使用能力视图 `derived_metrics` 中的派生指标时，必须把该派生
+    指标 id 写入 `post_calc.metrics`；代码会校验它的 `operands` 是否都由依赖节点产出。
+    `derived_metrics` 详情里的 `lower_is_better` 只是该指标的评价方向，不代表用户
+    要求选最低值。只有用户明确要求评价最好/最健康等结论时才写
+    `required_assertions: ["lower_is_better", "multi_metric_comparison"]`；单纯要求
+    分布、对比或列出结果时不得添加，并应保留全部分组。
 
 允许的 view：
 count / sum / avg / distribution / list / detail / top / trend / bucket_compare / photo / data

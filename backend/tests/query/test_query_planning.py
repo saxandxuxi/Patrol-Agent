@@ -8,6 +8,216 @@ from app.services.plan_contract import build_step_contract
 
 
 class QueryPlanningTests(unittest.TestCase):
+    @patch("app.query.analysis.chat_json")
+    def test_auxiliary_subject_is_allowed_when_final_subject_matches(
+        self,
+        chat_json,
+    ):
+        chat_json.return_value = {
+            "final_goal": "统计最近5次巡查中的坑槽数量",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "batches",
+                    "action": "query_data",
+                    "subject": "patrol",
+                    "view": "list",
+                    "metrics": [],
+                    "dimensions": ["patrol_number"],
+                    "filters": [],
+                    "output_projection": ["patrol_number"],
+                    "order_by": [
+                        {"field": "create_time", "direction": "desc"}
+                    ],
+                    "limit": 5,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "counts",
+                    "action": "query_data",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["patrol_number"],
+                    "filters": [
+                        {
+                            "field": "problem_type_name",
+                            "op": "=",
+                            "raw_value": "坑槽",
+                        }
+                    ],
+                    "output_projection": ["patrol_number", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": ["batches"],
+                    "inputs": [
+                        {
+                            "from_node": "batches",
+                            "from_field": "patrol_number",
+                            "to_field": "patrol_number",
+                            "op": "in",
+                        }
+                    ],
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "坑槽在最近5次巡查的数量变化",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+        )
+
+        self.assertEqual(plan.nodes[0].spec.subject, "patrol")
+        self.assertEqual(plan.nodes[-1].spec.subject, "disease")
+
+    @patch("app.query.analysis.chat_json")
+    def test_trend_intent_repairs_missing_terminal_analysis(self, chat_json):
+        data_view = {
+            "id": "q1",
+            "action": "query_data",
+            "subject": "disease",
+            "view": "distribution",
+            "metrics": ["count"],
+            "dimensions": ["patrol_number"],
+            "filters": [
+                {
+                    "field": "problem_type_name",
+                    "op": "=",
+                    "raw_value": "坑槽",
+                }
+            ],
+            "output_projection": ["patrol_number", "count"],
+            "order_by": [],
+            "limit": None,
+            "required_assertions": ["preserve_user_scope"],
+            "depends_on": [],
+            "inputs": [],
+        }
+        first = {
+            "final_goal": "分析最近5次巡查的坑槽数量变化",
+            "intent_family": "trend",
+            "views": [data_view],
+        }
+        second = {
+            **first,
+            "views": [
+                data_view,
+                {
+                    "id": "trend",
+                    "action": "post_calc",
+                    "subject": "disease",
+                    "view": "trend",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": ["q1"],
+                    "inputs": [],
+                },
+            ],
+        }
+        chat_json.side_effect = [first, second]
+
+        plan = analyze_single_turn(
+            "坑槽在最近5次巡查的数量变化",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+        )
+
+        self.assertEqual(chat_json.call_count, 2)
+        self.assertEqual(plan.nodes[-1].node_type, "post_calc")
+        self.assertEqual(plan.response_mode, "analysis")
+
+    @patch("app.query.analysis.chat_json")
+    def test_trend_analysis_consumes_all_data_nodes(self, chat_json):
+        batch_view = {
+            "id": "batches",
+            "action": "query_data",
+            "subject": "patrol",
+            "view": "list",
+            "metrics": [],
+            "dimensions": ["patrol_number"],
+            "filters": [],
+            "output_projection": ["patrol_number"],
+            "order_by": [{"field": "create_time", "direction": "desc"}],
+            "limit": 5,
+            "required_assertions": ["preserve_user_scope"],
+            "depends_on": [],
+            "inputs": [],
+        }
+        count_view = {
+            "id": "counts",
+            "action": "query_data",
+            "subject": "disease",
+            "view": "distribution",
+            "metrics": ["count"],
+            "dimensions": ["patrol_number"],
+            "filters": [
+                {
+                    "field": "problem_type_name",
+                    "op": "=",
+                    "raw_value": "坑槽",
+                }
+            ],
+            "output_projection": ["patrol_number", "count"],
+            "order_by": [],
+            "limit": None,
+            "required_assertions": ["preserve_user_scope"],
+            "depends_on": ["batches"],
+            "inputs": [
+                {
+                    "from_node": "batches",
+                    "from_field": "patrol_number",
+                    "to_field": "patrol_number",
+                    "op": "in",
+                }
+            ],
+        }
+        chat_json.return_value = {
+            "final_goal": "分析最近5次巡查的坑槽数量变化",
+            "intent_family": "trend",
+            "views": [
+                batch_view,
+                count_view,
+                {
+                    "id": "trend",
+                    "action": "post_calc",
+                    "subject": "disease",
+                    "view": "trend",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": ["counts"],
+                    "inputs": [],
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "坑槽在最近5次巡查的数量变化",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+        )
+
+        self.assertEqual(plan.nodes[-1].depends_on, ("batches", "counts"))
+
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
     @patch("app.query.analysis.chat_json")
     def test_uncompilable_plan_is_fed_back_before_audit(

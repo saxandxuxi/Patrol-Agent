@@ -1,6 +1,7 @@
 import unittest
 
 from app.query.capability_registry import CapabilityRegistry
+from app.query.fields import FieldReachSet
 from app.query.metric_compiler import compile_registered_metric
 
 
@@ -37,6 +38,19 @@ class MetricRegistryTests(unittest.TestCase):
         names = set(self.registry.snapshot.metrics["disease"])
         self.assertIn("sum_area", names)
         self.assertIn("avg_area", names)
+
+    def test_planner_view_exposes_metric_and_derived_metric_contracts(self):
+        view = self.registry.planner_view("disease", FieldReachSet()).to_prompt_dict()
+
+        route_length = view["metrics"]["route_length_km"]
+        density = view["derived_metrics"]["disease_density"]
+
+        self.assertEqual(route_length["unit"], "km")
+        self.assertEqual(
+            density["operands"],
+            ["count", "route_length_km"],
+        )
+        self.assertEqual(density["evaluator"], "post_calc")
 
 
 if __name__ == "__main__":

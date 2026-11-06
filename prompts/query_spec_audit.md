@@ -43,7 +43,13 @@
     `route_length_km`，并用 `post_calc` 综合比较。`disease_density` 不是可执行指标；
     密度必须声明为 `post_calc` 派生计算。用户未要求病害类型时，不应额外增加路线 × 类型分布。
     表示“越少/越低越好”的健康评价，`post_calc.required_assertions` 必须包含
-    `lower_is_better`；缺失时通过 `set.required_assertions` 补齐。
+    `lower_is_better` 和 `multi_metric_comparison`；缺失时通过
+    `set.required_assertions` 补齐。
+23. `post_calc.metrics` 声明派生指标时，所有操作数必须由 `depends_on` 的上游节点实际
+    产出；缺失操作数时返回 `missing_derived_operand`，并在 `set` 中只补齐上游指标。
+    派生指标自身的 `lower_is_better` 属性不等于用户要求选最低值；单纯分布、对比或列出
+    结果的题不得自动添加这两个评价断言，已有该断言且用户未要求评价时，通过
+    `set.required_assertions` 删除它并保留全部分组。
 
 如果计划完整，返回：
 {

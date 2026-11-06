@@ -84,6 +84,78 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertIn("密度最低的是B", payload["reply"])
         self.assertEqual(payload["rows"][0]["路线名称"], "B")
 
+    @patch("app.services.agent.chat")
+    def test_multi_metric_assertion_uses_all_available_dimensions(self, chat):
+        chat.return_value = (
+            "综合病害数量、总面积、平均面积、病害长度和病害密度，"
+            "A 路线的综合负担最低；依据是 A 的 5 项代理指标均低于 B。"
+        )
+        payload = agent._post_calc_payload(
+            {
+                "id": "p1",
+                "question": "综合判断哪条路线健康状况最好",
+                "depends_on": [1],
+                "metrics": ["disease_density"],
+                "required_assertions": [
+                    "lower_is_better",
+                    "multi_metric_comparison",
+                ],
+            },
+            {
+                1: {
+                    "columns": [
+                        "路线名称",
+                        "数量",
+                        "总面积",
+                        "平均面积",
+                        "总长度",
+                        "路线长度_km",
+                    ],
+                    "rows": [
+                        {
+                            "路线名称": "A",
+                            "数量": "5",
+                            "总面积": "20",
+                            "平均面积": "4",
+                            "总长度": "10",
+                            "路线长度_km": "10",
+                        },
+                        {
+                            "路线名称": "B",
+                            "数量": "8",
+                            "总面积": "40",
+                            "平均面积": "5",
+                            "总长度": "16",
+                            "路线长度_km": "20",
+                        },
+                    ],
+                    "spec": {
+                        "metrics": [
+                            "count",
+                            "sum_area",
+                            "avg_area",
+                            "sum_effective_disease_length",
+                            "route_length_km",
+                        ],
+                        "dimensions": ["route_name"],
+                    },
+                    "field_labels": {
+                        "count": "数量",
+                        "sum_area": "总面积",
+                        "avg_area": "平均面积",
+                        "sum_effective_disease_length": "总长度",
+                        "route_length_km": "路线长度_km",
+                        "route_name": "路线名称",
+                    },
+                }
+            },
+        )
+
+        chat.assert_called_once()
+        self.assertTrue(payload["accepted"])
+        self.assertIn("综合", payload["reply"])
+        self.assertIn("病害密度", payload["reply"])
+
     @patch("app.services.agent.chat", side_effect=AssertionError("LLM should not be called"))
     def test_structured_trend_uses_sequence_and_metric_specs(self, _chat):
         payload = agent._post_calc_payload(
@@ -230,7 +302,7 @@ class AnswerExperienceTests(unittest.TestCase):
                     "action": "post_calc",
                     "question": "比较路线指标并判断健康状况",
                     "subject": "disease",
-                    "view": "data",
+                    "view": "derived_metrics",
                     "metrics": [],
                     "dimensions": [],
                     "filters": [],
@@ -254,6 +326,7 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertEqual(plan.response_mode, "analysis")
         self.assertEqual(len(plan.nodes), 2)
         self.assertEqual(plan.nodes[-1].node_type, "post_calc")
+        self.assertEqual(plan.nodes[-1].spec.view, "data")
         self.assertEqual(plan.nodes[-1].depends_on, ("q1",))
         self.assertIn("total_area", plan.nodes[0].spec.metrics)
         self.assertIn("average_area", plan.nodes[0].spec.metrics)

@@ -3750,25 +3750,29 @@ def _post_calc_payload(
     comparison = _compare_datasets(question, deps)
     if comparison:
         return comparison
-    lower_is_better = "lower_is_better" in {
+    required_assertions = {
         str(item)
         for item in task.get("required_assertions") or ()
     }
-    density = _density_rows(
-        question,
-        deps,
-        lower_is_better=lower_is_better,
-    )
-    if not density and "严重" in question:
+    lower_is_better = "lower_is_better" in required_assertions
+    multi_metric_comparison = "multi_metric_comparison" in required_assertions
+    density = None
+    if not multi_metric_comparison:
         density = _density_rows(
-            "病害密度",
+            question,
             deps,
-            lower_is_better=False,
+            lower_is_better=lower_is_better,
         )
-    if density:
-        if "严重" in question:
-            density["reply"] = "按病害密度判断，" + str(density.get("reply") or "")
-        return density
+        if not density and "严重" in question:
+            density = _density_rows(
+                "病害密度",
+                deps,
+                lower_is_better=False,
+            )
+        if density:
+            if "严重" in question:
+                density["reply"] = "按病害密度判断，" + str(density.get("reply") or "")
+            return density
     trend = _trend_conclusion(question, deps)
     if trend:
         return trend
@@ -3821,6 +3825,14 @@ def _post_calc_payload(
                 "table_analysis",
                 question=question,
                 evidence=context,
+                requirements=json.dumps(
+                    {
+                        "required_assertions": sorted(required_assertions),
+                        "declared_metrics": list(task.get("metrics") or []),
+                    },
+                    ensure_ascii=False,
+                    default=str,
+                ),
             ),
             temperature=0,
             model=role_model("semantic"),

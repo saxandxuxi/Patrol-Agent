@@ -202,6 +202,29 @@ class CapabilityRegistry:
             }
             for hit in getattr(reach, "hits", ())
         )
+        metric_details = {
+            metric_id: {
+                "label": metric.label,
+                "unit": metric.unit,
+                "allowed_views": list(metric.allowed_views),
+                "requires_join": list(metric.requires_join),
+            }
+            for metric_id, metric in self.snapshot.metrics.get(subject, {}).items()
+        }
+        derived_metric_details = {
+            metric_id: {
+                "label": metric.label,
+                "unit": metric.unit,
+                "expression": metric.expression,
+                "operands": list(metric.operands),
+                "evaluator": metric.evaluator,
+                "lower_is_better": metric.lower_is_better,
+            }
+            for metric_id, metric in self.snapshot.derived_metrics.get(
+                subject,
+                {},
+            ).items()
+        }
         return PlannerCapabilityView(
             subject=subject,
             base_table=subject_cap.base_table,
@@ -210,7 +233,23 @@ class CapabilityRegistry:
             derived_metrics=tuple(self.snapshot.derived_metrics.get(subject, {})),
             allowed_views=subject_cap.allowed_views,
             reach_evidence=evidence,
+            metric_details=metric_details,
+            derived_metric_details=derived_metric_details,
         )
+
+    def metric(
+        self,
+        subject: str,
+        metric_id: str,
+    ) -> MetricCapability | None:
+        return self.snapshot.metrics.get(subject, {}).get(metric_id)
+
+    def derived_metric(
+        self,
+        subject: str,
+        metric_id: str,
+    ) -> DerivedMetricCapability | None:
+        return self.snapshot.derived_metrics.get(subject, {}).get(metric_id)
 
     def _augment_physical_fields(self, kind: str) -> None:
         catalog = schema_catalog.field_catalog(kind)

@@ -37,6 +37,22 @@ def resolve_subject(
             if subject.base_table == table and subject_id not in candidates:
                 candidates.append(subject_id)
                 evidence.append(f"field_grounding.table={table}")
+    for table_item in grounded.get("tables") or []:
+        table_name = str(
+            table_item.get("proxy_table")
+            or table_item.get("name")
+            or table_item.get("table")
+            or ""
+        ).strip()
+        if not table_name:
+            continue
+        for subject_id, subject in registry.snapshot.subjects.items():
+            if subject.base_table != table_name or subject_id in candidates:
+                continue
+            candidates.append(subject_id)
+            evidence.append(
+                f"grounding_table={table_name}:{table_item.get('score', 0)}"
+            )
     for hit in reach.hits:
         for subject_id, subject in registry.snapshot.subjects.items():
             if subject.base_table == hit.table and subject_id not in candidates:

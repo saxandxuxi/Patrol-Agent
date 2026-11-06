@@ -43,6 +43,43 @@ class SubjectCapabilityViewTests(unittest.TestCase):
         self.assertEqual(resolution.subject, "disease")
         self.assertGreater(resolution.confidence, 0)
 
+    @patch("app.query.capability_registry.subject_resolver.chat_json")
+    def test_subject_router_considers_all_grounded_tables(self, chat_json):
+        chat_json.return_value = {
+            "subject": "disease",
+            "confidence": 0.88,
+            "evidence": ["最终答案是病害数量"],
+        }
+        reach = FieldReachSet(
+            hits=(
+                FieldReachHit(
+                    "ai_maintain_patrol",
+                    "patrol_number",
+                    "巡查",
+                    "test",
+                    4.0,
+                ),
+            )
+        )
+
+        resolution = resolve_subject(
+            "坑槽在最近5次巡查的数量变化",
+            "data",
+            reach,
+            self.registry,
+            grounded={
+                "subject": "maintain_patrol",
+                "table": "ai_maintain_patrol",
+                "tables": [
+                    {"name": "ai_maintain_patrol", "score": 15.3},
+                    {"name": "ai_problem", "score": 6.6},
+                ],
+            },
+        )
+
+        self.assertEqual(resolution.subject, "disease")
+        chat_json.assert_called_once()
+
     def test_reach_conversion_preserves_real_column_hits(self):
         reach = _field_reach_from_ground(
             {
