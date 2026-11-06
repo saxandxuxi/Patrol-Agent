@@ -17,6 +17,27 @@ def binding(field, op, value):
 
 
 class SpecMdlTests(unittest.TestCase):
+    def test_pile_segment_aliases_compile_to_same_bucket(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="top",
+                metrics=("count",),
+                dimensions=("pile_number_segment_500m",),
+                filters=(),
+                output_projection=("pile_number_segment_500m", "count"),
+                order_by=(),
+                limit=10,
+                required_assertions=(),
+                question="按500米桩号分段统计",
+            )
+        )
+
+        self.assertIn("FLOOR(disease.pile_distance / 500)", sql)
+        self.assertIn("AS 桩号分段", sql)
+
     def test_disease_day_distribution_uses_calendar_day(self):
         sql = compile_spec_mdl(
             QuerySpec(
@@ -256,6 +277,26 @@ class SpecMdlTests(unittest.TestCase):
         self.assertIn("JOIN patrol_route", sql)
         self.assertIn("COUNT(*) AS 数量", sql)
         self.assertIn("GROUP BY patrol.equipment_id, route.short_name", sql)
+
+    def test_patrol_count_task_alias_compiles_to_count(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="patrol",
+                view="distribution",
+                metrics=("count_task",),
+                dimensions=("equipment_id",),
+                filters=(),
+                output_projection=("equipment_id", "count_task"),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="每台设备完成任务次数",
+            )
+        )
+
+        self.assertIn("COUNT(*) AS 数量", sql)
 
     def test_dimension_list_without_metric_returns_distinct_dimensions(self):
         spec = QuerySpec(

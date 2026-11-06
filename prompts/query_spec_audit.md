@@ -49,6 +49,10 @@
 `set` 只能包含可以安全规范化的结构字段：`limit`、`view`、`metrics`、`dimensions`、`order_by`、`output_projection`、`required_assertions`。
 禁止通过 `set` 修改 `filters`、`subject`、`question`、`kind` 或用户范围。
 
+`set.view` 只能使用：
+`count / sum / avg / distribution / list / detail / top / trend / bucket_compare / photo / data`。
+分组汇总必须写 `distribution`；不要输出 `group`、`aggregate`、`summary`、`table` 等别名。
+
 [user]
 用户问题：
 <<question>>

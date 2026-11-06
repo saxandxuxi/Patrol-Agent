@@ -21,6 +21,7 @@ from app.query.service import (
     _default_wren_executor,
     _observation_payload,
     _scope_key,
+    _section_identity,
     _simple_spec_mdl,
     _terminal_sections,
     start_single_turn,
@@ -101,6 +102,28 @@ def count_observation() -> ExecutionObservation:
 
 
 class ServiceTests(unittest.TestCase):
+    def test_section_identity_names_the_sub_question(self):
+        spec = count_plan().nodes[0].spec
+        node = PlanNode(
+            id="q2_day",
+            spec=QuerySpec(
+                **{
+                    **spec.__dict__,
+                    "question": "查询长沙－芷江高速公路11月3日的病害分布",
+                }
+            ),
+        )
+
+        identity = _section_identity(node)
+
+        self.assertEqual(identity["node_id"], "q2_day")
+        self.assertIn("11月3日", identity["title"])
+        self.assertEqual(
+            identity["question"],
+            "查询长沙－芷江高速公路11月3日的病害分布",
+        )
+        self.assertEqual(identity["tool"], "query_data")
+
     def test_empty_observation_keeps_logical_columns_for_dependencies(self):
         spec = QuerySpec(
             id="q1",

@@ -54,11 +54,19 @@ def validate_query_spec(
                 )
             )
     for item in spec.filters:
-        if item.source != "user_explicit" and not item.resolver.strip():
+        resolver = item.resolver.strip()
+        inferred_identity = (
+            item.source == "model_inference"
+            and resolver.startswith("identity:")
+        )
+        if item.source != "user_explicit" and (not resolver or inferred_identity):
             issues.append(
                 VerificationIssue(
                     code="unresolved_provenance",
-                    message=f"过滤值 {item.field} 来源为 {item.source}，但缺少解析器",
+                    message=(
+                        f"过滤值 {item.field} 来源为 {item.source}，"
+                        "但没有经过字典、业务规则或受控解析"
+                    ),
                     node_id=spec.id,
                     stage="contract",
                 )

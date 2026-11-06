@@ -71,3 +71,36 @@ class FieldValidatorTests(unittest.TestCase):
             OutputProjection(fields=()),
         )
         self.assertIn("unresolved_provenance", {item.code for item in issues})
+
+    def test_model_inferred_identity_value_is_not_dictionary_resolution(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=("route_name",),
+            filters=(
+                ValueBinding(
+                    field="patrol_id",
+                    op="=",
+                    storage_value="LAST_PATROL_ID",
+                    display_value="LAST_PATROL_ID",
+                    source="model_inference",
+                    resolver="identity:patrol_id",
+                    raw_text="最近一次巡检",
+                ),
+            ),
+            output_projection=("route_name",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+
+        issues = validate_query_spec(
+            spec,
+            PhysicalSchemaView(columns=frozenset()),
+            OutputProjection(fields=()),
+        )
+
+        self.assertIn("unresolved_provenance", {item.code for item in issues})

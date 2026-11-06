@@ -145,6 +145,18 @@ class ValueAnalysisTests(unittest.TestCase):
         self.assertEqual(len(value.storage_value), 2)
         self.assertEqual(value.resolver, "time_range")
 
+    def test_exclusive_next_year_boundary_is_not_rebased(self):
+        value = resolve_value(
+            "create_time",
+            "<",
+            "2027-01-01",
+            "包头-茂名在2026年各月的巡检次数分别是多少？",
+            "mysql",
+        )
+
+        self.assertEqual(value.storage_value, "2027-01-01 00:00:00")
+        self.assertEqual(value.op, "<")
+
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
     def test_patrol_device_dimension_uses_populated_equipment_id(

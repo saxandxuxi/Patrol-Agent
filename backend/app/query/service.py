@@ -530,6 +530,17 @@ def _trace_node_result(
     )
 
 
+def _section_identity(node: Any) -> dict[str, Any]:
+    question = str(node.spec.question or "").strip()
+    title = f"{node.id}. {question[:48]}" if question else node.id
+    return {
+        "node_id": node.id,
+        "title": title,
+        "question": question,
+        "tool": node.node_type,
+    }
+
+
 def _execute_plan(
     plan: QueryPlan,
     decision: UserDecision,
@@ -563,7 +574,7 @@ def _execute_plan(
             )
             sections.append(
                 {
-                    "node_id": node.id,
+                    **_section_identity(node),
                     "answer": reason,
                     "status": "blocked",
                     "failure_code": "dependency_failed",
@@ -575,7 +586,7 @@ def _execute_plan(
             if node.depends_on and not node.spec.input_bindings:
                 sections.append(
                     {
-                        "node_id": node.id,
+                        **_section_identity(node),
                         "answer": (
                             "依赖步骤没有声明可执行输入绑定，"
                             "无法保证使用真实的上一节点结果。"
@@ -594,7 +605,7 @@ def _execute_plan(
             except UnsupportedQuerySpec as exc:
                 sections.append(
                     {
-                        "node_id": node.id,
+                        **_section_identity(node),
                         "answer": f"无法安全执行依赖查询：{exc}",
                         "status": "unsupported",
                         "failure_code": "missing_dependency_value",
@@ -635,7 +646,7 @@ def _execute_plan(
                 )
                 sections.append(
                     {
-                        "node_id": node.id,
+                        **_section_identity(node),
                         "answer": reason,
                         "status": "repairable",
                         "failure_code": str(
@@ -649,7 +660,7 @@ def _execute_plan(
             if not answer:
                 sections.append(
                     {
-                        "node_id": node.id,
+                        **_section_identity(node),
                         "answer": "后置计算没有返回可用结果。",
                         "status": "repairable",
                         "failure_code": "post_calc_empty",
@@ -676,7 +687,7 @@ def _execute_plan(
             answers_by_id[node.id] = answer
             sections.append(
                 {
-                    "node_id": node.id,
+                    **_section_identity(node),
                     "answer": answer,
                     "status": "accepted",
                     "rows_fetched": len(rows),
@@ -698,7 +709,7 @@ def _execute_plan(
         except UnsupportedQuerySpec as exc:
             sections.append(
                 {
-                    "node_id": node.id,
+                    **_section_identity(node),
                     "answer": f"无法安全执行该查询：{exc}",
                     "status": "unsupported",
                     "failure_code": "unsupported_query_spec",
@@ -730,7 +741,7 @@ def _execute_plan(
             unavailable_dependencies[node.id] = answer
             sections.append(
                 {
-                    "node_id": node.id,
+                    **_section_identity(node),
                     "answer": answer,
                     "status": "unsupported",
                     "failure_code": "incomplete_time_coverage",
@@ -760,7 +771,7 @@ def _execute_plan(
         if report.status != "accepted":
             sections.append(
                 {
-                    "node_id": node.id,
+                    **_section_identity(node),
                     "answer": "；".join(issue.message for issue in report.issues),
                     "status": report.status,
                     "sql": compiled.sql,
@@ -783,7 +794,7 @@ def _execute_plan(
                 count_by_scope[_scope_key(effective_spec)] = count
         sections.append(
             {
-                "node_id": node.id,
+                **_section_identity(node),
                 "answer": answer,
                 "status": report.status,
                 "sql": compiled.sql,

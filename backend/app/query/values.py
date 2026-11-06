@@ -163,7 +163,9 @@ def resolve_value(
         raw_years = set(re.findall(r"(?<!\d)(\d{4})(?!\d)", text))
         parsed = relative or raw_parsed or question_parsed
         if raw_parsed and not relative and raw_years and not any(
-            year in question for year in raw_years
+            year in question
+            or int(year) in {datetime.now().year, datetime.now().year + 1}
+            for year in raw_years
         ):
             raw_year = int(sorted(raw_years)[0])
             current_year = datetime.now().year

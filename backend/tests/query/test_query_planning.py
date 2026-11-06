@@ -9,6 +9,73 @@ from app.services.plan_contract import build_step_contract
 
 class QueryPlanningTests(unittest.TestCase):
     @patch("app.query.analysis.chat_json")
+    def test_metric_objects_are_normalized_to_logical_metrics(self, chat_json):
+        chat_json.return_value = {
+            "final_goal": "任务次数",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "patrol",
+                    "view": "distribution",
+                    "metrics": [{"field": "task_id", "agg": "count"}],
+                    "dimensions": ["equipment_id"],
+                    "filters": [],
+                    "output_projection": ["equipment_id", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "每台设备分别完成多少次任务",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+
+        self.assertEqual(plan.nodes[0].spec.metrics, ("count",))
+
+    @patch("app.query.analysis.chat_json")
+    def test_patrol_device_alias_uses_equipment_dimension(self, chat_json):
+        chat_json.return_value = {
+            "final_goal": "设备任务次数",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "patrol",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["device_id"],
+                    "filters": [],
+                    "output_projection": ["device_id", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "2026年11月每台巡检设备分别完成多少次巡检",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+
+        self.assertEqual(plan.nodes[0].spec.dimensions, ("equipment_id",))
+        self.assertEqual(plan.nodes[0].spec.output_projection, ("equipment_id", "count"))
+
+    @patch("app.query.analysis.chat_json")
     def test_route_dependency_uses_display_name_contract(self, chat_json):
         chat_json.return_value = {
             "final_goal": "Top路线多指标",

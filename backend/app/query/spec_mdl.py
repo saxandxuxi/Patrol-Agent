@@ -44,6 +44,12 @@ _FIELD_ALIASES = {
     "collection_day": "day",
     "collection_time_day": "day",
     "create_time_day": "day",
+    "device_id": "equipment_id",
+    "device": "equipment_id",
+    "equipment": "equipment_id",
+    "pile_number_segment": "pile_segment_500m",
+    "pile_number_segment_500m": "pile_segment_500m",
+    "pile_segment": "pile_segment_500m",
 }
 
 
@@ -330,7 +336,7 @@ def _patrol_dimension(field: str, joins: set[str]) -> tuple[str, str]:
 
 def _disease_metric(metric: str, joins: set[str]) -> tuple[str, str]:
     normalized = _base_field(metric)
-    if normalized == "count":
+    if normalized in {"count", "count_task", "task_count", "record_count"}:
         return "COUNT(*)", "数量"
     if normalized in {"sum_area", "total_area"}:
         return "ROUND(SUM(disease.area), 2)", "总面积"
@@ -350,7 +356,7 @@ def _disease_metric(metric: str, joins: set[str]) -> tuple[str, str]:
 
 def _patrol_metric(metric: str) -> tuple[str, str]:
     normalized = _base_field(metric)
-    if normalized == "count":
+    if normalized in {"count", "count_task", "task_count", "record_count"}:
         return "COUNT(*)", "数量"
     if normalized == "patrol_mileage":
         return "patrol.patrol_mileage", "巡检里程"

@@ -17,8 +17,10 @@ from .contracts import (
     QuerySpecError,
     ValueBinding,
 )
-from .fields import FieldReachSet, PhysicalSchemaView
+from .fields import FieldReachSet, OutputProjection, PhysicalSchemaView
 from .planner import build_query_plan
+from .spec_mdl import UnsupportedQuerySpec, compile_spec_mdl
+from .validator import validate_query_spec
 from .values import resolve_value
 
 
@@ -30,6 +32,50 @@ def _string_tuple(value: Any) -> tuple[str, ...]:
     if not isinstance(value, list):
         return ()
     return tuple(str(item).strip() for item in value if str(item).strip())
+
+
+def _metric_tuple(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    result: list[str] = []
+    for item in value:
+        if isinstance(item, str):
+            metric = item.strip()
+        elif isinstance(item, dict):
+            aggregate = str(item.get("agg") or item.get("aggregation") or "").lower()
+            field = str(item.get("field") or item.get("column") or "").strip()
+            if aggregate == "count":
+                metric = "count"
+            elif aggregate in {"avg", "average"} and field:
+                metric = f"average_{field}"
+            elif aggregate == "sum" and field:
+                metric = f"sum_{field}"
+            else:
+                metric = field
+        else:
+            metric = ""
+        if metric and metric not in result:
+            result.append(metric)
+    return tuple(result)
+
+
+_VIEW_ALIASES = {
+    "group": "distribution",
+    "grouped": "distribution",
+    "aggregate": "distribution",
+    "summary": "distribution",
+}
+
+
+def _canonical_view(
+    value: Any,
+    metrics: tuple[str, ...] = (),
+    dimensions: tuple[str, ...] = (),
+) -> str:
+    view = str(value or "").strip()
+    if view in {"table", "table_view"}:
+        return "distribution" if metrics and dimensions else "list"
+    return _VIEW_ALIASES.get(view, view)
 
 
 def _order_items(value: Any) -> tuple[Any, ...]:
@@ -50,7 +96,8 @@ def _canonical_dimensions(subject: str, dimensions: tuple[str, ...]) -> tuple[st
     return tuple(
         (
             "equipment_id"
-            if subject == "patrol" and item == "device_code"
+            if subject == "patrol"
+            and item in {"device_code", "device_id", "device", "equipment"}
             else "route_name"
             if subject == "disease" and item == "routes_id"
             else item
@@ -591,7 +638,13 @@ def _analyze_once(
             limit = int(raw["limit"]) if raw.get("limit") is not None else None
         except (TypeError, ValueError) as exc:
             raise QuerySpecError("limit 必须是整数") from exc
-        view = str(raw.get("view") or "").strip()
+        metrics = _metric_tuple(raw.get("metrics"))
+        subject = str(raw.get("subject") or "disease").strip()
+        dimensions = _canonical_dimensions(
+            subject,
+            _string_tuple(raw.get("dimensions")),
+        )
+        view = _canonical_view(raw.get("view"), metrics, dimensions)
         if (
             view in {"list", "detail"}
             and not re.search(r"(?:前|最多|显示|展示|返回)\s*\d+", original)
@@ -603,11 +656,6 @@ def _analyze_once(
             and not re.search(r"(?:前|最多|top|取)\s*\d+", original, re.I)
         ):
             limit = None
-        subject = str(raw.get("subject") or "disease").strip()
-        dimensions = _canonical_dimensions(
-            subject,
-            _string_tuple(raw.get("dimensions")),
-        )
         output_projection = _canonical_dimensions(
             subject,
             _string_tuple(raw.get("output_projection")),
@@ -630,7 +678,7 @@ def _analyze_once(
                 kind=kind,
                 subject=subject,
                 view=view,
-                metrics=_string_tuple(raw.get("metrics")),
+                metrics=metrics,
                 dimensions=dimensions,
                 filters=tuple(filters),
                 output_projection=output_projection,
@@ -708,9 +756,30 @@ def _apply_audit_patches(plan: QueryPlan, verdict: dict[str, Any]) -> QueryPlan:
             continue
         values = dict(node.spec.__dict__)
         values.update(changes)
-        for key in ("metrics", "dimensions", "order_by", "output_projection", "required_assertions"):
-            if key in changes and isinstance(changes[key], list):
-                values[key] = tuple(changes[key])
+        if "metrics" in changes:
+            values["metrics"] = _metric_tuple(changes["metrics"])
+        if "dimensions" in changes:
+            values["dimensions"] = _canonical_dimensions(
+                str(values.get("subject") or ""),
+                _string_tuple(changes["dimensions"]),
+            )
+        if "output_projection" in changes:
+            values["output_projection"] = _canonical_dimensions(
+                str(values.get("subject") or ""),
+                _string_tuple(changes["output_projection"]),
+            )
+        if "order_by" in changes:
+            values["order_by"] = _order_items(changes["order_by"])
+        if "required_assertions" in changes:
+            values["required_assertions"] = _string_tuple(
+                changes["required_assertions"]
+            )
+        if "view" in changes:
+            values["view"] = _canonical_view(
+                changes["view"],
+                tuple(values.get("metrics") or ()),
+                tuple(values.get("dimensions") or ()),
+            )
         nodes.append(
             node.__class__(
                 id=node.id,
@@ -720,6 +789,52 @@ def _apply_audit_patches(plan: QueryPlan, verdict: dict[str, Any]) -> QueryPlan:
             )
         )
     return QueryPlan(question=plan.question, nodes=tuple(nodes))
+
+
+def _plan_contract_issues(
+    plan: QueryPlan,
+    schema: PhysicalSchemaView,
+) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    for node in plan.nodes:
+        for issue in validate_query_spec(
+            node.spec,
+            schema,
+            OutputProjection(fields=()),
+        ):
+            issues.append(
+                {
+                    "code": issue.code,
+                    "node_id": node.id,
+                    "reason": issue.message,
+                    "repair_hint": "",
+                }
+            )
+    return issues
+
+
+def _audit_issue_changes_plan(plan: QueryPlan, issue: dict[str, Any]) -> bool:
+    changes = issue.get("set")
+    if not isinstance(changes, dict) or not changes:
+        return True
+    return _apply_audit_patches(plan, {"issues": [issue]}) != plan
+
+
+def _query_plan_compiles(plan: QueryPlan) -> bool:
+    checked = False
+    for node in plan.nodes:
+        if node.node_type != "query_data":
+            continue
+        if node.spec.subject not in {"disease", "patrol"}:
+            continue
+        checked = True
+        try:
+            sql = compile_spec_mdl(node.spec)
+        except UnsupportedQuerySpec:
+            return False
+        if not sql:
+            return False
+    return checked
 
 
 def _ambiguity_message(issues: list[Any]) -> str:
@@ -803,15 +918,29 @@ def analyze_single_turn(
             ):
                 continue
             effective_issues.append(issue)
+        effective_issues = [
+            issue
+            for issue in effective_issues
+            if _audit_issue_changes_plan(plan, issue)
+        ]
         if not effective_issues:
             return plan
         verdict = {**verdict, "issues": effective_issues}
         patched = _apply_audit_patches(plan, verdict)
         if patched != plan:
-            repaired = audit_query_plan(str(question or "").strip(), patched)
-            if repaired.get("complete") is True:
-                return patched
-            verdict = repaired
+            contract_issues = _plan_contract_issues(patched, schema)
+            if contract_issues:
+                verdict = {
+                    "complete": False,
+                    "issues": contract_issues,
+                }
+            else:
+                if _query_plan_compiles(plan) and not _query_plan_compiles(patched):
+                    return plan
+                repaired = audit_query_plan(str(question or "").strip(), patched)
+                if repaired.get("complete") is True:
+                    return patched
+                verdict = repaired
         issues = verdict.get("issues") or []
         feedback = json.dumps(issues, ensure_ascii=False, default=str)
         if any(

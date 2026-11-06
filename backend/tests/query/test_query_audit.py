@@ -8,6 +8,300 @@ from app.query.fields import FieldReachSet, PhysicalSchemaView
 
 class QueryAuditTests(unittest.TestCase):
     @patch("app.query.analysis.audit_query_plan")
+    @patch("app.query.analysis.chat_json")
+    def test_audit_patch_that_breaks_compiler_is_rejected(
+        self,
+        chat_json,
+        audit,
+    ):
+        chat_json.return_value = {
+            "final_goal": "路线病害指标",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": [
+                        "count",
+                        "total_area",
+                        "average_area",
+                        "route_length_km",
+                    ],
+                    "dimensions": ["route_name"],
+                    "filters": [],
+                    "output_projection": [
+                        "route_name",
+                        "count",
+                        "total_area",
+                        "average_area",
+                        "route_length_km",
+                    ],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        audit.return_value = {
+            "complete": False,
+            "issues": [
+                {
+                    "code": "invalid_view_shape",
+                    "node_id": "q1",
+                    "set": {
+                        "metrics": ["count", "total_area", "average_area"],
+                        "dimensions": ["route_name", "route_length_km"],
+                    },
+                }
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "按路线统计数量和总面积，并关联路线长度",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+        )
+
+        self.assertIn("route_length_km", plan.nodes[0].spec.metrics)
+        self.assertEqual(plan.nodes[0].spec.dimensions, ("route_name",))
+        self.assertEqual(audit.call_count, 1)
+
+    @patch("app.query.analysis.audit_query_plan")
+    @patch("app.query.analysis.chat_json")
+    def test_noop_audit_issue_does_not_block_a_valid_plan(
+        self,
+        chat_json,
+        audit,
+    ):
+        chat_json.return_value = {
+            "final_goal": "路线病害指标",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": [
+                        "count",
+                        "total_area",
+                        "average_area",
+                        "route_length_km",
+                    ],
+                    "dimensions": ["route_name"],
+                    "filters": [],
+                    "output_projection": [
+                        "route_name",
+                        "count",
+                        "total_area",
+                        "average_area",
+                        "route_length_km",
+                    ],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        audit.return_value = {
+            "complete": False,
+            "issues": [
+                {
+                    "code": "invalid_view_shape",
+                    "node_id": "q1",
+                    "reason": "路线长度不应作为病害指标",
+                    "set": {"view": "distribution"},
+                }
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "按路线统计数量和总面积，并关联路线长度",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+        )
+
+        self.assertIn("route_length_km", plan.nodes[0].spec.metrics)
+        self.assertEqual(audit.call_count, 1)
+
+    @patch("app.query.analysis.audit_query_plan")
+    @patch("app.query.analysis.chat_json")
+    def test_audit_aggregate_view_alias_is_normalized_to_distribution(
+        self,
+        chat_json,
+        audit,
+    ):
+        chat_json.return_value = {
+            "final_goal": "设备路线任务次数",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "patrol",
+                    "view": "list",
+                    "metrics": [],
+                    "dimensions": ["route_name"],
+                    "filters": [],
+                    "output_projection": ["route_name"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        audit.side_effect = [
+            {
+                "complete": False,
+                "issues": [
+                    {
+                        "code": "invalid_view_shape",
+                        "node_id": "q1",
+                        "set": {
+                            "view": "aggregate",
+                            "dimensions": ["device_id", "route_name"],
+                            "metrics": [{"field": "task_id", "agg": "count"}],
+                        },
+                    }
+                ],
+            },
+            {"complete": True, "issues": []},
+        ]
+
+        plan = analyze_single_turn(
+            "2026年11月每台巡检设备分别完成了哪些路线、各多少次任务？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+        )
+
+        spec = plan.nodes[0].spec
+        self.assertEqual(spec.view, "distribution")
+        self.assertEqual(spec.metrics, ("count",))
+        self.assertEqual(spec.dimensions, ("equipment_id", "route_name"))
+
+    @patch("app.query.analysis.audit_query_plan")
+    @patch("app.query.analysis.chat_json")
+    def test_audit_group_view_alias_is_normalized_before_validation(
+        self,
+        chat_json,
+        audit,
+    ):
+        chat_json.return_value = {
+            "final_goal": "设备路线任务次数",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "patrol",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["equipment_id", "route_name"],
+                    "filters": [],
+                    "output_projection": ["equipment_id", "route_name", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        audit.side_effect = [
+            {
+                "complete": False,
+                "issues": [
+                    {
+                        "code": "invalid_view_shape",
+                        "node_id": "q1",
+                        "set": {"view": "group"},
+                    }
+                ],
+            },
+            {"complete": True, "issues": []},
+        ]
+
+        plan = analyze_single_turn(
+            "每台巡检设备在各条路线上分别完成多少次任务",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+        )
+
+        self.assertEqual(plan.nodes[0].spec.view, "distribution")
+
+    @patch("app.query.analysis.audit_query_plan")
+    @patch("app.query.analysis.chat_json")
+    def test_audit_metric_patch_is_normalized_to_query_contract(
+        self,
+        chat_json,
+        audit,
+    ):
+        chat_json.return_value = {
+            "final_goal": "设备任务次数",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "patrol",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["equipment_id"],
+                    "filters": [],
+                    "output_projection": ["equipment_id", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        audit.side_effect = [
+            {
+                "complete": False,
+                "issues": [
+                    {
+                        "code": "missing_metric",
+                        "node_id": "q1",
+                        "set": {
+                            "metrics": [
+                                {"field": "task_id", "agg": "count"}
+                            ]
+                        },
+                    }
+                ],
+            },
+            {"complete": True, "issues": []},
+        ]
+
+        plan = analyze_single_turn(
+            "每台巡检设备分别完成多少次任务",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+        )
+
+        self.assertEqual(plan.nodes[0].spec.metrics, ("count",))
+
+    @patch("app.query.analysis.audit_query_plan")
     @patch("app.query.analysis._analyze_once")
     def test_planning_parse_error_gets_one_feedback_retry(
         self,
