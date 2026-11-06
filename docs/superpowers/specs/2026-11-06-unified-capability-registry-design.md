@@ -71,6 +71,7 @@ resources/capabilities/
   index.yaml
   subjects.yaml
   fields.yaml
+  field_overrides.yaml
   metrics.yaml
   derived_metrics.yaml
   enums.yaml
@@ -79,8 +80,12 @@ resources/capabilities/
   aliases.yaml
   identifiers.yaml
   query_shapes.yaml
+  dimensions.yaml
+  predicates.yaml
+  time_buckets.yaml
+  result_words.yaml
   repair_policy.yaml
-  template_capabilities.yaml
+  templates.yaml
 ```
 
 `auto_templates.json`、`preset_queries.json`、日志、缓存和数据库实时读取结果属于运行数据，不迁入该目录。
@@ -265,7 +270,22 @@ PhysicalSchemaCatalog
 
 快照必须带版本或哈希，日志和 FailureEvidence 记录使用的能力快照 ID。
 
-### 7.2 PlannerCapabilityView
+### 7.2 SubjectResolver
+
+QuerySpec 生成前必须先确定查询主体。SubjectResolver 使用用户问题、意图、字段触达证据和 registry 中的主体摘要，返回：
+
+```json
+{
+  "subject": "disease",
+  "confidence": 0.93,
+  "alternatives": [],
+  "evidence": ["病害类型", "病害数量"]
+}
+```
+
+主体唯一时进入 QuerySpec 生成；多个主体都合理时返回确认卡；无匹配主体时返回 `unsupported_subject`。Planner 随后只能看到已确定主体的能力视图，不能在同一请求里跨多个主体自由选择指标。
+
+### 7.3 PlannerCapabilityView
 
 Planner 不接收全部 592 列。代码根据主体和触达证据生成当前问题的能力视图：
 
@@ -283,7 +303,7 @@ Planner 不接收全部 592 列。代码根据主体和触达证据生成当前�
 
 字段触达证据只引用 registry 中的字段和能力，不复制另一份注释或枚举事实。
 
-### 7.3 EnumResolver
+### 7.4 EnumResolver
 
 输入：`kind + table + column + raw_value`。
 
@@ -297,7 +317,7 @@ Planner 不接收全部 592 列。代码根据主体和触达证据生成当前�
 
 任何情况下都不能把未解析的口语直接拼进 SQL。
 
-### 7.4 EntityResolver
+### 7.5 EntityResolver
 
 输入：实体类型 + 原始文本。
 
@@ -312,7 +332,7 @@ Planner 不接收全部 592 列。代码根据主体和触达证据生成当前�
 
 “裂缝”按实体族展开；不会把字面字符串“裂缝”直接加入 `IN`。
 
-### 7.5 上下行策略
+### 7.6 上下行策略
 
 - 用户明确说“上行”或“下行”：精确过滤对应 code。
 - 用户只说“上下行”且未说“分别”：按上行、下行分别展示。
