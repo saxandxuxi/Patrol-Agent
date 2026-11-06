@@ -65,43 +65,57 @@ def _resolve_damage_type(
 ) -> ValueBinding:
     from .capability_registry import resolve_entity
 
-    text = str(raw_value or "").strip()
-    if not text:
+    raw_values = (
+        list(raw_value)
+        if isinstance(raw_value, (list, tuple))
+        else [raw_value]
+    )
+    texts = [str(item or "").strip() for item in raw_values]
+    texts = [item for item in texts if item]
+    if not texts:
         raise QuerySpecAmbiguity(
             "查询条件缺少可执行的病害类型，请补充具体病害名称。"
         )
-    resolution = resolve_entity(
-        registry,
-        "disease_type",
-        text,
-        kind,
-    )
-    if resolution.status == "ambiguous":
-        labels = "、".join(item.label for item in resolution.values[:8])
-        raise QuerySpecAmbiguity(
-            f"病害类型“{text}”匹配到多个值：{labels}"
+    labels: list[str] = []
+    families: list[str] = []
+    for text in texts:
+        resolution = resolve_entity(
+            registry,
+            "disease_type",
+            text,
+            kind,
         )
-    if resolution.status == "unsupported" or not resolution.values:
-        raise QuerySpecError(f"病害类型不在数据库字典中：{text}")
-    labels = [item.label for item in resolution.values]
-    exact = len(labels) == 1 and labels[0] == text
+        if resolution.status == "ambiguous":
+            choices = "、".join(item.label for item in resolution.values[:8])
+            raise QuerySpecAmbiguity(
+                f"病害类型“{text}”匹配到多个值：{choices}"
+            )
+        if resolution.status == "unsupported" or not resolution.values:
+            raise QuerySpecError(f"病害类型不在数据库字典中：{text}")
+        if resolution.family:
+            families.append(resolution.family)
+        for item in resolution.values:
+            if item.label not in labels:
+                labels.append(item.label)
+    exact = len(texts) == 1 and labels == texts
     storage_value: Any = labels[0] if exact else labels
+    display_text = "、".join(texts)
     return ValueBinding(
         field="problem_type_name",
         op="=",
         storage_value=storage_value,
-        display_value=text,
-        source=_source(text, question),
+        display_value=display_text,
+        source=_source(display_text, question),
         resolver=(
             "damage_type_dictionary"
             if exact
             else (
-                f"entity_family:{resolution.family}"
-                if resolution.family
+                "entity_family:" + ",".join(dict.fromkeys(families))
+                if families
                 else "damage_type_dictionary_expand"
             )
         ),
-        raw_text=text,
+        raw_text=display_text,
     )
 
 

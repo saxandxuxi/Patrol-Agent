@@ -120,6 +120,20 @@ class ValueAnalysisTests(unittest.TestCase):
         self.assertIn("网状裂缝", value.storage_value)
         self.assertEqual(value.resolver, "entity_family:crack")
 
+    def test_damage_type_list_resolves_each_entity(self):
+        value = resolve_value(
+            "problem_type_name",
+            "=",
+            ["裂缝", "坑槽"],
+            "裂缝和坑槽各自在不同道路上的病害密度",
+            "mysql",
+        )
+
+        self.assertIn("横向裂缝", value.storage_value)
+        self.assertIn("纵向裂缝", value.storage_value)
+        self.assertIn("坑槽", value.storage_value)
+        self.assertTrue(value.resolver.startswith("entity_family:"))
+
     def test_quarter_value_is_normalized_to_exact_time_bounds(self):
         value = resolve_value(
             "create_time",

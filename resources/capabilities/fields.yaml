@@ -13,3 +13,11 @@ fields:
       physical_table: ai_problem
       physical_column: up_or_down
       enum_key: ai_problem.up_or_down
+    route_length_km:
+      expression: route.route_length_km
+      label: 路线长度
+      unit: km
+      roles: [metric]
+      physical_table: basic_facilities_routes
+      physical_column: route_length_km
+      requires_join: [route]

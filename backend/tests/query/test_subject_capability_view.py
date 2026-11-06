@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from app.query.capability_registry import CapabilityRegistry, resolve_subject
+from app.query.capability_registry.subject_resolver import SubjectResolution
 from app.query.contracts import QueryPlan
 from app.query.fields import FieldReachHit, FieldReachSet
 from app.query.service import _field_reach_from_ground, start_single_turn
@@ -23,6 +24,8 @@ class SubjectCapabilityViewTests(unittest.TestCase):
             {item.code: item.label for item in up_down.enum_values},
             {"0": "全部", "1": "上行", "2": "下行"},
         )
+        self.assertIn("route_length_km", view.fields)
+        self.assertIn("route_length_km", view.metrics)
 
     def test_subject_resolver_uses_grounding_fact(self):
         reach = FieldReachSet(
@@ -30,7 +33,7 @@ class SubjectCapabilityViewTests(unittest.TestCase):
         )
 
         resolution = resolve_subject(
-            "上下行分别有多少处",
+            "病害有多少处",
             "analysis",
             reach,
             self.registry,
@@ -62,8 +65,13 @@ class SubjectCapabilityViewTests(unittest.TestCase):
     @patch("app.query.service.resolve_templates")
     @patch("app.query.service.analyze_single_turn")
     @patch("app.query.service.field_grounding.ground")
+    @patch(
+        "app.query.service.resolve_subject",
+        return_value=SubjectResolution(subject="disease", confidence=0.9),
+    )
     def test_start_single_turn_passes_real_field_reach(
         self,
+        _resolve_subject,
         ground,
         analyze,
         resolve_templates,

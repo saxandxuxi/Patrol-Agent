@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ...services import prompts
+from ...services.llm import chat_json, role_model
 from ..fields import FieldReachSet
 from .registry import CapabilityRegistry
 
@@ -40,6 +42,17 @@ def resolve_subject(
             if subject.base_table == hit.table and subject_id not in candidates:
                 candidates.append(subject_id)
                 evidence.append(f"reach={hit.table}.{hit.column}")
+    for subject_id, subject in registry.snapshot.subjects.items():
+        if subject_id in candidates:
+            continue
+        matching_fields = [
+            field
+            for field in registry.snapshot.fields.get(subject_id, {}).values()
+            if field.label and len(field.label) >= 2 and field.label in question
+        ]
+        if matching_fields:
+            candidates.append(subject_id)
+            evidence.append(f"subject_field={subject_id}")
     if len(candidates) == 1:
         return SubjectResolution(
             subject=candidates[0],
@@ -47,10 +60,50 @@ def resolve_subject(
             evidence=tuple(evidence),
         )
     if len(candidates) > 1:
+        summaries = {
+            subject_id: {
+                "base_table": registry.snapshot.subjects[subject_id].base_table,
+                "allowed_views": list(
+                    registry.snapshot.subjects[subject_id].allowed_views
+                ),
+                "field_examples": [
+                    field.label
+                    for field in list(
+                        registry.snapshot.fields.get(subject_id, {}).values()
+                    )[:12]
+                ],
+            }
+            for subject_id in candidates
+        }
+        try:
+            routed = chat_json(
+                prompts.messages(
+                    "subject_router",
+                    question=question,
+                    subjects=summaries,
+                ),
+                model=role_model("semantic"),
+            )
+        except Exception:
+            routed = {}
+        selected = str((routed or {}).get("subject") or "").strip()
+        if selected in candidates:
+            return SubjectResolution(
+                subject=selected,
+                confidence=float((routed or {}).get("confidence") or 0.7),
+                evidence=tuple(evidence)
+                + tuple(
+                    str(item)
+                    for item in (routed or {}).get("evidence") or ()
+                ),
+            )
         return SubjectResolution(
             subject="",
-            confidence=0.5,
-            alternatives=tuple(candidates),
+            confidence=float((routed or {}).get("confidence") or 0.5),
+            alternatives=tuple(
+                str(item)
+                for item in (routed or {}).get("alternatives") or candidates
+            ),
             evidence=tuple(evidence),
         )
     if len(registry.snapshot.subjects) == 1:
