@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass, field, is_dataclass, replace
+from types import MappingProxyType
 from typing import Any
 
 
@@ -151,3 +153,24 @@ class PlannerCapabilityView:
             },
             "field_reach_evidence": list(self.reach_evidence),
         }
+
+
+def freeze_snapshot(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {
+                key: freeze_snapshot(item)
+                for key, item in value.items()
+            }
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(freeze_snapshot(item) for item in value)
+    if is_dataclass(value):
+        return replace(
+            value,
+            **{
+                item.name: freeze_snapshot(getattr(value, item.name))
+                for item in value.__dataclass_fields__.values()
+            },
+        )
+    return value

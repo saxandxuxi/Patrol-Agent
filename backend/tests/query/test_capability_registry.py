@@ -33,6 +33,12 @@ class CapabilityRegistryTests(unittest.TestCase):
             with self.assertRaisesRegex(CapabilityConfigError, "unknown_key"):
                 CapabilityRegistry.load(config_dir=config_dir)
 
+    def test_capability_snapshot_nested_mappings_are_read_only(self):
+        registry = CapabilityRegistry.load(config_dir=CAPABILITY_DIR)
+
+        with self.assertRaises(TypeError):
+            registry.snapshot.metrics["disease"]["count"] = None
+
 
 if __name__ == "__main__":
     unittest.main()

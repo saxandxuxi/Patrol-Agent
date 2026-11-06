@@ -352,8 +352,8 @@ def _enrich_tiny_label(table_label: str, column_name: str, label: str) -> str:
 def _overrides() -> dict[str, Any]:
     """字段元数据的静态覆盖层（docs/代码结构重构与模板外置方案.md §5.4）。
 
-    事实源是库里的 COLUMN_COMMENT，这里只写例外；文件放在项目根 `resources/field_meta/`。
-    老的 `backend/app/data/` 位置仍兼容（迁移期）。
+    事实源是库里的 COLUMN_COMMENT，这里只写例外；文件放在
+    `resources/capabilities/field_overrides.yaml`。
     """
     from .resource_loader import load_capability_file
 

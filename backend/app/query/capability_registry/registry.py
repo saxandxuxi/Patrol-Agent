@@ -18,6 +18,7 @@ from .models import (
     PlannerCapabilityView,
     PlannerFieldView,
     SubjectCapability,
+    freeze_snapshot,
 )
 
 
@@ -175,6 +176,7 @@ class CapabilityRegistry:
         registry._augment_numeric_metrics()
         registry._augment_enums(kind)
         registry._validate_physical_fields(kind)
+        registry._snapshot = freeze_snapshot(registry.snapshot)
         return registry
 
     def planner_view(self, subject: str, reach: Any) -> PlannerCapabilityView:
