@@ -1,8 +1,11 @@
 import unittest
 
-from app.query.contracts import QuerySpec
+from app.query.contracts import QuerySpec, ValueBinding
 from app.query.fields import PhysicalSchemaView
+from app.query.template_sources import contract_from_preset
 from app.query.templates import TemplateContract, TemplateProvider, resolve_templates
+from app.services import preset_lib
+from tests.query.factories import count_spec
 
 
 class FixedProvider(TemplateProvider):
@@ -14,6 +17,120 @@ class FixedProvider(TemplateProvider):
 
 
 class TemplateResolutionTests(unittest.TestCase):
+    def test_preset_with_unbound_required_time_is_not_offered(self):
+        raw = preset_lib.query_by_id("device_month_records")
+        self.assertIsNotNone(raw)
+        contract = contract_from_preset(raw)
+        result = resolve_templates(
+            count_spec(
+                filters=(
+                    ValueBinding(
+                        field="device_code",
+                        op="=",
+                        storage_value="__ALL__",
+                        display_value="全部设备",
+                        source="user_explicit",
+                        resolver="identifier",
+                        raw_text="全部设备",
+                    ),
+                )
+            ),
+            PhysicalSchemaView(columns=frozenset()),
+            [FixedProvider([contract])],
+        )
+
+        self.assertEqual(result.candidates, ())
+        self.assertIn("missing_required_filter:time_range", result.rejections[0])
+
+    def test_preset_accepts_bound_time_range_and_device(self):
+        raw = preset_lib.query_by_id("device_month_records")
+        self.assertIsNotNone(raw)
+        contract = contract_from_preset(raw)
+        result = resolve_templates(
+            count_spec(
+                filters=(
+                    ValueBinding(
+                        field="device_code",
+                        op="=",
+                        storage_value="__ALL__",
+                        display_value="全部设备",
+                        source="user_explicit",
+                        resolver="identifier",
+                        raw_text="全部设备",
+                    ),
+                    ValueBinding(
+                        field="collection_time",
+                        op=">=",
+                        storage_value="2026-11-02 00:00:00",
+                        display_value="2026-11-02",
+                        source="user_explicit",
+                        resolver="time_range",
+                        raw_text="11月2日",
+                    ),
+                    ValueBinding(
+                        field="collection_time",
+                        op="<",
+                        storage_value="2026-11-03 00:00:00",
+                        display_value="2026-11-03",
+                        source="user_explicit",
+                        resolver="time_range",
+                        raw_text="11月2日",
+                    ),
+                )
+            ),
+            PhysicalSchemaView(columns=frozenset()),
+            [FixedProvider([contract])],
+        )
+
+        self.assertEqual(len(result.candidates), 1)
+        self.assertEqual(
+            result.candidates[0].candidate_id,
+            "preset:device_month_records:q1:v1",
+        )
+
+    def test_preset_with_identifier_outside_options_is_not_offered(self):
+        raw = preset_lib.query_by_id("device_month_records")
+        self.assertIsNotNone(raw)
+        contract = contract_from_preset(raw)
+        result = resolve_templates(
+            count_spec(
+                filters=(
+                    ValueBinding(
+                        field="device_code",
+                        op="=",
+                        storage_value="102367594561",
+                        display_value="102367594561",
+                        source="user_explicit",
+                        resolver="identifier",
+                        raw_text="102367594561",
+                    ),
+                    ValueBinding(
+                        field="collection_time",
+                        op=">=",
+                        storage_value="2026-11-02 00:00:00",
+                        display_value="2026-11-02",
+                        source="user_explicit",
+                        resolver="time_range",
+                        raw_text="11月2日",
+                    ),
+                    ValueBinding(
+                        field="collection_time",
+                        op="<",
+                        storage_value="2026-11-03 00:00:00",
+                        display_value="2026-11-03",
+                        source="user_explicit",
+                        resolver="time_range",
+                        raw_text="11月2日",
+                    ),
+                )
+            ),
+            PhysicalSchemaView(columns=frozenset()),
+            [FixedProvider([contract])],
+        )
+
+        self.assertEqual(result.candidates, ())
+        self.assertIn("unbound:", result.rejections[0])
+
     def test_partial_metric_support_is_rejected(self):
         spec = QuerySpec(
             id="q1",

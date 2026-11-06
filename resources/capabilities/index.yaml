@@ -18,3 +18,4 @@ files:
   - repair_policy.yaml
   - templates.yaml
   - calculators.yaml
+  - preset_bindings.yaml

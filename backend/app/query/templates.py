@@ -4,8 +4,10 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from ..services import preset_lib
 from .contracts import QuerySpec, ValueBinding, scope_hash
 from .fields import PhysicalSchemaView
+from .preset_bindings import filter_semantic_name, values_from_spec
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,7 @@ class TemplateContract:
     required_assertions: tuple[str, ...] = ()
     physical_columns: tuple[tuple[str, str], ...] = ()
     title: str = ""
+    required_filters: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -127,11 +130,30 @@ def _eligibility_issues(
         if not schema.has_column(*column):
             issues.append(f"missing_physical_column:{column[0]}.{column[1]}")
 
-    fixed_by_field = {item.field: item for item in contract.fixed_conditions}
-    spec_by_field = {item.field: item for item in spec.filters}
+    fixed_by_field = {
+        filter_semantic_name(item.field): item
+        for item in contract.fixed_conditions
+    }
+    spec_by_field = {
+        filter_semantic_name(item.field): item
+        for item in spec.filters
+    }
+    contract_fields = {
+        filter_semantic_name(item)
+        for item in contract.filters
+    }
     for item in spec.filters:
-        if item.field not in contract.filters and item.field not in fixed_by_field:
-            issues.append(f"missing_filter:{item.field}")
+        field = filter_semantic_name(item.field)
+        if field not in contract_fields and field not in fixed_by_field:
+            issues.append(f"missing_filter:{field}")
+    spec_fields = set(spec_by_field)
+    if spec.limit is not None:
+        spec_fields.add("limit")
+    issues.extend(
+        f"missing_required_filter:{field}"
+        for field in contract.required_filters
+        if field not in spec_fields
+    )
     for field_name, fixed in fixed_by_field.items():
         actual = spec_by_field.get(field_name)
         if actual is None:
@@ -165,6 +187,22 @@ def resolve_templates(
                     + ";".join(issues)
                 )
                 continue
+            if contract.adapter_id == "preset":
+                query = preset_lib.query_by_id(contract.native_id)
+                if not query:
+                    rejections.append(
+                        f"preset:{contract.id}:missing_preset_query"
+                    )
+                    continue
+                sql, reason = preset_lib.bind(
+                    query,
+                    values_from_spec(spec),
+                )
+                if not sql:
+                    rejections.append(
+                        f"preset:{contract.id}:unbound:{reason or 'unknown'}"
+                    )
+                    continue
             token = uuid.uuid4().hex
             candidate_id = (
                 f"{contract.adapter_id or contract.source}:"

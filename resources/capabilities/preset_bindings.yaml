@@ -1,0 +1,26 @@
+version: "1"
+
+# QuerySpec 的结构字段 -> 预置模板参数语义。
+filters:
+  damage_type: problem_type_name
+  route_name: route_id
+  routes_id: route_id
+  problem_type_name: damage_type
+  collection_time: time_range
+  create_time: time_range
+  date_granularity: time_range
+  date_from: time_range
+  date_to: time_range
+  top_n: limit
+
+# 模板执行时，QuerySpec 字段名 -> 预置模板占位符名。
+parameter_aliases:
+  route_name: route_id
+  routes_id: route_id
+  problem_type_name: damage_type
+  limit: top_n
+
+# 这些字段共同表达一个完整时间范围。
+time_fields:
+  - collection_time
+  - create_time

@@ -9,6 +9,7 @@ from ..services.logging_service import log_event
 from ..services.resource_loader import load_capability_file
 from .contracts import QuerySpec, ValueBinding
 from .fields import PhysicalSchemaView
+from .preset_bindings import filter_semantic_name
 from .templates import TemplateContract
 
 
@@ -17,11 +18,6 @@ class ContractConversion:
     ok: bool
     contract: TemplateContract | None
     code: str = ""
-
-
-_FILTER_FIELDS = {
-    "damage_type": "problem_type_name",
-}
 
 
 def _as_tuple(value: Any) -> tuple[str, ...]:
@@ -33,7 +29,7 @@ def _as_tuple(value: Any) -> tuple[str, ...]:
 def _fixed_condition(field_name: str, value: Any) -> ValueBinding:
     display = str(value or "").strip()
     return ValueBinding(
-        field=_FILTER_FIELDS.get(field_name, field_name),
+        field=field_name,
         op="=",
         storage_value=value,
         display_value=display,
@@ -60,14 +56,39 @@ def _contracts_from_declaration(
     metrics = _as_tuple(match.get("metrics"))
     dimensions = _as_tuple(match.get("group_by"))
     filters = set(_as_tuple(match.get("slots")))
-    filters.update(_FILTER_FIELDS.get(item, item) for item in (raw.get("params") or []))
+    filters.update(str(item) for item in (raw.get("params") or []))
+    required = _as_tuple(match.get("requires"))
+    if not required and adapter_id == "preset":
+        parameter_specs = preset_lib.load().get("params") or {}
+        required = tuple(
+            str(item)
+            for item in (raw.get("params") or [])
+            if not bool((parameter_specs.get(str(item)) or {}).get("allow_all"))
+        )
+    required_filters = tuple(
+        sorted(
+            {
+                filter_semantic_name(item)
+                for item in required
+                if str(item).strip()
+            }
+        )
+    )
     fixed = tuple(
         _fixed_condition(str(field_name), value)
         for field_name, value in (match.get("fixed") or {}).items()
         if str(field_name).strip()
     )
     fixed_fields = {item.field for item in fixed}
-    filters = tuple(sorted((filters | fixed_fields) - {""}))
+    filters = tuple(
+        sorted(
+            {
+                filter_semantic_name(item)
+                for item in (filters | fixed_fields)
+                if str(item).strip()
+            }
+        )
+    )
     native_id = str(raw.get("id") or "").strip()
     if not native_id:
         return ()
@@ -92,6 +113,7 @@ def _contracts_from_declaration(
                     output_projection=_as_tuple(match.get("output_projection")),
                     required_assertions=("preserve_user_scope",),
                     title=str(raw.get("title") or native_id),
+                    required_filters=required_filters,
                 )
             )
     return tuple(contracts)
@@ -214,10 +236,9 @@ def contract_from_example(raw: dict[str, Any]) -> ContractConversion:
     filters = tuple(
         sorted(
             {
-                _FILTER_FIELDS.get(str(item), str(item))
-                for item in conditions
+                filter_semantic_name(str(item))
+                for item in (set(conditions) | fixed_fields)
             }
-            | fixed_fields
         )
     )
     contract = TemplateContract(
