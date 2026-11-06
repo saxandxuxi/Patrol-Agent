@@ -21,12 +21,17 @@ def _default_generator(
     document: str,
     exclude_ids: set[str],
     count: int,
+    exclude_questions: set[str],
 ) -> list[ExamCase]:
     response = chat_json(
         prompts.messages(
             "promotion_exam_generate",
             business_document=document,
             exclude_ids=json.dumps(sorted(exclude_ids), ensure_ascii=False),
+            exclude_questions=json.dumps(
+                sorted(exclude_questions),
+                ensure_ascii=False,
+            ),
             case_count=str(count),
         ),
         model=role_model("planner"),
@@ -53,13 +58,22 @@ def generate_exam_cases(
     exclude_ids: set[str],
     count: int = 15,
     generator: Generator | None = None,
+    exclude_questions: set[str] | None = None,
 ) -> list[ExamCase]:
+    excluded_questions = {
+        "".join(str(item).split())
+        for item in (exclude_questions or set())
+        if str(item).strip()
+    }
     generated = list(
-        (generator or _default_generator)(
+        _default_generator(
             document,
             set(exclude_ids),
             count,
+            set(exclude_questions or set()),
         )
+        if generator is None
+        else generator(document, set(exclude_ids), count)
     )
     filtered = [
         item
@@ -67,6 +81,7 @@ def generate_exam_cases(
         if item.id
         and item.question
         and item.id not in exclude_ids
+        and "".join(item.question.split()) not in excluded_questions
     ]
     unique: list[ExamCase] = []
     seen: set[str] = set()

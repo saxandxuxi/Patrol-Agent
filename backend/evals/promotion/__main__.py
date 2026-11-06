@@ -79,11 +79,21 @@ def _load_manifest(path: Path) -> ExamManifest:
 def _generate(output: Path, seed: int) -> int:
     document = _document_text()
     old_cases = sample_old_cases(seed=seed, count=5)
-    all_old_ids = {item.id for item in load_old_cases()}
+    old_pool = load_old_cases()
+    excluded_ids = {item.id for item in old_pool}
+    excluded_questions = {item.question for item in old_pool}
+    for previous_path in sorted(output.parent.glob("*.yaml")):
+        try:
+            previous = _load_manifest(previous_path)
+        except Exception:
+            continue
+        excluded_ids.update(previous.fresh_case_ids)
+        excluded_questions.update(item.question for item in previous.fresh_cases())
     fresh_cases = generate_exam_cases(
         document,
-        exclude_ids=all_old_ids,
+        exclude_ids=excluded_ids,
         count=15,
+        exclude_questions=excluded_questions,
     )
     manifest = ExamManifest(
         exam_id=f"promotion-{datetime.now().strftime('%Y%m%d-%H%M%S')}",

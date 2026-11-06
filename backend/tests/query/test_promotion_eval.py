@@ -154,6 +154,32 @@ class PromotionEvalTests(unittest.TestCase):
         self.assertNotIn("generated_01", {item.id for item in generated})
         self.assertNotIn("generated_02", {item.id for item in generated})
 
+    def test_fresh_generation_excludes_duplicate_question_text(self):
+        def generator(document, exclude_ids, count):
+            data = cases("fresh", count + 2, "generated")
+            data[1] = ExamCase(
+                id="renamed_duplicate",
+                category=data[1].category,
+                question=data[0].question,
+                focus=data[1].focus,
+                source="fresh",
+            )
+            return data
+
+        generated = generate_exam_cases(
+            "业务文档",
+            set(),
+            15,
+            generator=generator,
+            exclude_questions={"generated 问题 1"},
+        )
+
+        self.assertEqual(len(generated), 15)
+        self.assertNotIn(
+            "generated 问题 1",
+            {item.question for item in generated},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

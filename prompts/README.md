@@ -37,7 +37,7 @@
 | `result_summary.md` | 查询结果中文摘要（模板兜不住时） | `agent._summarize_result` | 默认模型 | `<<message>> <<columns>> <<preview>>` |
 | `templatize_sql.md` | 成功 SQL 自动模板化（离线挖槽兜底，只识别值不改结构） | `templatizer._llm_skeleton` | `role_model("semantic")` | `<<kind>> <<schema>> <<question>> <<sql>>` |
 | `example_direct_match.md` | L2 示例直达：严格同问判定（7 要素，不写 SQL） | `direct_match._score` | `role_model("semantic")` | `<<question>> <<candidates>>` |
-| `promotion_exam_generate.md` | 每轮晋级考试生成 15 道全新题（不给 SQL 映射） | `evals.promotion.case_factory` | `role_model("planner")` | `<<business_document>> <<exclude_ids>> <<case_count>>` |
+| `promotion_exam_generate.md` | 每轮晋级考试生成 15 道全新题（不给 SQL 映射） | `evals.promotion.case_factory` | `role_model("planner")` | `<<business_document>> <<exclude_ids>> <<exclude_questions>> <<case_count>>` |
 
 ## 每条提示词的"已知坑"（改的时候别踩）
 

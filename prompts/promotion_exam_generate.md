@@ -23,6 +23,9 @@
 已曝光或禁止复用的题 ID：
 <<exclude_ids>>
 
+已曝光或禁止复用的题干：
+<<exclude_questions>>
+
 需要生成的全新题数量：
 <<case_count>>
 
