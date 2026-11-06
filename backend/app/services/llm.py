@@ -247,8 +247,14 @@ def chat_json(
     messages: list[dict[str, str]],
     model: dict[str, Any] | None = None,
     allow_list: bool = False,
+    max_tokens: int | None = None,
 ) -> dict[str, Any] | list[Any]:
-    text = chat(messages, model=model, temperature=0).strip()
+    text = chat(
+        messages,
+        model=model,
+        temperature=0,
+        max_tokens=max_tokens,
+    ).strip()
     text = text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     data = _parse_json_lenient(text, allow_list=allow_list)
     if data is not None:
@@ -269,6 +275,7 @@ def chat_json(
         ],
         model=model,
         temperature=0,
+        max_tokens=max_tokens,
     ).strip()
     retry = retry.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     data = _parse_json_lenient(retry, allow_list=allow_list)

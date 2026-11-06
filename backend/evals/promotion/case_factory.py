@@ -30,6 +30,7 @@ def _default_generator(
             case_count=str(count),
         ),
         model=role_model("planner"),
+        max_tokens=4096,
     )
     raw_cases = response.get("cases") if isinstance(response, dict) else None
     if not isinstance(raw_cases, list):
