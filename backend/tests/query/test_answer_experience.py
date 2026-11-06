@@ -180,6 +180,52 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertEqual(evidence["metrics"]["面积"]["max"]["group"], "A")
         self.assertEqual(evidence["metrics"]["路线长度"]["min"]["group"], "B")
 
+    @patch("app.services.agent.chat", side_effect=RuntimeError("model unavailable"))
+    def test_analysis_falls_back_to_deterministic_metric_boundaries(self, _chat):
+        payload = agent._post_calc_payload(
+            {
+                "question": "哪条路的健康状况最好？",
+                "depends_on": [1],
+            },
+            {
+                1: {
+                    "rows": [
+                        {"路线名称": "A", "数量": 100, "面积": 80},
+                        {"路线名称": "B", "数量": 40, "面积": 30},
+                        {"路线名称": "C", "数量": 5, "面积": 2},
+                    ],
+                    "columns": ["路线名称", "数量", "面积"],
+                }
+            },
+        )
+
+        self.assertTrue(payload["accepted"])
+        self.assertIn("C", payload["reply"])
+        self.assertIn("代理指标", payload["reply"])
+
+    @patch("app.services.agent.chat", return_value="判断维度与依据：")
+    def test_incomplete_analysis_reply_falls_back_to_metric_boundaries(self, _chat):
+        payload = agent._post_calc_payload(
+            {
+                "question": "哪条路的健康状况最好？",
+                "depends_on": [1],
+            },
+            {
+                1: {
+                    "rows": [
+                        {"路线名称": "A", "数量": 100, "面积": 80},
+                        {"路线名称": "B", "数量": 40, "面积": 30},
+                        {"路线名称": "C", "数量": 5, "面积": 2},
+                    ],
+                    "columns": ["路线名称", "数量", "面积"],
+                }
+            },
+        )
+
+        self.assertTrue(payload["accepted"])
+        self.assertIn("C", payload["reply"])
+        self.assertIn("代理指标", payload["reply"])
+
     def test_sql_expression_month_dimension_is_canonicalized(self):
         dimensions = _canonical_dimensions(
             "patrol",

@@ -3473,6 +3473,62 @@ def _compact_table_evidence(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _deterministic_table_conclusion(
+    question: str,
+    rows: list[dict[str, Any]],
+) -> str:
+    evidence = _compact_table_evidence(rows)
+    metrics = evidence.get("metrics") or {}
+    if not metrics:
+        return ""
+    prefer_high = any(word in question for word in ("最严重", "更严重", "最多"))
+    boundary = "max" if prefer_high else "min"
+    boundary_label = "最高" if prefer_high else "最低"
+    preferred_metrics = [
+        column
+        for column in ("数量", "总面积", "平均面积", "路线长度")
+        if column in metrics
+    ]
+    selected = preferred_metrics or list(metrics)[:4]
+    details = [
+        f"{column}{boundary_label}的是"
+        f"{metrics[column][boundary]['group']}"
+        f"（{metrics[column][boundary]['value']}）"
+        for column in selected
+    ]
+    scores: dict[str, int] = {}
+    for column in selected:
+        group = str(metrics[column][boundary]["group"])
+        if group:
+            scores[group] = scores.get(group, 0) + 1
+    lead = max(scores, key=scores.get) if scores else ""
+    conclusion = "；".join(details)
+    if lead:
+        conclusion = (
+            f"从可用代理指标看，{lead}在最多指标上表现最优。"
+            + conclusion
+        )
+    return (
+        conclusion
+        + "。这些是病害数量、面积等代理指标，不代表正式健康状况评分或资金成本。"
+    )
+
+
+def _analysis_reply_has_minimum_contract(
+    reply: str,
+    rows: list[dict[str, Any]],
+) -> bool:
+    text = str(reply or "").strip()
+    if len(text) < 20 or text[-1:] in "：:，,、":
+        return False
+    if _reply_looks_incomplete(text):
+        return False
+    has_metrics = bool((_compact_table_evidence(rows).get("metrics") or {}))
+    if has_metrics and not any(char.isdigit() for char in text):
+        return False
+    return True
+
+
 def _post_calc_payload(
     task: dict[str, Any],
     results: dict[int, dict[str, Any]],
@@ -3562,6 +3618,16 @@ def _post_calc_payload(
     except Exception as exc:  # noqa: BLE001
         log_error("agent", "post_calc_failed", exc, question=question[:120])
         reply = ""
+    if reply and not _analysis_reply_has_minimum_contract(reply, rows):
+        log_event(
+            "agent",
+            "WARNING",
+            "post_calc_reply_incomplete",
+            question=question[:80],
+        )
+        reply = ""
+    if not reply:
+        reply = _deterministic_table_conclusion(question, rows)
     if not reply:
         reason = "后置计算没有返回可用结果"
         failure = react_repair.build_failure(

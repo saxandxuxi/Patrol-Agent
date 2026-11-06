@@ -8,6 +8,27 @@ from app.services.plan_contract import build_step_contract
 
 
 class QueryPlanningTests(unittest.TestCase):
+    @patch("app.query.analysis.chat_json", side_effect=AssertionError("LLM should not be called"))
+    def test_route_health_analysis_uses_deterministic_plan(self, _chat_json):
+        plan = analyze_single_turn(
+            "哪条路的健康状况最好？从哪几个维度判断？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+
+        self.assertEqual(plan.response_mode, "analysis")
+        self.assertEqual(plan.nodes[0].spec.dimensions, ("route_name",))
+        self.assertTrue(
+            {
+                "count",
+                "total_area",
+                "average_area",
+                "route_length_km",
+            }.issubset(set(plan.nodes[0].spec.metrics))
+        )
+        self.assertEqual(plan.nodes[1].node_type, "post_calc")
+
     @patch("app.query.analysis.route_resolver._route_text_in_message", return_value="华容－常宁高速公路")
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")

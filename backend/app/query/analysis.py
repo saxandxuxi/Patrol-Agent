@@ -769,6 +769,83 @@ def _completion_status_plan(
     )
 
 
+def _route_analysis_plan(
+    question: str,
+    kind: str,
+    schema: PhysicalSchemaView,
+    reach: FieldReachSet,
+) -> QueryPlan | None:
+    original = str(question or "").strip()
+    if not any(word in original for word in ("路", "路线", "道路")):
+        return None
+    if not any(
+        word in original
+        for word in (
+            "健康状况",
+            "情况最好",
+            "病害最严重",
+            "更严重",
+            "养护压力",
+            "优先养护",
+        )
+    ):
+        return None
+    specs = [
+        QuerySpec(
+            id="q1",
+            kind=kind,
+            subject="disease",
+            view="distribution",
+            metrics=(
+                "count",
+                "total_area",
+                "average_area",
+                "sum_effective_disease_length",
+                "route_length_km",
+            ),
+            dimensions=("route_name",),
+            filters=(),
+            output_projection=(
+                "route_name",
+                "count",
+                "total_area",
+                "average_area",
+                "sum_effective_disease_length",
+                "route_length_km",
+            ),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+            question=original,
+        )
+    ]
+    dependencies: dict[str, tuple[str, ...]] = {}
+    node_types = {"q1": "query_data"}
+    _append_post_calc(
+        specs,
+        dependencies,
+        node_types,
+        "q1",
+        original,
+    )
+    contract = IntentContract(
+        original_question=original,
+        kind=kind,
+        intent_family="analysis",
+        final_goal="比较各路线病害相关指标",
+        unknown_terms=(),
+    )
+    return build_query_plan(
+        contract,
+        tuple(specs),
+        schema,
+        reach,
+        dependencies,
+        node_types,
+        response_mode="analysis",
+    )
+
+
 def _analyze_once(
     question: str,
     kind: str,
@@ -1074,7 +1151,10 @@ def analyze_single_turn(
     *,
     audit: bool = False,
 ) -> QueryPlan:
-    deterministic = _completion_status_plan(question, kind, schema, reach)
+    deterministic = (
+        _completion_status_plan(question, kind, schema, reach)
+        or _route_analysis_plan(question, kind, schema, reach)
+    )
     if deterministic is not None:
         return deterministic
     feedback = ""
