@@ -1,0 +1,129 @@
+version: 1
+exam_id: promotion-20261107-014220
+generated_at: '2026-11-07T01:42:20.766135+08:00'
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20261110
+code_fingerprint: content:10f396f1840c3af5e13fcfc80cb9002b0eeef36f13ab037c3f209bd5c9b6b5e6
+fresh_case_ids:
+- fresh_asset_road_grade_area_stats
+- fresh_disease_type_direction_dist
+- fresh_time_monthly_trend_multi_route
+- fresh_task_completion_rate_district
+- fresh_asset_road_grade_lane_unsupported
+- fresh_disease_type_route_topn
+- fresh_maintenance_district_trend
+- fresh_task_device_recent_detail
+- fresh_disease_size_filter_route_stats
+- fresh_time_inter_inspection_comparison
+- fresh_asset_surface_type_dist
+- fresh_disease_hotspot_pile_segment
+- fresh_maintenance_plan_actual_gap
+- fresh_disease_direction_type_diff
+- fresh_time_monthly_new_additions
+old_case_ids:
+- fresh_task_monthly_coverage
+- fresh_disease_type_direction_compare
+- oil_severity_route
+- holdout_11
+- fresh_topn_severity_area
+cases:
+- id: fresh_asset_road_grade_area_stats
+  category: 资产
+  question: 请统计行政等级为“省道”的所有路段中，检出的病害总面积是多少平方米？
+  focus: 验证系统能否基于资产属性（行政等级）筛选路段，并聚合计算该范围内所有病害的面积总和。
+  source: fresh
+- id: fresh_disease_type_direction_dist
+  category: 病害
+  question: 在G4京港澳高速上，上行方向和下行方向的“坑槽”病害数量分别是多少？哪一侧更多？
+  focus: 验证系统能否按路线、方向及特定病害类型进行多维分组统计，并进行简单的数值比较。
+  source: fresh
+- id: fresh_time_monthly_trend_multi_route
+  category: 时间
+  question: 展示S20外环高速和G60沪昆高速在过去六个月中，每月病害总数的变化趋势对比。
+  focus: 验证系统能否同时处理多条路线的时间序列数据，并按月粒度聚合病害数量以生成趋势对比。
+  source: fresh
+- id: fresh_task_completion_rate_district
+  category: 巡检任务
+  question: 统计第一管养片区在本月计划巡检里程与实际完成里程的完成率。
+  focus: 验证系统能否获取指定管养片区在指定时间范围内的计划与实际里程数据，并计算百分比指标。
+  source: fresh
+- id: fresh_asset_road_grade_lane_unsupported
+  category: 资产/不支持能力
+  question: 请统计行政等级为“国道”的路段中，第二车道的病害数量分布情况。
+  focus: 系统需识别出当前数据未更新车道分布信息，明确说明无法提供指定车道的统计数据，属于不支持的能力范围。
+  source: fresh
+- id: fresh_disease_type_route_topn
+  category: 病害/TopN
+  question: 在G4京港澳高速上，出现频率最高的前三种病害类型分别是什么？请列出它们的具体数量。
+  focus: 考察按路线过滤后，对病害类型进行分组计数并取Top N的能力，需返回类型名称及对应数量。
+  source: fresh
+- id: fresh_maintenance_district_trend
+  category: 管养/趋势
+  question: 第一管养片区在过去六个月中，每月检出的病害总面积呈现怎样的变化趋势？
+  focus: 考察按管养单位聚合，并按时间维度（月）展示病害面积连续变化趋势的能力。
+  source: fresh
+- id: fresh_task_device_recent_detail
+  category: 设备/巡检任务
+  question: 编号为DEV-7712的设备在最近一次执行的巡检任务中，共检出了多少处病害？主要分布在哪些路线？
+  focus: 考察关联设备ID与最近一次任务记录，统计该次任务的病害总数及涉及路线列表的能力。
+  source: fresh
+- id: fresh_disease_size_filter_route_stats
+  category: 病害/明细
+  question: 在S20外环高速上，长度超过3米的纵向裂缝共有多少处？这些裂缝的总长度是多少米？
+  focus: 考察在指定路线和病害类型下，基于尺寸阈值（长度>3米）进行筛选，并统计数量和累加长度的能力。
+  source: fresh
+- id: fresh_time_inter_inspection_comparison
+  category: 时间/对比
+  question: 对比长沙－芷江高速公路最近两次巡检结果，新增了多少处坑槽病害？
+  focus: 考察识别同一路线最近两个时间点的巡检记录，计算特定病害类型（坑槽）的新增数量差值。
+  source: fresh
+- id: fresh_asset_surface_type_dist
+  category: 资产/病害
+  question: 目前路网中，水泥混凝土路面路段上检出的病害总数是多少？其中裂缝类病害占比多少？
+  focus: 考察按路面材料类型（资产属性）过滤病害数据，统计总数并计算特定类型病害占比的能力。
+  source: fresh
+- id: fresh_disease_hotspot_pile_segment
+  category: 病害/分段查询
+  question: 在G60沪昆高速K100至K150区间内，哪一公里的路段病害数量最多？请给出具体桩号区间和数量。
+  focus: 考察在指定大区间内，按固定长度（1公里）分段统计病害数量，并找出最大值所在分段的能力。
+  source: fresh
+- id: fresh_maintenance_plan_actual_gap
+  category: 管养/任务
+  question: 第二管养片区本季度的计划巡检里程与实际完成里程分别是多少？未完成的比例是多少？
+  focus: 考察按管养单位和时间范围（季度）提取计划与实际里程数据，并计算未完成比例的能力。
+  source: fresh
+- id: fresh_disease_direction_type_diff
+  category: 病害/方向
+  question: 在包头-茂名高速上，上行方向和下行方向的“横向裂缝”病害数量差异有多大？哪一侧更多？
+  focus: 考察按路线和方向分组，统计特定病害类型的数量，并计算两侧差值及判断大小关系。
+  source: fresh
+- id: fresh_time_monthly_new_additions
+  category: 时间/趋势
+  question: 统计今年第一季度，G4京港澳高速每月新增的病害数量分别是多少？
+  focus: 考察按路线和时间（月）维度，统计每个时间段内相对于上一时段或初始状态的新增病害数量。
+  source: fresh
+- id: fresh_task_monthly_coverage
+  category: 巡检任务
+  question: 统计第一管养片区在本月计划巡检里程与实际完成巡检里程的完成率。
+  focus: 获取指定片区和月份的计划与实际里程数据，计算百分比形式的任务完成率。
+  source: old
+- id: fresh_disease_type_direction_compare
+  category: 病害/资产
+  question: 在G4京港澳高速上，对比上行和下行方向中“坑槽”病害的数量差异，哪边更多？
+  focus: 验证系统能否针对特定路线、特定病害类型，按行驶方向进行分组统计并比较数量。
+  source: old
+- id: oil_severity_route
+  category: 历史题
+  question: 哪个道路的泛油问题更严重？
+  focus: ''
+  source: old
+- id: holdout_11
+  category: 时间趋势
+  question: 长沙－芷江高速公路最近三个月的病害数量变化趋势如何？
+  focus: 检查相对时间、路线过滤、月份分组和趋势结论。
+  source: old
+- id: fresh_topn_severity_area
+  category: TopN
+  question: 找出全路网中单次检出病害总面积最大的前5个路段，并显示其具体面积数值。
+  focus: 验证系统能否按路段聚合病害面积，并进行降序排列取Top N的结果。
+  source: old
