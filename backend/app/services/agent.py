@@ -3412,6 +3412,67 @@ def _row_with_group_labels(
     return item
 
 
+def _compact_table_evidence(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    valid_rows = [row for row in rows if isinstance(row, dict) and row]
+    if not valid_rows:
+        return {"row_count": 0, "group_columns": [], "metrics": {}}
+    columns = list(valid_rows[0])
+
+    def number(value: Any) -> float | None:
+        try:
+            return float(str(value).replace(",", ""))
+        except (TypeError, ValueError):
+            return None
+
+    numeric_columns = [
+        column
+        for column in columns
+        if sum(number(row.get(column)) is not None for row in valid_rows)
+        >= max(1, len(valid_rows) // 2)
+    ]
+    group_columns = [
+        column
+        for column in columns
+        if column not in numeric_columns
+        and any(str(row.get(column) or "").strip() for row in valid_rows)
+    ]
+
+    def group_label(row: dict[str, Any]) -> str:
+        return " / ".join(
+            str(row.get(column) or "").strip()
+            for column in group_columns
+            if str(row.get(column) or "").strip()
+        )
+
+    metrics: dict[str, Any] = {}
+    for column in numeric_columns:
+        values = []
+        for row in valid_rows:
+            value = number(row.get(column))
+            if value is not None:
+                values.append((value, row))
+        if not values:
+            continue
+        minimum = min(values, key=lambda item: item[0])
+        maximum = max(values, key=lambda item: item[0])
+        metrics[column] = {
+            "min": {
+                "group": group_label(minimum[1]),
+                "value": minimum[0],
+            },
+            "max": {
+                "group": group_label(maximum[1]),
+                "value": maximum[0],
+            },
+        }
+    return {
+        "row_count": len(valid_rows),
+        "columns": columns,
+        "group_columns": group_columns,
+        "metrics": metrics,
+    }
+
+
 def _post_calc_payload(
     task: dict[str, Any],
     results: dict[int, dict[str, Any]],
@@ -3476,26 +3537,26 @@ def _post_calc_payload(
     context_parts: list[str] = []
     for dep in deps:
         rows = list(dep.get("rows") or [])
-        columns = list(dep.get("columns") or [])
         block = f"- {dep.get('question', '')}: {dep.get('reply', '')}"
         if rows:
             block += (
-                f"\n  列：{json.dumps(columns, ensure_ascii=False)}\n"
-                f"  行（前 {min(len(rows), 80)} 条）："
-                + json.dumps(rows[:80], ensure_ascii=False, default=str)
+                "\n  紧凑证据："
+                + json.dumps(
+                    _compact_table_evidence(rows),
+                    ensure_ascii=False,
+                    default=str,
+                )
             )
         context_parts.append(block)
     context = "\n".join(context_parts) or "（没有可用的前序结果）"
     try:
         reply = chat(
             prompts.messages(
-                "post_calc",
+                "table_analysis",
                 question=question,
-                calc_logic=str(task.get("calc_logic") or question),
-                context=context,
+                evidence=context,
             ),
             temperature=0,
-            # 后置计算要读懂前序结果的口径（哪个数除以哪个数），用语义理解模型
             model=role_model("semantic"),
         ).strip()
     except Exception as exc:  # noqa: BLE001

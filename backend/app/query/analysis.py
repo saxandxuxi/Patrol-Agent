@@ -54,9 +54,36 @@ def _metric_tuple(value: Any) -> tuple[str, ...]:
                 metric = field
         else:
             metric = ""
+        if "(" in metric and metric.endswith(")"):
+            aggregate, _, field = metric.partition("(")
+            aggregate = aggregate.strip().lower()
+            field = field[:-1].strip().lower()
+            if aggregate == "count":
+                metric = "count"
+            elif aggregate == "sum":
+                metric = {
+                    "area": "sum_area",
+                    "disease_length": "sum_disease_length",
+                    "effective_disease_length": "sum_effective_disease_length",
+                }.get(field, f"sum_{field}")
+            elif aggregate in {"avg", "average"}:
+                metric = {
+                    "area": "average_area",
+                    "disease_length": "average_length",
+                    "effective_disease_length": "average_length",
+                }.get(field, f"average_{field}")
+        metric = _METRIC_ALIASES.get(metric, metric)
         if metric and metric not in result:
             result.append(metric)
     return tuple(result)
+
+
+_METRIC_ALIASES = {
+    "sum_length": "sum_disease_length",
+    "total_length": "sum_disease_length",
+    "avg_length": "average_length",
+    "sum_effective_length": "sum_effective_disease_length",
+}
 
 
 _VIEW_ALIASES = {
@@ -93,6 +120,15 @@ def _order_items(value: Any) -> tuple[Any, ...]:
 
 
 def _canonical_dimensions(subject: str, dimensions: tuple[str, ...]) -> tuple[str, ...]:
+    normalized_dimensions = []
+    for item in dimensions:
+        compact = item.replace(" ", "").lower()
+        if compact.startswith("date_format(") and any(
+            field in compact
+            for field in ("create_time", "collection_time", "collection_month", "create_month")
+        ):
+            item = "month"
+        normalized_dimensions.append(item)
     return tuple(
         (
             "equipment_id"
@@ -102,7 +138,7 @@ def _canonical_dimensions(subject: str, dimensions: tuple[str, ...]) -> tuple[st
             if subject == "disease" and item == "routes_id"
             else item
         )
-        for item in dimensions
+        for item in normalized_dimensions
     )
 
 
@@ -570,6 +606,63 @@ def _apply_question_contract(
         )
 
 
+def _apply_response_contract(
+    contract: IntentContract,
+    question: str,
+    specs: list[QuerySpec],
+    dependencies: dict[str, tuple[str, ...]],
+    node_types: dict[str, str],
+) -> None:
+    if contract.intent_family != "analysis":
+        return
+    data_specs = [
+        spec for spec in specs if node_types.get(spec.id) == "query_data"
+    ]
+    for index, spec in enumerate(specs):
+        if (
+            spec.view != "distribution"
+            or not any("route" in field for field in spec.dimensions)
+        ):
+            continue
+        metrics = list(spec.metrics)
+        equivalents = {
+            "count": {"count", "count_task", "task_count", "record_count"},
+            "total_area": {"total_area", "sum_area"},
+            "average_area": {"average_area", "avg_area"},
+            "route_length_km": {"route_length_km"},
+        }
+        for metric, aliases in equivalents.items():
+            if not any(item in aliases for item in metrics):
+                metrics.append(metric)
+        output = list(
+            dict.fromkeys(
+                [
+                    *spec.dimensions,
+                    *metrics,
+                    *spec.output_projection,
+                ]
+            )
+        )
+        specs[index] = QuerySpec(
+            **{
+                **spec.__dict__,
+                "metrics": tuple(metrics),
+                "output_projection": tuple(output),
+                "limit": None,
+            }
+        )
+    if data_specs and not any(
+        node_types.get(spec.id) == "post_calc" for spec in specs
+    ):
+        _append_post_calc(
+            specs,
+            dependencies,
+            node_types,
+            tuple(spec.id for spec in data_specs),
+            question,
+        )
+
+
 def _analyze_once(
     question: str,
     kind: str,
@@ -710,6 +803,13 @@ def _analyze_once(
         dependencies,
         node_types,
     )
+    _apply_response_contract(
+        contract,
+        original,
+        specs,
+        dependencies,
+        node_types,
+    )
     _apply_identifier_contract(original, specs)
     _canonicalize_input_bindings(specs)
     return build_query_plan(
@@ -719,6 +819,9 @@ def _analyze_once(
         reach,
         dependencies,
         node_types,
+        response_mode=(
+            "analysis" if contract.intent_family == "analysis" else "data"
+        ),
     )
 
 
@@ -788,7 +891,11 @@ def _apply_audit_patches(plan: QueryPlan, verdict: dict[str, Any]) -> QueryPlan:
                 node_type=node.node_type,
             )
         )
-    return QueryPlan(question=plan.question, nodes=tuple(nodes))
+    return QueryPlan(
+        question=plan.question,
+        nodes=tuple(nodes),
+        response_mode=plan.response_mode,
+    )
 
 
 def _plan_contract_issues(

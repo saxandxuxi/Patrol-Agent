@@ -78,6 +78,7 @@ class PlanNode:
 class QueryPlan:
     question: str
     nodes: tuple[PlanNode, ...]
+    response_mode: str = "data"
 
 
 @dataclass(frozen=True)

@@ -466,7 +466,12 @@ def compile_spec_mdl(spec: QuerySpec) -> str | None:
 
     selects: list[str] = []
     if effective_view in {"count", "sum", "avg"}:
-        if spec.view == "count":
+        if (
+            spec.view == "count"
+            and len(metrics) == 1
+            and _base_field(spec.metrics[0])
+            in {"count", "count_task", "task_count", "record_count"}
+        ):
             selects = ["COUNT(*) AS 病害数量" if spec.subject == "disease" else "COUNT(*) AS 数量"]
         else:
             selects = [

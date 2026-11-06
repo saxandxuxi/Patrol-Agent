@@ -17,6 +17,27 @@ def binding(field, op, value):
 
 
 class SpecMdlTests(unittest.TestCase):
+    def test_count_view_keeps_all_requested_metrics(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="count",
+                metrics=("count", "sum_area"),
+                dimensions=(),
+                filters=(),
+                output_projection=("count", "sum_area"),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="统计上行病害数量和总面积",
+            )
+        )
+
+        self.assertIn("COUNT(*) AS", sql)
+        self.assertIn("SUM(disease.area)", sql)
+
     def test_pile_segment_aliases_compile_to_same_bucket(self):
         sql = compile_spec_mdl(
             QuerySpec(

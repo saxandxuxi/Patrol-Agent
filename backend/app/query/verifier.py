@@ -87,14 +87,15 @@ def verify_deterministic(
         )
     if spec.view in {"detail", "list"}:
         if spec.output_projection and not observation.columns:
-            issues.append(
-                VerificationIssue(
-                    code="missing_output_columns",
-                    message="明细查询缺少展示字段",
-                    node_id=spec.id,
-                    stage="fact",
+            if observation.rows_fetched > 0:
+                issues.append(
+                    VerificationIssue(
+                        code="missing_output_columns",
+                        message="明细查询缺少展示字段",
+                        node_id=spec.id,
+                        stage="fact",
+                    )
                 )
-            )
     elif spec.view in {"distribution", "trend", "count", "sum", "avg", "top"}:
         label_columns = [
             key

@@ -13,6 +13,7 @@ def build_query_plan(
     reach: FieldReachSet,
     dependencies: dict[str, tuple[str, ...]] | None = None,
     node_types: dict[str, str] | None = None,
+    response_mode: str = "data",
 ) -> QueryPlan:
     if not specs:
         raise QuerySpecError("模型没有产出任何查询视图")
@@ -35,4 +36,8 @@ def build_query_plan(
                 node_type=types_by_node.get(spec.id, "query_data"),
             )
         )
-    return QueryPlan(question=contract.original_question, nodes=tuple(nodes))
+    return QueryPlan(
+        question=contract.original_question,
+        nodes=tuple(nodes),
+        response_mode=response_mode,
+    )

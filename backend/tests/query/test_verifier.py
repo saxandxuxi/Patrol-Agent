@@ -52,6 +52,40 @@ def count_observation() -> ExecutionObservation:
 
 
 class VerifierTests(unittest.TestCase):
+    def test_empty_detail_does_not_require_output_columns(self):
+        spec = QuerySpec(
+            id="detail",
+            kind="mysql",
+            subject="disease",
+            view="detail",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=("problem_number",),
+            order_by=(),
+            limit=500,
+            required_assertions=(),
+        )
+        observation = ExecutionObservation(
+            node_id="detail",
+            ok=True,
+            engine="wren",
+            sql="SELECT problem_number FROM ai_problem WHERE 1=0",
+            columns=(),
+            rows_fetched=0,
+        )
+
+        report = verify_result(
+            spec,
+            CompiledQuery(observation.sql, "wren", "wren"),
+            observation,
+        )
+
+        self.assertNotIn(
+            "missing_output_columns",
+            {issue.code for issue in report.issues},
+        )
+
     def test_bounded_empty_distribution_is_valid_zero_result(self):
         spec = detail_spec(
             id="q1",

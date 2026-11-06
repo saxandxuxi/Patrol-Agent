@@ -15,6 +15,7 @@ from ..services import (
     wren_engine,
 )
 from ..services.llm import LLMError
+from ..services.logging_service import console_json
 from ..services.resource_loader import load_yaml
 from .analysis import analyze_single_turn
 from .compiler import CompiledQuery, compile_query
@@ -307,15 +308,62 @@ def _default_post_calc_executor(
     return agent._post_calc_payload(task, results)
 
 
-def assemble_answer(sections: list[dict[str, Any]]) -> AnswerPackage:
+def _data_answer_text(section: dict[str, Any]) -> str:
+    view = str(section.get("view") or "")
+    section_type = str(section.get("type") or "")
+    title = str(section.get("title") or "").strip()
+    prefix = f"“{title}”" if title else "本次查询"
+    if str(section.get("status") or "accepted") != "accepted":
+        return str(section.get("answer") or "").strip()
+    rows_fetched = int(
+        section.get("rows_fetched")
+        or len(section.get("rows") or section.get("preview_rows") or [])
+    )
+    total_count = section.get("total_count")
+    if section_type == "post_calc":
+        return str(section.get("answer") or "").strip()
+    if view in {"list", "detail"}:
+        if total_count is not None:
+            return (
+                f"{prefix}共 {int(total_count)} 条，当前展示前 {rows_fetched} 条，"
+                "完整明细请在结果工作台查看。"
+            )
+        return f"{prefix}返回 {rows_fetched} 条，明细已生成，请在结果工作台查看。"
+    if view in {"distribution", "trend", "top"}:
+        return (
+            f"{prefix}查询完成，共 {rows_fetched} 行，"
+            "详细结果已生成，请在结果工作台查看。"
+        )
+    return str(section.get("answer") or "").strip()
+
+
+def assemble_answer(
+    sections: list[dict[str, Any]],
+    response_mode: str = "data",
+) -> AnswerPackage:
+    if response_mode == "analysis":
+        conclusions = [
+            section
+            for section in sections
+            if str(section.get("type") or "") in {"analysis", "post_calc"}
+        ]
+        if conclusions:
+            sections = conclusions
     texts: list[str] = []
     for section in sections:
-        text = str(section.get("answer") or "").strip()
+        text = (
+            _data_answer_text(section)
+            if response_mode == "data"
+            else str(section.get("answer") or "").strip()
+        )
         if text and text not in texts:
             texts.append(text)
     if not texts:
         return AnswerPackage("查询完成，但没有可展示的数据。")
-    return AnswerPackage("；".join(texts) + "。", tuple(sections))
+    text = "；".join(texts)
+    if text[-1:] not in "。！？.!?；;":
+        text += "。"
+    return AnswerPackage(text, tuple(sections))
 
 
 def _terminal_sections(
@@ -523,11 +571,7 @@ def _trace_node_result(
             ],
         },
     }
-    print(
-        "[query][node] "
-        + json.dumps(record, ensure_ascii=True, default=str),
-        flush=True,
-    )
+    console_json("[query][node] ", record)
 
 
 def _section_identity(node: Any) -> dict[str, Any]:
@@ -538,6 +582,8 @@ def _section_identity(node: Any) -> dict[str, Any]:
         "title": title,
         "question": question,
         "tool": node.node_type,
+        "type": "post_calc" if node.node_type == "post_calc" else "data",
+        "view": node.spec.view,
     }
 
 
@@ -690,6 +736,7 @@ def _execute_plan(
                     **_section_identity(node),
                     "answer": answer,
                     "status": "accepted",
+                    "shape": "post_calc",
                     "rows_fetched": len(rows),
                     "columns": list(observation.columns),
                     "preview_rows": list(observation.preview_rows),
@@ -747,8 +794,12 @@ def _execute_plan(
                     "failure_code": "incomplete_time_coverage",
                     "sql": compiled.sql,
                     "engine": compiled.engine,
+                    "shape": effective_spec.view,
                     "columns": list(observation.columns),
                     "preview_rows": list(observation.preview_rows),
+                    "rows": list(
+                        observation.result_rows or observation.preview_rows
+                    ),
                     "rows_fetched": observation.rows_fetched,
                     "total_count": observation.total_count,
                     "truncated": observation.truncated,
@@ -776,8 +827,12 @@ def _execute_plan(
                     "status": report.status,
                     "sql": compiled.sql,
                     "engine": compiled.engine,
+                    "shape": effective_spec.view,
                     "columns": list(observation.columns),
                     "preview_rows": list(observation.preview_rows),
+                    "rows": list(
+                        observation.result_rows or observation.preview_rows
+                    ),
                     "rows_fetched": observation.rows_fetched,
                     "total_count": observation.total_count,
                     "truncated": observation.truncated,
@@ -799,14 +854,19 @@ def _execute_plan(
                 "status": report.status,
                 "sql": compiled.sql,
                 "engine": compiled.engine,
+                "shape": effective_spec.view,
                 "columns": list(observation.columns),
                 "preview_rows": list(observation.preview_rows),
+                "rows": list(observation.result_rows or observation.preview_rows),
                 "rows_fetched": observation.rows_fetched,
                 "total_count": observation.total_count,
                 "truncated": observation.truncated,
             }
         )
-    return assemble_answer(_terminal_sections(plan, sections))
+    return assemble_answer(
+        _terminal_sections(plan, sections),
+        response_mode=plan.response_mode,
+    )
 
 
 def _answer_text(spec: Any, observation: Any) -> str:
@@ -832,6 +892,25 @@ def _answer_text(spec: Any, observation: Any) -> str:
     if preview and isinstance(preview[0], dict):
         if spec.view in {"count", "sum", "avg"}:
             first = preview[0]
+            if len(first) > 1:
+                values = {
+                    "disease": "处",
+                    "patrol": "次",
+                    "route": "条",
+                    "section": "段",
+                    "work_order": "条",
+                }
+                parts = []
+                for key, value in first.items():
+                    key_text = str(key)
+                    if "面积" in key_text or "area" in key_text.lower():
+                        unit = "㎡"
+                    elif "长度" in key_text or "length" in key_text.lower():
+                        unit = "米"
+                    else:
+                        unit = values.get(spec.subject, "条")
+                    parts.append(f"{key_text} {value}{unit}")
+                return "；".join(parts)
             numeric_key = next(
                 (
                     key

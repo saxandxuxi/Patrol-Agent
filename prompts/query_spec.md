@@ -61,6 +61,10 @@
       `problem_number`、`problem_type_name`、`area`、`effective_disease_length`、
       `pile_number`、`route_name`、`collection_time` 中可用的定位字段。
     明细默认 `limit=500`；回答必须说明命中总数、实际展示条数和是否截断。
+16. “哪条路健康状况最好、哪条路更值得优先养护、哪条路病害最严重”等评价题，即使数据库
+    没有正式 PCI、健康指数或成本评分，也不要因此停止。应使用真实可查的病害数量、总面积、
+    平均面积、病害长度、病害密度和路线长度做代理比较，并在最终回答中明确这些只是代理指标，
+    不是官方评分或资金成本模型。只有用户明确要求必须使用一个不存在的指标时，才返回歧义。
 
 允许的 view：
 count / sum / avg / distribution / list / detail / top / trend / bucket_compare / photo / data
