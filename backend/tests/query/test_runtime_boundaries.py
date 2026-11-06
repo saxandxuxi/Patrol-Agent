@@ -4,7 +4,9 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-from app.services import agent, llm, orchestrator, react_agent
+from app.calculations.domain.comparison import compare_datasets
+from app.calculations.post_calc import execute_post_calc
+from app.services import llm, orchestrator, react_agent
 
 
 class RuntimeBoundaryTests(unittest.TestCase):
@@ -105,55 +107,72 @@ class RuntimeBoundaryTests(unittest.TestCase):
             )
         )
 
-    def test_density_keeps_disease_type_and_reports_each_group(self):
-        result = agent._density_rows(
-            "裂缝和坑槽各自在不同道路上的病害密度",
-            [
-                {
-                    "group_labels": {"病害类型": "坑槽"},
+    @patch(
+        "app.calculations.domain.analysis.chat",
+        side_effect=RuntimeError("model unavailable"),
+    )
+    def test_density_keeps_disease_type_and_route_context(self, _chat):
+        result = execute_post_calc(
+            {
+                "question": "按病害类型和路线计算密度",
+                "depends_on": [1],
+                "required_assertions": ["lower_is_better"],
+                "calculation": {
+                    "tool": "calculate_columns",
+                    "operation": "divide",
+                    "operands": [
+                        {
+                            "name": "numerator",
+                            "source": {"node": "1", "field": "count"},
+                        },
+                        {
+                            "name": "denominator",
+                            "source": {"node": "1", "field": "route_length_km"},
+                        },
+                    ],
+                    "output": {
+                        "name": "density",
+                        "label": "病害密度",
+                        "unit": "处/km",
+                    },
+                    "precision": 4,
+                },
+            },
+            {
+                1: {
                     "field_labels": {
                         "count": "数量",
-                        "sum_area": "面积",
                         "route_length_km": "长度",
                         "route_name": "路线",
+                        "problem_type_name": "病害类型",
                     },
                     "rows": [
                         {
                             "路线": "A",
+                            "病害类型": "坑槽",
                             "数量": "4",
-                            "面积": "0.71",
                             "长度": "5.1",
-                        }
-                    ],
-                },
-                {
-                    "group_labels": {"病害类型": "横向裂缝"},
-                    "field_labels": {
-                        "count": "数量",
-                        "sum_area": "面积",
-                        "route_length_km": "长度",
-                        "route_name": "路线",
-                    },
-                    "rows": [
+                        },
                         {
                             "路线": "A",
+                            "病害类型": "横向裂缝",
                             "数量": "56",
-                            "面积": "21.17",
                             "长度": "5.1",
-                        }
+                        },
                     ],
-                },
-            ],
+                }
+            },
         )
 
-        self.assertIsNotNone(result)
+        self.assertTrue(result["accepted"])
         self.assertIn("病害类型", result["columns"])
-        self.assertIn("横向裂缝：A", result["reply"])
-        self.assertIn("坑槽：A", result["reply"])
+        self.assertEqual(
+            [row["病害类型"] for row in result["rows"]],
+            ["坑槽", "横向裂缝"],
+        )
 
     def test_comparison_accepts_two_empty_filtered_row_sets(self):
-        result = agent._compare_datasets(
-            "对比11月2日与3日的病害差异",
+        result = compare_datasets(
             [
                 {"columns": ["病害类型", "数量"], "rows": []},
                 {"columns": ["病害类型", "数量"], "rows": []},

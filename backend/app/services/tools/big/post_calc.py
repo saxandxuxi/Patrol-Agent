@@ -23,11 +23,11 @@ from ...react_repair import build_failure
     wraps="agent._post_calc_payload:2411",
 )
 def post_calc(task: dict[str, Any], results: dict[int | str, dict[str, Any]]) -> dict[str, Any]:
-    from ... import agent
+    from ....calculations.post_calc import execute_post_calc
 
     normalized = {int(key): value for key, value in (results or {}).items()}
     try:
-        payload = agent._post_calc_payload(task, normalized)
+        payload = execute_post_calc(task, normalized)
     except Exception as exc:  # noqa: BLE001
         return observation(
             "post_calc",

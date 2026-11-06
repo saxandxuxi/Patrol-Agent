@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -77,7 +78,11 @@ def resolve_entity(
         )
 
     alias_map = registry.snapshot.aliases.get(entity_id) or {}
-    alias_target = alias_map.get(text) if isinstance(alias_map, dict) else None
+    alias_target = (
+        alias_map.get(text)
+        if isinstance(alias_map, Mapping)
+        else None
+    )
     effective = str(alias_target or text)
     exact = [
         item
@@ -180,7 +185,7 @@ def _entity_values(
         values.append(EntityValue(code=code, label=label, aliases=aliases))
     seen_labels = {item.label for item in values}
     for source_item in source.get("auxiliary_sources") or []:
-        if not isinstance(source_item, dict):
+        if not isinstance(source_item, Mapping):
             continue
         table_name = str(source_item.get("table") or "")
         column_name = str(source_item.get("value_column") or "")

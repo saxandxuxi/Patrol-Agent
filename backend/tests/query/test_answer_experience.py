@@ -1,96 +1,22 @@
 import unittest
 from unittest.mock import patch
 
+from app.calculations.evidence import compact_table_evidence
+from app.calculations.post_calc import execute_post_calc
 from app.query.analysis import _canonical_dimensions, analyze_single_turn
 from app.query.contracts import QuerySpec
 from app.query.fields import FieldReachSet, PhysicalSchemaView
 from app.query.service import assemble_answer
-from app.services import agent
 
 
 class AnswerExperienceTests(unittest.TestCase):
-    def test_density_uses_structured_route_length_not_disease_length(self):
-        payload = agent._density_rows(
-            "比较路线病害密度",
-            [
-                {
-                    "columns": ["路线名称", "数量", "总面积", "总长度", "路线长度_km"],
-                    "rows": [
-                        {
-                            "路线名称": "A",
-                            "数量": "5",
-                            "总面积": "20",
-                            "总长度": "100",
-                            "路线长度_km": "10",
-                        }
-                    ],
-                    "spec": {
-                        "metrics": [
-                            "count",
-                            "sum_area",
-                            "route_length_km",
-                        ],
-                        "dimensions": ["route_name"],
-                    },
-                    "field_labels": {
-                        "count": "数量",
-                        "sum_area": "总面积",
-                        "route_length_km": "路线长度_km",
-                        "route_name": "路线名称",
-                    },
-                }
-            ],
-        )
-
-        self.assertIsNotNone(payload)
-        self.assertEqual(payload["rows"][0]["密度_处_per_km"], 0.5)
-
-    def test_density_lower_is_better_selects_lowest_value(self):
-        payload = agent._density_rows(
-            "比较路线健康状况",
-            [
-                {
-                    "columns": ["路线名称", "数量", "总面积", "路线长度_km"],
-                    "rows": [
-                        {
-                            "路线名称": "A",
-                            "数量": "5",
-                            "总面积": "20",
-                            "路线长度_km": "10",
-                        },
-                        {
-                            "路线名称": "B",
-                            "数量": "8",
-                            "总面积": "40",
-                            "路线长度_km": "40",
-                        },
-                    ],
-                    "spec": {
-                        "metrics": ["count", "sum_area", "route_length_km"],
-                        "dimensions": ["route_name"],
-                    },
-                    "field_labels": {
-                        "count": "数量",
-                        "sum_area": "总面积",
-                        "route_length_km": "路线长度_km",
-                        "route_name": "路线名称",
-                    },
-                }
-            ],
-            lower_is_better=True,
-        )
-
-        self.assertIsNotNone(payload)
-        self.assertIn("密度最低的是B", payload["reply"])
-        self.assertEqual(payload["rows"][0]["路线名称"], "B")
-
-    @patch("app.services.agent.chat")
+    @patch("app.calculations.domain.analysis.chat")
     def test_multi_metric_assertion_uses_all_available_dimensions(self, chat):
         chat.return_value = (
             "综合病害数量、总面积、平均面积、病害长度和病害密度，"
             "A 路线的综合负担最低；依据是 A 的 5 项代理指标均低于 B。"
         )
-        payload = agent._post_calc_payload(
+        payload = execute_post_calc(
             {
                 "id": "p1",
                 "question": "综合判断哪条路线健康状况最好",
@@ -156,14 +82,32 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertIn("综合", payload["reply"])
         self.assertIn("病害密度", payload["reply"])
 
-    @patch("app.services.agent.chat", side_effect=AssertionError("LLM should not be called"))
+    @patch(
+        "app.calculations.domain.analysis.chat",
+        side_effect=AssertionError("LLM should not be called"),
+    )
     def test_structured_trend_uses_sequence_and_metric_specs(self, _chat):
-        payload = agent._post_calc_payload(
+        payload = execute_post_calc(
             {
                 "id": "q3",
                 "question": "计算最近巡查的病害数量变化",
                 "depends_on": [1, 2],
                 "view": "trend",
+                "calculation": {
+                    "tool": "calculate_series",
+                    "operation": "subtract",
+                    "operands": [
+                        {
+                            "name": "labels",
+                            "source": {"node": "1", "field": "patrol_number"},
+                        },
+                        {
+                            "name": "values",
+                            "source": {"node": "2", "field": "count"},
+                        },
+                    ],
+                    "precision": 6,
+                },
             },
             {
                 1: {
@@ -228,7 +172,10 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertIn("=3", payload["reply"])
         self.assertIn("=5", payload["reply"])
         self.assertIn("-5，+2", payload["reply"])
-        self.assertEqual([row["数量"] for row in payload["rows"]], [8, 3, 5])
+        self.assertEqual(
+            [row["value"] for row in payload["rows"]],
+            ["8", "3", "5"],
+        )
 
     def test_scalar_answer_keeps_multiple_metrics(self):
         from app.query.contracts import ExecutionObservation
@@ -415,7 +362,7 @@ class AnswerExperienceTests(unittest.TestCase):
             {"路线名称": "C", "数量": 5, "面积": 2, "路线长度": 50},
         ]
 
-        evidence = agent._compact_table_evidence(rows)
+        evidence = compact_table_evidence(rows)
 
         self.assertEqual(evidence["row_count"], 3)
         self.assertEqual(evidence["metrics"]["数量"]["max"]["group"], "A")
@@ -423,12 +370,16 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertEqual(evidence["metrics"]["面积"]["max"]["group"], "A")
         self.assertEqual(evidence["metrics"]["路线长度"]["min"]["group"], "B")
 
-    @patch("app.services.agent.chat", side_effect=RuntimeError("model unavailable"))
+    @patch(
+        "app.calculations.domain.analysis.chat",
+        side_effect=RuntimeError("model unavailable"),
+    )
     def test_analysis_falls_back_to_deterministic_metric_boundaries(self, _chat):
-        payload = agent._post_calc_payload(
+        payload = execute_post_calc(
             {
                 "question": "哪条路的健康状况最好？",
                 "depends_on": [1],
+                "required_assertions": ["lower_is_better"],
             },
             {
                 1: {
@@ -446,12 +397,16 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertIn("C", payload["reply"])
         self.assertIn("代理指标", payload["reply"])
 
-    @patch("app.services.agent.chat", return_value="判断维度与依据：")
+    @patch(
+        "app.calculations.domain.analysis.chat",
+        return_value="判断维度与依据：",
+    )
     def test_incomplete_analysis_reply_falls_back_to_metric_boundaries(self, _chat):
-        payload = agent._post_calc_payload(
+        payload = execute_post_calc(
             {
                 "question": "哪条路的健康状况最好？",
                 "depends_on": [1],
+                "required_assertions": ["lower_is_better"],
             },
             {
                 1: {

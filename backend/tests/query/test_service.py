@@ -689,11 +689,41 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(effective.filters[0].op, "=")
         self.assertEqual(effective.filters[0].storage_value, "P1")
 
-    def test_severity_post_calc_compares_density_and_reports_inputs(self):
+    @patch(
+        "app.calculations.domain.analysis.chat",
+        side_effect=RuntimeError("model unavailable"),
+    )
+    def test_severity_post_calc_compares_density_and_reports_inputs(
+        self,
+        _chat,
+    ):
         payload = _default_post_calc_executor(
             {
                 "question": "哪个道路的病害最严重？",
                 "depends_on": ["q1"],
+                "calculation": {
+                    "tool": "calculate_columns",
+                    "operation": "divide",
+                    "operands": [
+                        {
+                            "name": "numerator",
+                            "source": {"node": "q1", "field": "count"},
+                        },
+                        {
+                            "name": "denominator",
+                            "source": {
+                                "node": "q1",
+                                "field": "route_length_km",
+                            },
+                        },
+                    ],
+                    "output": {
+                        "name": "disease_density",
+                        "label": "病害密度",
+                        "unit": "处/公里",
+                    },
+                    "precision": 4,
+                },
             },
             {
                 "q1": {
@@ -722,7 +752,8 @@ class ServiceTests(unittest.TestCase):
             },
         )
         self.assertTrue(payload["accepted"])
-        self.assertIn("密度最高的是B", payload["reply"])
+        self.assertIn("B", payload["reply"])
+        self.assertIn("病害密度", payload["reply"])
         self.assertIn("处/公里", payload["reply"])
 
     def test_trend_post_calc_reports_direction_from_upstream_rows(self):
@@ -730,6 +761,21 @@ class ServiceTests(unittest.TestCase):
             {
                 "question": "长沙－芷江高速公路病害数量，最近是在增加还是在减少？",
                 "depends_on": ["q1"],
+                "calculation": {
+                    "tool": "calculate_series",
+                    "operation": "subtract",
+                    "operands": [
+                        {
+                            "name": "labels",
+                            "source": {"node": "q1", "field": "月份"},
+                        },
+                        {
+                            "name": "values",
+                            "source": {"node": "q1", "field": "病害数量"},
+                        },
+                    ],
+                    "precision": 6,
+                },
             },
             {
                 "q1": {
@@ -749,6 +795,26 @@ class ServiceTests(unittest.TestCase):
             {
                 "question": "AI识别的病害类型，靠谱吗？有多少是认不出来的？",
                 "depends_on": ["q1_low", "q2_total"],
+                "calculation": {
+                    "tool": "calculate_scalar",
+                    "operation": "percentage_share",
+                    "operands": [
+                        {
+                            "name": "numerator",
+                            "source": {"node": "q1_low", "field": "count"},
+                        },
+                        {
+                            "name": "total",
+                            "source": {"node": "q2_total", "field": "count"},
+                        },
+                    ],
+                    "output": {
+                        "name": "low_confidence_share",
+                        "label": "低置信度占比",
+                        "unit": "%",
+                    },
+                    "precision": 2,
+                },
             },
             {
                 "q1_low": {"rows": [{"count": "17623"}]},

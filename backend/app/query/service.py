@@ -327,9 +327,9 @@ def _default_post_calc_executor(
     task: dict[str, Any],
     results: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    from ..services import agent
+    from ..calculations.post_calc import execute_post_calc
 
-    return agent._post_calc_payload(task, results)
+    return execute_post_calc(task, results)
 
 
 def _data_answer_text(section: dict[str, Any]) -> str:

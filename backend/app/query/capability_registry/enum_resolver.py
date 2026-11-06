@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -44,7 +45,11 @@ def resolve_enum(
             evidence=({"field": enum.key, "match": "duplicate_label"},),
         )
     alias_map = registry.snapshot.aliases.get(enum.key) or {}
-    alias_target = alias_map.get(text) if isinstance(alias_map, dict) else None
+    alias_target = (
+        alias_map.get(text)
+        if isinstance(alias_map, Mapping)
+        else None
+    )
     if alias_target:
         alias_value = next(
             (

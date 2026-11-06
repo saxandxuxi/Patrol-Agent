@@ -5,6 +5,16 @@ from typing import Any
 from .numbers import as_decimal
 
 
+def row_with_group_labels(
+    dependency: dict[str, Any],
+    row: dict[str, Any],
+) -> dict[str, Any]:
+    item = dict(row)
+    for key, value in (dependency.get("group_labels") or {}).items():
+        item.setdefault(str(key), value)
+    return item
+
+
 def compact_table_evidence(
     rows: list[dict[str, Any]] | tuple[dict[str, Any], ...],
 ) -> dict[str, Any]:

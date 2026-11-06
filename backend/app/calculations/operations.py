@@ -15,6 +15,12 @@ ROLE_NAMES = {
 }
 
 
+def roles_for_tool(tool: str, operation: str) -> tuple[str, ...]:
+    if tool == "calculate_series":
+        return ("labels", "values")
+    return ROLE_NAMES.get(operation, ())
+
+
 @dataclass(frozen=True)
 class OperationResult:
     value: Decimal | None = None
