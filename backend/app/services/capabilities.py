@@ -18,22 +18,13 @@ from typing import Any
 from . import example_reuse, nl2sql, parsers, preset_lib, templatizer
 from ..config import settings
 from .logging_service import log_error, log_event
+from .resource_loader import load_capability_file
 
 # 主体 → 物理表（通用算子的入口表）
 _SUBJECT_TABLES = {
-    "disease": "ai_problem",
-    "patrol": "ai_maintain_patrol",
-    "route": "basic_facilities_routes",
-    "section": "basic_facilities_sections",
-    "pile_point": "basic_facilities_sections_pile_detail",
-    "asset": "ai_asset_main",
-    "work_order": "ai_work_order",
-    # 台账类资产（以前没登记 → "桥梁的技术等级"这类问题主体只能回落成 asset/病害，
-    # 全靠字段触达把落点救回来；登记后主体、落点、字段线索三者一致）
-    "bridge": "basic_facilities_bridges",
-    "tunnel": "basic_facilities_tunnels",
-    "slope": "basic_facilities_slope",
-    "project": "project_manage_project_main",
+    str(subject_id): str(raw.get("base_table") or "")
+    for subject_id, raw in (load_capability_file("subjects.yaml", {}) or {}).items()
+    if isinstance(raw, dict)
 }
 
 _TOKEN_TTL_SECONDS = settings.capability_token_ttl_minutes * 60

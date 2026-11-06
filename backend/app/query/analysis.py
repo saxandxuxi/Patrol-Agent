@@ -7,6 +7,7 @@ from typing import Any
 from ..services import prompts
 from ..services.llm import LLMError, chat_json, role_model
 from .audit import audit_query_plan
+from .capability_registry import CapabilityRegistry
 from .contracts import (
     InputBinding,
     IntentContract,
@@ -197,16 +198,25 @@ def _analyze_once(
     schema: PhysicalSchemaView,
     reach: FieldReachSet,
     planning_feedback: str = "",
+    *,
+    registry: CapabilityRegistry | None = None,
+    subject: str = "",
 ) -> QueryPlan:
     original = str(question or "").strip()
     if not original:
         raise QuerySpecError("用户问题为空")
+    planner_view = (
+        registry.planner_view(subject, reach).to_prompt_dict()
+        if registry is not None and subject
+        else {}
+    )
     data = chat_json(
         prompts.messages(
             "query_spec",
             question=original,
             kind=kind,
             current_date=datetime.now().strftime("%Y-%m-%d"),
+            capabilities=_text_context(planner_view),
             schema=_text_context(sorted(schema.columns)),
             planning_feedback=planning_feedback or "无",
             reach=_text_context(
@@ -261,16 +271,20 @@ def _analyze_once(
         except (TypeError, ValueError) as exc:
             raise QuerySpecError("limit 必须是整数") from exc
         metrics = _metric_tuple(raw.get("metrics"))
-        subject = str(raw.get("subject") or "disease").strip()
+        selected_subject = str(raw.get("subject") or subject or "disease").strip()
+        if subject and selected_subject != subject:
+            raise QuerySpecError(
+                f"规划主体 {selected_subject} 与已确定主体 {subject} 不一致"
+            )
         dimensions = _canonical_dimensions(
-            subject,
+            selected_subject,
             _string_tuple(raw.get("dimensions")),
         )
         view = _canonical_view(raw.get("view"), metrics, dimensions)
         if view in {"list", "detail"} and limit is None:
             limit = 500
         output_projection = _canonical_dimensions(
-            subject,
+            selected_subject,
             _string_tuple(raw.get("output_projection")),
         )
         input_bindings = []
@@ -289,7 +303,7 @@ def _analyze_once(
             QuerySpec(
                 id=spec_id,
                 kind=kind,
-                subject=subject,
+                    subject=selected_subject,
                 view=view,
                 metrics=metrics,
                 dimensions=dimensions,
@@ -469,6 +483,8 @@ def analyze_single_turn(
     reach: FieldReachSet,
     *,
     audit: bool = False,
+    registry: CapabilityRegistry | None = None,
+    subject: str = "",
 ) -> QueryPlan:
     feedback = ""
     for attempt in range(2):
@@ -479,6 +495,8 @@ def analyze_single_turn(
                 schema,
                 reach,
                 feedback,
+                registry=registry,
+                subject=subject,
             )
         except LLMError as exc:
             if attempt == 0:

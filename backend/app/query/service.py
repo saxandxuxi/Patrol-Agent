@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from ..services import (
+    field_grounding,
     nl2sql,
     preset_lib,
     schema_catalog,
@@ -18,6 +19,7 @@ from ..services.llm import LLMError
 from ..services.logging_service import console_json
 from ..services.resource_loader import load_capability_file
 from .analysis import analyze_single_turn
+from .capability_registry import CapabilityRegistry, resolve_subject
 from .compiler import CompiledQuery, compile_query
 from .confirmations import (
     ConfirmationTicket,
@@ -34,7 +36,7 @@ from .contracts import (
     ValueBinding,
 )
 from .executor import execute_compiled
-from .fields import FieldReachSet, PhysicalSchemaView
+from .fields import FieldReachHit, FieldReachSet, PhysicalSchemaView
 from .template_sources import (
     AutoTemplateProvider,
     BuiltinTemplateProvider,
@@ -78,6 +80,28 @@ def _default_schema(kind: str) -> PhysicalSchemaView:
                 columns.add((table_name, column_name))
     snapshot = json.dumps(sorted(columns), ensure_ascii=False)[:4096]
     return PhysicalSchemaView(columns=frozenset(columns), snapshot=snapshot)
+
+
+def _field_reach_from_ground(grounded: dict[str, Any] | None) -> FieldReachSet:
+    hits = []
+    for item in (grounded or {}).get("columns") or []:
+        if not isinstance(item, dict):
+            continue
+        table = str(item.get("table") or "")
+        column = str(item.get("column") or "")
+        if not table or not column:
+            continue
+        matched = "；".join(str(value) for value in item.get("hits") or ())
+        hits.append(
+            FieldReachHit(
+                table=table,
+                column=column,
+                matched_text=matched or column,
+                source="field_grounding",
+                score=float(item.get("score") or 0),
+            )
+        )
+    return FieldReachSet(hits=tuple(hits))
 
 
 def _default_template_executor(
@@ -1084,9 +1108,26 @@ def start_single_turn(
     providers: tuple[Any, ...] | list[Any] | None = None,
 ) -> TurnStart:
     schema = schema or _default_schema(kind)
-    reach = reach or FieldReachSet()
+    grounded = field_grounding.ground(kind, question)
+    reach = reach or _field_reach_from_ground(grounded)
+    registry = CapabilityRegistry.load(kind)
+    subject_resolution = resolve_subject(
+        question,
+        "data",
+        reach,
+        registry,
+        grounded=grounded,
+    )
     try:
-        plan = analyze_single_turn(question, kind, schema, reach, audit=True)
+        plan = analyze_single_turn(
+            question,
+            kind,
+            schema,
+            reach,
+            audit=True,
+            registry=registry,
+            subject=subject_resolution.subject,
+        )
     except LLMError:
         return TurnStart(
             plan=QueryPlan(question=question, nodes=()),

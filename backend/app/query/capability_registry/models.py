@@ -17,6 +17,8 @@ class FieldCapability:
     field_id: str
     expression: str
     label: str
+    data_type: str = ""
+    comment: str = ""
     roles: tuple[str, ...] = ()
     unit: str = ""
     physical_table: str = ""
@@ -99,3 +101,51 @@ class CapabilitySnapshot:
     result_words: dict[str, Any]
     repair_policy: dict[str, Any]
     templates: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class PlannerFieldView:
+    field_id: str
+    label: str
+    data_type: str
+    comment: str
+    roles: tuple[str, ...]
+    enum_values: tuple[EnumValueCapability, ...] = ()
+
+
+@dataclass(frozen=True)
+class PlannerCapabilityView:
+    subject: str
+    base_table: str
+    fields: dict[str, PlannerFieldView]
+    metrics: tuple[str, ...]
+    derived_metrics: tuple[str, ...]
+    allowed_views: tuple[str, ...]
+    reach_evidence: tuple[dict[str, Any], ...] = ()
+
+    def to_prompt_dict(self) -> dict[str, Any]:
+        return {
+            "subject": self.subject,
+            "base_table": self.base_table,
+            "allowed_views": list(self.allowed_views),
+            "fields": {
+                field_id: {
+                    "label": field.label,
+                    "type": field.data_type,
+                    "comment": field.comment,
+                    "roles": list(field.roles),
+                    "enum_values": [
+                        {
+                            "code": item.code,
+                            "label": item.label,
+                            "display": item.display,
+                        }
+                        for item in field.enum_values
+                    ],
+                }
+                for field_id, field in self.fields.items()
+            },
+            "metrics": list(self.metrics),
+            "derived_metrics": list(self.derived_metrics),
+            "field_reach_evidence": list(self.reach_evidence),
+        }

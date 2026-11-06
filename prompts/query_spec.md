@@ -2,7 +2,7 @@
 用途：单轮巡检数据查询的 QuerySpec 生成
 调用：app.query.analysis.analyze_single_turn
 模型：role_model("semantic")
-占位符：<<question>> <<kind>> <<current_date>> <<schema>> <<reach>>
+占位符：<<question>> <<kind>> <<current_date>> <<capabilities>> <<schema>> <<reach>>
 -->
 [system]
 你是巡检数据查询分析器。只输出 JSON，不输出 SQL、Markdown 或解释。
@@ -124,6 +124,9 @@ count / sum / avg / distribution / list / detail / top / trend / bucket_compare 
 当前日期：<<current_date>>
 
 用户问题：<<question>>
+
+当前主体能力视图（字段、枚举、指标和派生指标的唯一事实源）：
+<<capabilities>>
 
 真实物理字段：
 <<schema>>
