@@ -1,0 +1,194 @@
+{
+  "exam_id": "promotion-20261107-004838",
+  "code_fingerprint": "cbe0aacf6b1a093f97ed8ea95568d429b18213a7:339a11323da39cef3111096231a83114b8e01b2b484db4b2d6d923741bc7182e",
+  "passed_fresh": 9,
+  "total_fresh": 15,
+  "passed_old": 5,
+  "total_old": 5,
+  "passed_total": 14,
+  "total": 20,
+  "promoted": false,
+  "promotion_reason": "未晋级：新题 9/15，旧题 5/5，总计 14/20",
+  "results": [
+    {
+      "id": "fresh_lane_disease_unsupported",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "compiler",
+      "reason": "系统返回了 execution_failure 状态（sections 中 status 为 unsupported，且 failure_code 为 query_plan_not_executable）。根据规则，当 section 为 error、repairable 或 blocked（此处 query_plan_not_executable 属于规划/编译阶段的阻断）时，属于系统执行失败，不得判为 correct_unsupported。此外，最终回答仅提及过滤值解析问题，未按照考察重点明确告知‘车道分布数据未更新’这一业务层面的缺失原因，而是归咎于技术解析失败。",
+      "answer": "无法可靠规划该查询：过滤值 pile_number 来源为 model_inference，但没有经过字典、业务规则或受控解析；过滤值 lane_index 来源为 model_inference，但没有经过字典、业务规则或受控解析"
+    },
+    {
+      "id": "fresh_asset_road_grade_stats",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户要求按'行政等级'（国道）筛选病害数量。系统明确回答'当前数据能力不支持：病害查询不支持过滤字段：route_level'，并判定为 unsupported。根据规则，如果数据库确实缺少字段且系统明确说明具体缺失原因并停止猜测，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：病害查询不支持过滤字段：route_level"
+    },
+    {
+      "id": "fresh_disease_size_filter",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了用户意图：1. 确定时间范围（最近一次巡检），通过查询 patrol 表按 create_time 倒序获取 patrol_number 'XCBH202611050000'；2. 应用过滤条件（病害类型='横向裂缝'，长度>5米），SQL 中使用了 problem_type_name = '横向裂缝' 和 effective_disease_length > 5；3. 执行统计，返回结果为 0 处。SQL 逻辑与业务文档中关于病害尺寸和类型的查询能力相符，最终回答明确给出了数量结论。",
+      "answer": "“q1_patrol. 获取最近一次巡检任务的 patrol_number，按 collection_time 倒序取第”返回 1 条，明细已生成，请在结果工作台查看。；共 0处。"
+    },
+    {
+      "id": "fresh_time_trend_area",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "execution",
+      "reason": "QueryPlanError: 没有找到路线“S20外环高速”。名字相近的路线有：新化文田-东安井头圩、龙山石牌(省界)-凤凰茶田(省界)、慈利-安化县渠江、双峰洪山殿-嘉禾县城、望城乌山-湘潭茶恩寺，请确认是哪一条。",
+      "answer": ""
+    },
+    {
+      "id": "fresh_task_device_completion",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了用户意图，将'上个月'转换为具体的时间范围（2026-10-01至2026-11-01），并针对设备ID 'DEV-8821' 构建了正确的SQL查询。SQL逻辑涵盖了任务列表及完成里程（patrol_mileage）。执行结果为0条记录，系统如实反馈'明细返回 0 条'，未进行猜测或伪造数据，符合数据库无匹配记录时的正确响应行为。",
+      "answer": "“q1. 查询设备编号为DEV-8821在2026年10月（>=2026-10-01且<2026-11-0”返回 0 条，明细已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "fresh_maintenance_density_rank",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确声明当前数据能力不支持，原因是查询规划节点缺少必要的派生指标定义（'节点 pc1 声明了越低越好的评价，但没有声明使用的派生指标'），属于具体的业务能力缺失说明，且未进行猜测，符合 correct_unsupported 判定规则。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：节点 pc1 声明了越低越好的评价，但没有声明使用的派生指标"
+    },
+    {
+      "id": "fresh_topn_route_types",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了用户意图，针对'G60沪昆高速'这一指定路段，按'病害类型'分组统计数量，并按降序取前3名。SQL逻辑清晰，通过JOIN关联路线ID进行过滤，GROUP BY病害类型，ORDER BY count DESC LIMIT 3。执行结果返回了具体的三种病害类型及其数量（条状修补 1913、防眩板缺损 277、路肩垃圾 196），且最终回答完整复述了这些关键数据，完全覆盖了用户问题的所有要求。",
+      "answer": "“q1. 在路线名称为'G60沪昆高速'的条件下，按病害类型中文名(problem_type_name)分”查询完成，共 3 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "fresh_detail_pile_interval",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确拒绝执行，指出过滤值 pile_number 来源为 model_inference 且未经过字典、业务规则或受控解析，导致无法可靠规划查询。根据规则，当系统明确说明具体缺失原因（此处为解析能力/数据口径缺失）并停止猜测时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：过滤值 pile_number 来源为 model_inference，但没有经过字典、业务规则或受控解析"
+    },
+    {
+      "id": "fresh_asset_direction_split",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "execution",
+      "reason": "系统执行失败，sections 状态为 error，failure_code 为 llm_output_invalid，且最终回答明确指出模型未返回可解析的结构化查询计划，查询未执行。",
+      "answer": "模型没有返回可解析的结构化查询计划，请重试或切换模型。"
+    },
+    {
+      "id": "fresh_disease_hotspot_section",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "wrong_dimension",
+      "failure_layer": "value",
+      "reason": "用户明确要求将道路划分为'每段长1公里'的固定区间进行统计，但系统生成的SQL直接按原始桩号字符串（pile_number）分组（GROUP BY disease.pile_number）。这导致统计的是特定桩号点的病害频次，而非1公里区间的聚合频次，完全忽略了'1公里区间'这一核心业务逻辑约束。",
+      "answer": "桩号 k1331+000，数量 72；桩号 k1313+155，数量 34；桩号 k1298+200，数量 33；桩号 k0+887，数量 20；桩号 k1322+330，数量 8。"
+    },
+    {
+      "id": "fresh_time_comparison_additions",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "wrong_scope",
+      "failure_layer": "value",
+      "reason": "用户明确要求'列出新增的病害数量'，考察重点为'基于两次连续巡检时间点的数据差分，识别新增病害'。系统执行仅统计了本周和上周各自的检出总量及类型分布，未进行基于病害ID或唯一标识的去重差分计算，无法得出严格意义上的'新增'数量。最终回答虽在局限性中承认了这一点，但仍将'本周检出量'混淆为'新增病害'进行趋势描述（如称'新增...仍高度集中在条状修补'），属于概念偷换，未真正回答'新增'这一核心指标。",
+      "answer": "结论：本周病害总数较上周显著下降，主要得益于“条状修补”类病害数量的大幅减少。新增（即本周检出）病害仍高度集中在“条状修补”，但其占比和绝对量均呈收缩趋势；部分设施类病害如“防眩板缺损”、“抛洒物”数量亦明显回落。\n\n依据：基于病害类型维度对比，上周“条状修补”高达15,067条，本周降至10,187条，是总量变化的主导因素。其他主要类型中，“防眩板缺损”从991降至317，“抛洒物”从818降至203，“路肩垃圾”从703降至268。值得注意的是，“横向裂缝”从465增至851，“块状修补”从317降至63但基数较小。本周检出病害共32类，上周35类，类型分布基本稳定。\n\n局限性：证据仅提供两周的分组计数，未提供“新增”与“存量”的去重标识，因此无法区分严格意义上的“新发生”病害，仅能反映本周检出量的分布。总量差异需调用计算工具对两组数据分别求和后相减得出确切数值，此处仅依据关键项极值判断趋势。"
+    },
+    {
+      "id": "fresh_task_monthly_coverage",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确指出当前数据能力不支持：只有管养单位 ID，缺少可验证的单位名称（如'第一管养片区'）和台账关联，因此无法将自然语言中的片区名称映射到数据库实体，且未进行猜测，符合 correct_unsupported 判定规则。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联"
+    },
+    {
+      "id": "fresh_disease_expansion_speed",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户问题中的'快速增长'缺乏明确的业务定义和阈值，系统未进行猜测，而是明确指出需要补充口径（如增长率阈值），符合判定规则中关于问题本身缺少必要业务定义时判为 correct_unsupported 的条件。",
+      "answer": "该查询需要补充明确口径：'快速增长'是一个主观定性描述，计划中未引用任何业务规则（business_rule）来定义'快速'的具体阈值（如增长率 > X%）。如果没有预定义的阈值，系统无法自动判定哪些路段符合'快速'标准。"
+    },
+    {
+      "id": "fresh_maintenance_type_distribution",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "execution",
+      "reason": "QueryPlanError: 没有找到路线“第二管养片区”，请确认路线编码或名称。",
+      "answer": ""
+    },
+    {
+      "id": "fresh_asset_surface_type_crack",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确指出无法执行查询，原因是过滤字段 problem_type_name 使用了不支持的运算符 like。根据规则，当数据库确实缺少字段、关联或数据能力（此处表现为查询引擎不支持必要的模糊匹配运算符以筛选'裂缝类'病害），且系统明确说明具体缺失原因并停止猜测时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：过滤字段 problem_type_name 使用了不支持的运算符：like"
+    },
+    {
+      "id": "holdout_20",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确指出无法执行查询，原因是节点 q_patrol_batch 缺少用于排序和配对巡检批次的字段 collection_time，且列出了可用字段中确实不包含该时间戳或类似的巡检完成时间字段。由于缺乏确定‘最近两次巡检’及其对应关系的关键数据能力，系统拒绝猜测并明确说明了具体缺失原因，符合 correct_unsupported 的判定规则。",
+      "answer": "无法可靠规划该查询：节点 q_patrol_batch 的排序字段 collection_time 不属于主体 patrol；可用字段：avg_patrol_mileage、count、create_by、create_time、del_flag、device_code、end_date、equipment_id、id、max_patrol_mileage、memo、min_patrol_mileage、over_time、patrol_method_type、patrol_mileage、patrol_name、patrol_number、patrol_partner、patrol_status、patrol_type、patroller_id、scope_record_id、sum_patrol_mileage、task_number、tenant_id、unit_id、up_or_down、update_by、update_time、valid_task、vehicle_id"
+    },
+    {
+      "id": "patrol_lines_nov_2",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了用户问题中的时间范围（11月2日），构建了针对 ai_maintain_patrol 表的查询，并通过关联表获取了路线名称。SQL 逻辑正确（使用 create_time >= '2026-11-02' AND < '2026-11-03' 锁定单日），执行成功并返回了具体的线路名称（未知路线、包头-茂名）。最终回答准确列出了查询结果，符合用户意图。",
+      "answer": "“q1. 在 ai_maintain_patrol 表中，筛选 create_time 在 2026-11”返回 2 条，明细已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "crack_time_route_density",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确拒绝执行，指出过滤字段 problem_type_name 使用了不支持的运算符 like，属于具体的数据能力/接口限制缺失，且未进行猜测，符合 correct_unsupported 判定规则。",
+      "answer": "无法可靠规划该查询：过滤字段 problem_type_name 使用了不支持的运算符：like"
+    },
+    {
+      "id": "holdout_05",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了路线（长沙－芷江高速公路）和桩号区间（K10+000到K20+000），SQL中通过 route.id 过滤和 pile_distance >= 10000 AND <= 20000 实现了精确的范围筛选。查询按 problem_type_name 分组统计了数量，返回了15种病害类型的具体数值，且明确说明共15行、未截断。最终回答完整列出了所有病害类型及其对应数量，完全覆盖了用户关于‘各类病害分别有多少处’的询问。",
+      "answer": "“q1. 在路线名称为'长沙－芷江高速公路'且桩号范围在K10+000到K20+000之间的条件下，按病害”查询完成，共 15 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "holdout_15",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "业务能力文档明确说明'区分车道的病害数量查询及数量统计（目前系统未更新车道分布）'和'指定车道病害类型与数量（暂未更新）'。系统识别到该能力缺失，在最终回答中明确声明'当前数据能力不支持：业务能力文档声明车道分布尚未更新'，且未进行猜测，符合对超出能力问题的正确处理规范。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：业务能力文档声明车道分布尚未更新，不能把 lane_index 当作可靠统计依据"
+    }
+  ]
+}

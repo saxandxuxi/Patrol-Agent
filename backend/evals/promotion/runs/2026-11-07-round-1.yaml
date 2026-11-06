@@ -1,0 +1,129 @@
+version: 1
+exam_id: promotion-20261107-004838
+generated_at: '2026-11-07T00:48:38.817780+08:00'
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20261107
+code_fingerprint: cbe0aacf6b1a093f97ed8ea95568d429b18213a7:339a11323da39cef3111096231a83114b8e01b2b484db4b2d6d923741bc7182e
+fresh_case_ids:
+- fresh_lane_disease_unsupported
+- fresh_asset_road_grade_stats
+- fresh_disease_size_filter
+- fresh_time_trend_area
+- fresh_task_device_completion
+- fresh_maintenance_density_rank
+- fresh_topn_route_types
+- fresh_detail_pile_interval
+- fresh_asset_direction_split
+- fresh_disease_hotspot_section
+- fresh_time_comparison_additions
+- fresh_task_monthly_coverage
+- fresh_disease_expansion_speed
+- fresh_maintenance_type_distribution
+- fresh_asset_surface_type_crack
+old_case_ids:
+- holdout_20
+- patrol_lines_nov_2
+- crack_time_route_density
+- holdout_05
+- holdout_15
+cases:
+- id: fresh_lane_disease_unsupported
+  category: 不支持能力
+  question: 请列出G4京港澳高速K100至K120路段第三车道的具体病害分布明细。
+  focus: 系统需明确告知当前车道分布数据未更新，无法提供指定车道的病害查询服务，并说明数据缺失情况。
+  source: fresh
+- id: fresh_asset_road_grade_stats
+  category: 资产
+  question: 统计本月内所有行政等级为“国道”的路段中，检出的病害总数量是多少？
+  focus: 正确筛选行政等级为国道的资产范围，并聚合该范围内所有病害的数量总和。
+  source: fresh
+- id: fresh_disease_size_filter
+  category: 病害
+  question: 在最近一次巡检中，长度超过5米的横向裂缝共有多少处？
+  focus: 结合病害类型（横向裂缝）和尺寸特征（长度>5米）进行过滤，并统计符合条件的病害处数。
+  source: fresh
+- id: fresh_time_trend_area
+  category: 趋势
+  question: 展示S20外环高速在过去六个月中，每月病害总面积的变化趋势图。
+  focus: 按月度时间维度聚合指定路段的病害面积数据，并以趋势形式呈现变化情况。
+  source: fresh
+- id: fresh_task_device_completion
+  category: 设备
+  question: 查询编号为DEV-8821的巡检设备在上个月执行的所有巡检任务及其实际完成里程。
+  focus: 关联设备ID与巡检任务，提取指定时间段内的任务列表及对应的完成里程数据。
+  source: fresh
+- id: fresh_maintenance_density_rank
+  category: 管养
+  question: 按照病害密度从高到低排序，列出所有管养片区的路况评估结果。
+  focus: 计算各片区的病害密度（病害处数/管养里程），并按降序排列展示片区名称及密度值。
+  source: fresh
+- id: fresh_topn_route_types
+  category: TopN
+  question: 找出G60沪昆高速上病害数量最多的前三种病害类型及其具体数量。
+  focus: 在指定路段范围内对病害类型进行分组统计，并按数量降序取前三名。
+  source: fresh
+- id: fresh_detail_pile_interval
+  category: 明细
+  question: 请提供K50+000至K50+500区间内所有检出病害的详细清单，包括桩号、类型和尺寸。
+  focus: 精确匹配起始和结束桩号区间，返回该范围内每一条病害记录的完整字段信息。
+  source: fresh
+- id: fresh_asset_direction_split
+  category: 资产
+  question: 对比分析某路段上行方向和下行方向在最新一次巡检中的病害数量差异。
+  focus: 分别统计同一路线上下行方向的病害数量，并计算或展示两者的差值或对比情况。
+  source: fresh
+- id: fresh_disease_hotspot_section
+  category: 病害
+  question: 识别出本季度内病害发生频率最高的五个具体桩号区间（每段长1公里）。
+  focus: 将道路划分为固定长度的区间，统计各区间病害频次，并输出排名前五的高发区间。
+  source: fresh
+- id: fresh_time_comparison_additions
+  category: 时间
+  question: 对比本周巡检与上周巡检结果，列出新增的病害数量及主要类型分布。
+  focus: 基于两次连续巡检时间点的数据差分，识别新增病害并统计其数量和类型占比。
+  source: fresh
+- id: fresh_task_monthly_coverage
+  category: 巡检任务
+  question: 统计第一管养片区在本月计划巡检里程与实际完成巡检里程的完成率。
+  focus: 获取指定片区和月份的计划与实际里程数据，计算百分比形式的任务完成率。
+  source: fresh
+- id: fresh_disease_expansion_speed
+  category: 趋势
+  question: 哪些路段的坑槽病害面积在连续三次巡检中呈现快速增长趋势？
+  focus: 追踪特定病害类型在多轮巡检中的面积变化，识别增长率显著高于阈值的路段。
+  source: fresh
+- id: fresh_maintenance_type_distribution
+  category: 管养
+  question: 分析第二管养片区内各类病害的分布比例，指出该片区最主要的病害类型是什么。
+  focus: 在指定管养单位范围内统计各病害类型的数量占比，并确定占比最高的类型。
+  source: fresh
+- id: fresh_asset_surface_type_crack
+  category: 资产
+  question: 统计所有沥青路面路段中，裂缝类病害的总长度是多少？
+  focus: 筛选路面类型为沥青的资产，累加其中所有裂缝类病害的长度字段。
+  source: fresh
+- id: holdout_20
+  category: 长期变化
+  question: 比较最近两次巡检，哪些路线的病害面积增长最快？
+  focus: 必须能够可靠配对同一路线的前后巡检；无法配对时必须明确说明限制。
+  source: old
+- id: patrol_lines_nov_2
+  category: 历史题
+  question: 11月2日巡检了哪些线路？
+  focus: ''
+  source: old
+- id: crack_time_route_density
+  category: 历史题
+  question: 裂缝集中在哪几个月？哪些路？这些路的病害密度怎么样？
+  focus: ''
+  source: old
+- id: holdout_05
+  category: 分段查询
+  question: 长沙－芷江高速公路K10+000到K20+000范围内，各类病害分别有多少处？
+  focus: 检查路线和桩号区间过滤，以及病害类型分组。
+  source: old
+- id: holdout_15
+  category: 超出能力
+  question: 2号车道上的病害类型和数量分别是什么？
+  focus: 若当前车道数据不可用，必须明确说明缺失能力，不能猜测。
+  source: old
