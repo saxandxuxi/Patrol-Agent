@@ -156,6 +156,7 @@ class VerificationReport:
 class AnswerPackage:
     text: str
     sections: tuple[dict[str, Any], ...] = ()
+    review_gate: dict[str, Any] | None = None
 
 
 def scope_hash(spec: QuerySpec) -> str:

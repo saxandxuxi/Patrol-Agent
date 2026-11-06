@@ -11,6 +11,7 @@ from app.query.contracts import (
     QuerySpecAmbiguity,
     QuerySpecError,
     ValueBinding,
+    VerificationIssue,
     VerificationReport,
 )
 from app.query.fields import FieldReachSet, PhysicalSchemaView
@@ -402,6 +403,47 @@ class ServiceTests(unittest.TestCase):
         section = result.answer.sections[0]
         self.assertEqual(section["sql"], "SELECT COUNT(*) AS n FROM ai_problem")
         self.assertEqual(section["engine"], "wren")
+
+    @patch("app.query.service.verify_result")
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    @patch("app.query.service.resolve_templates", return_value=empty_candidate_set())
+    @patch("app.query.service.analyze_single_turn")
+    def test_repairable_result_with_rows_attaches_review_gate(
+        self,
+        analyze,
+        _resolve,
+        _compile,
+        _execute,
+        _verify,
+    ):
+        analyze.return_value = count_plan()
+        _compile.return_value = CompiledQuery(
+            "SELECT COUNT(*) AS n FROM ai_problem",
+            "wren",
+            "wren",
+        )
+        _execute.return_value = count_observation()
+        _verify.return_value = VerificationReport(
+            status="repairable",
+            issues=(
+                VerificationIssue(
+                    code="wrong_shape",
+                    message="结果像聚合值，但问题要求明细",
+                    node_id="q1",
+                    stage="semantic",
+                ),
+            ),
+        )
+
+        result = start_single_turn(
+            "把面积前五名和长度前五名的病害调出来",
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+
+        self.assertIsNotNone(result.answer.review_gate)
+        self.assertEqual(result.answer.review_gate["nodes"][0]["node_id"], "q1")
 
     def test_large_distribution_reports_hidden_rows(self):
         answer = _answer_text(

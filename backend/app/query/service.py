@@ -34,10 +34,12 @@ from .contracts import (
     QuerySpecError,
     UserDecision,
     ValueBinding,
+    scope_hash,
 )
 from .executor import execute_compiled
 from .fields import FieldReachHit, FieldReachSet, PhysicalSchemaView
 from .preset_bindings import apply_overrides, values_from_spec
+from .review import ReviewSuspicion, issue_review_gate
 from .template_sources import (
     AutoTemplateProvider,
     BuiltinTemplateProvider,
@@ -644,7 +646,37 @@ def _section_identity(node: Any) -> dict[str, Any]:
         "tool": node.node_type,
         "type": "post_calc" if node.node_type == "post_calc" else "data",
         "view": node.spec.view,
+        "scope_hash": scope_hash(node.spec),
     }
+
+
+def _review_suspicions(
+    plan: QueryPlan,
+    sections: list[dict[str, Any]],
+) -> list[ReviewSuspicion]:
+    suspicions: list[ReviewSuspicion] = []
+    for section in sections:
+        if str(section.get("status") or "") != "repairable":
+            continue
+        if not (section.get("rows") or section.get("preview_rows")):
+            continue
+        failure_code = str(section.get("failure_code") or "")
+        if failure_code in {
+            "execution_failed",
+            "query_compile_failed",
+            "unsupported_query_spec",
+        }:
+            continue
+        suspicions.append(
+            ReviewSuspicion(
+                original_question=plan.question,
+                node_id=str(section.get("node_id") or ""),
+                reason=str(section.get("answer") or "查询结果可能没有回答用户问题"),
+                failure_layer=str(section.get("failure_stage") or "verification"),
+                failure_code=failure_code,
+            )
+        )
+    return suspicions
 
 
 def _execute_plan(
@@ -925,6 +957,11 @@ def _execute_plan(
                     "answer": "；".join(issue.message for issue in report.issues),
                     "status": report.status,
                     "failure_code": failure_code,
+                    "failure_stage": (
+                        report.issues[0].stage
+                        if report.issues
+                        else "verification"
+                    ),
                     "sql": compiled.sql,
                     "engine": compiled.engine,
                     "shape": effective_spec.view,
@@ -963,7 +1000,9 @@ def _execute_plan(
                 "truncated": observation.truncated,
             }
         )
-    return assemble_answer(sections, response_mode=plan.response_mode)
+    answer = assemble_answer(sections, response_mode=plan.response_mode)
+    gate = issue_review_gate(answer, _review_suspicions(plan, sections))
+    return replace(answer, review_gate=gate.to_dict()) if gate else answer
 
 
 def _answer_text(spec: Any, observation: Any) -> str:
