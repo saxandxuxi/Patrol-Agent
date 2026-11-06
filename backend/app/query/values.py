@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -41,10 +42,29 @@ def _shift_months(moment: datetime, months: int) -> datetime:
 
 
 def _relative_time_range(question: str) -> tuple[datetime, datetime] | None:
-    if "近三月" not in question and "近三个月" not in question and "最近三个月" not in question:
+    month_words = {
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+        "十": 10,
+    }
+    match = re.search(
+        r"(?:最近|近)\s*(\d+|[一二两三四五六七八九十])\s*个?月",
+        question,
+    )
+    if not match:
         return None
+    raw_months = match.group(1)
+    months = int(raw_months) if raw_months.isdigit() else month_words[raw_months]
     now = datetime.now()
-    return _shift_months(now, -3), now
+    return _shift_months(now, -months), now
 
 
 def _resolve_damage_type(raw_value: Any, question: str, kind: str) -> ValueBinding:
@@ -138,7 +158,21 @@ def resolve_value(
         )
     if field in _TIME_FIELDS:
         relative = _relative_time_range(question)
-        parsed = relative or parsers.parse_time_range(question)
+        raw_parsed = parsers.parse_time_range(text)
+        question_parsed = parsers.parse_time_range(question)
+        raw_years = set(re.findall(r"(?<!\d)(\d{4})(?!\d)", text))
+        parsed = relative or raw_parsed or question_parsed
+        if raw_parsed and not relative and raw_years and not any(
+            year in question for year in raw_years
+        ):
+            raw_year = int(sorted(raw_years)[0])
+            current_year = datetime.now().year
+            if raw_year != current_year:
+                start, end = parsed
+                parsed = (
+                    start.replace(year=start.year + current_year - raw_year),
+                    end.replace(year=end.year + current_year - raw_year),
+                )
         if parsed:
             start, end = parsed
             start_text = start.strftime("%Y-%m-%d %H:%M:%S")
@@ -146,12 +180,24 @@ def resolve_value(
             if relative or op == "between":
                 storage_value: Any = (start_text, end_text)
                 display_value = f"{start_text} 至 {end_text}"
-            elif op in {">=", ">", "="}:
+            elif op == "=":
+                storage_value = (start_text, end_text)
+                display_value = f"{start_text} 至 {end_text}"
+                op = "between"
+            elif op == ">=":
                 storage_value = start_text
                 display_value = start_text
-            elif op in {"<", "<="}:
+            elif op == ">":
                 storage_value = end_text
                 display_value = end_text
+                op = ">="
+            elif op == "<":
+                storage_value = start_text
+                display_value = start_text
+            elif op == "<=":
+                storage_value = end_text
+                display_value = end_text
+                op = "<"
             else:
                 storage_value = text
                 display_value = text

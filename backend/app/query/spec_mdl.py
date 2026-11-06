@@ -38,6 +38,12 @@ def _numeric_literal(value: Any) -> str:
 
 _FIELD_ALIASES = {
     "road_level": "route_level",
+    "collection_month": "month",
+    "collection_time_month": "month",
+    "create_time_month": "month",
+    "collection_day": "day",
+    "collection_time_day": "day",
+    "create_time_day": "day",
 }
 
 
@@ -103,6 +109,10 @@ def _disease_filter(
         "device_code": "disease.device_code",
         "lane_index": "disease.lane_index",
         "unit_id": "disease.unit_id",
+        "patrol_number": "disease.patrol_number",
+        "problem_number": "disease.problem_number",
+        "task_number": "patrol.task_number",
+        "order_number": "work_order.order_number",
     }
     if normalized == "pile_number":
         distance = _pile_meter(value)
@@ -111,6 +121,17 @@ def _disease_filter(
     expression = expressions.get(normalized)
     if not expression:
         raise UnsupportedQuerySpec(f"病害查询不支持过滤字段：{field}")
+    if normalized == "task_number":
+        joins.add("disease_patrol")
+    elif normalized == "order_number":
+        joins.add("work_order")
+    if op == "between" and normalized in {"collection_time", "create_time"}:
+        values = list(value) if isinstance(value, (list, tuple)) else [value]
+        if len(values) != 2:
+            raise UnsupportedQuerySpec("时间区间必须提供两个边界值")
+        where.append(f"{expression} >= {_literal(values[0])}")
+        where.append(f"{expression} < {_literal(values[1])}")
+        return
     if op in {"in", "between"} or isinstance(value, (list, tuple)):
         values = list(value) if isinstance(value, (list, tuple)) else [value]
         if op == "between":
@@ -185,10 +206,19 @@ def _patrol_filter(
         "patrol_id": "patrol.id",
         "unit_id": "patrol.unit_id",
         "up_or_down": "patrol.up_or_down",
+        "task_number": "patrol.task_number",
+        "patrol_number": "patrol.patrol_number",
     }
     expression = expressions.get(normalized)
     if not expression:
         raise UnsupportedQuerySpec(f"巡检任务查询不支持过滤字段：{field}")
+    if op == "between" and normalized in {"create_time", "collection_time"}:
+        values = list(value) if isinstance(value, (list, tuple)) else [value]
+        if len(values) != 2:
+            raise UnsupportedQuerySpec("时间区间必须提供两个边界值")
+        where.append(f"{expression} >= {_literal(values[0])}")
+        where.append(f"{expression} < {_literal(values[1])}")
+        return
     if op in {"in", "between"} or isinstance(value, (list, tuple)):
         values = list(value) if isinstance(value, (list, tuple)) else [value]
         if op == "between":
@@ -250,6 +280,8 @@ def _disease_dimension(
         )
     if normalized in {"collection_time_month", "month"}:
         return "DATE_FORMAT(disease.collection_time, '%Y-%m')", "月份"
+    if normalized in {"collection_time_day", "day"}:
+        return "DATE(disease.collection_time)", "日期"
     if normalized == "collection_time":
         if view == "trend":
             return "DATE_FORMAT(disease.collection_time, '%Y-%m')", "月份"
@@ -281,6 +313,8 @@ def _patrol_dimension(field: str, joins: set[str]) -> tuple[str, str]:
         return "route.short_name", "路线名称"
     if normalized in {"month", "create_time_month", "collection_time_month"}:
         return "DATE_FORMAT(patrol.create_time, '%Y-%m')", "月份"
+    if normalized in {"day", "create_time_day", "collection_time_day"}:
+        return "DATE(patrol.create_time)", "日期"
     if normalized == "create_time":
         return "patrol.create_time", "创建时间"
     if normalized == "patrol_name":
@@ -372,6 +406,10 @@ def _join_sql(joins: set[str]) -> list[str]:
             )
         else:
             values.append("JOIN route ON disease.routes_id = route.id")
+    if "disease_patrol" in joins:
+        values.append("JOIN patrol ON patrol.id = disease.patrol_id")
+    if "work_order" in joins:
+        values.append("JOIN ai_work_order ON ai_work_order.problem_id = disease.id")
     return values
 
 

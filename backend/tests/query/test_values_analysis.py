@@ -8,6 +8,37 @@ from app.query.values import resolve_value
 
 
 class ValueAnalysisTests(unittest.TestCase):
+    def test_exact_date_filter_uses_its_own_raw_value(self):
+        question = "长沙－芷江高速公路11月2日与3日的病害对比情况"
+
+        third = resolve_value(
+            "collection_time",
+            ">=",
+            "2026-11-03",
+            question,
+            "mysql",
+        )
+        end = resolve_value(
+            "collection_time",
+            "<=",
+            "2026-11-03",
+            question,
+            "mysql",
+        )
+        exclusive = resolve_value(
+            "collection_time",
+            "<",
+            "2026-11-03",
+            question,
+            "mysql",
+        )
+
+        self.assertEqual(third.storage_value, "2026-11-03 00:00:00")
+        self.assertEqual(end.storage_value, "2026-11-04 00:00:00")
+        self.assertEqual(end.op, "<")
+        self.assertEqual(exclusive.storage_value, "2026-11-03 00:00:00")
+        self.assertEqual(exclusive.op, "<")
+
     @patch("app.query.values.route_resolver._resolve_route")
     def test_route_name_resolves_to_storage_id(self, resolve_route):
         resolve_route.return_value = {
@@ -96,6 +127,18 @@ class ValueAnalysisTests(unittest.TestCase):
             ">=",
             "3 months ago",
             "近三月有多少巡检记录？",
+            "mysql",
+        )
+        self.assertEqual(value.op, "between")
+        self.assertEqual(len(value.storage_value), 2)
+        self.assertEqual(value.resolver, "time_range")
+
+    def test_relative_two_month_value_becomes_exact_bounds(self):
+        value = resolve_value(
+            "collection_time",
+            ">=",
+            "2个月前",
+            "计算最近两个月裂缝和坑槽的病害密度",
             "mysql",
         )
         self.assertEqual(value.op, "between")
@@ -315,6 +358,87 @@ class ValueAnalysisTests(unittest.TestCase):
         self.assertIn("route_length_km", plan.nodes[0].spec.metrics)
         calculation = next(node for node in plan.nodes if node.node_type == "post_calc")
         self.assertEqual(calculation.depends_on, (plan.nodes[0].id,))
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_density_contract_keeps_all_disease_datasets_and_drops_route_support(
+        self,
+        chat_json,
+        resolve,
+    ):
+        chat_json.return_value = {
+            "final_goal": "裂缝和坑槽分路线密度",
+            "intent_family": "analysis",
+            "views": [
+                {
+                    "id": "crack",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["route_name"],
+                    "filters": [{"field": "problem_type_name", "op": "=", "raw_value": "裂缝"}],
+                    "output_projection": ["route_name", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                },
+                {
+                    "id": "pothole",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["route_name"],
+                    "filters": [{"field": "problem_type_name", "op": "=", "raw_value": "坑槽"}],
+                    "output_projection": ["route_name", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                },
+                {
+                    "id": "route_support",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["route_length_km"],
+                    "dimensions": ["route_name"],
+                    "filters": [],
+                    "output_projection": ["route_name", "route_length_km"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                },
+            ],
+        }
+        resolve.side_effect = [
+            ValueBinding(
+                field="problem_type_name",
+                op="=",
+                storage_value=["横向裂缝", "网状裂缝", "纵向裂缝"],
+                display_value="裂缝",
+                source="user_explicit",
+                resolver="damage_type_dictionary_expand",
+                raw_text="裂缝",
+            ),
+            ValueBinding(
+                field="problem_type_name",
+                op="=",
+                storage_value="坑槽",
+                display_value="坑槽",
+                source="user_explicit",
+                resolver="damage_type_dictionary",
+                raw_text="坑槽",
+            ),
+        ]
+
+        plan = analyze_single_turn(
+            "计算最近两个月，裂缝和坑槽各自在不同道路上的病害密度",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+
+        self.assertNotIn("route_support", {node.id for node in plan.nodes})
+        calculation = next(node for node in plan.nodes if node.node_type == "post_calc")
+        self.assertEqual(calculation.depends_on, ("crack", "pothole"))
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")

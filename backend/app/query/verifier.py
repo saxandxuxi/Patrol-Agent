@@ -49,7 +49,12 @@ def verify_deterministic(
             )
         )
         return tuple(issues)
-    if observation.rows_fetched == 0:
+    bounded_empty = (
+        observation.rows_fetched == 0
+        and bool(spec.filters)
+        and spec.view in {"distribution", "trend", "top", "list", "detail"}
+    )
+    if observation.rows_fetched == 0 and not bounded_empty:
         issues.append(
             VerificationIssue(
                 code="empty_result",
@@ -102,7 +107,11 @@ def verify_deterministic(
                 for row in observation.preview_rows[:10]
             )
         ]
-        if spec.view == "distribution" and label_columns:
+        if (
+            spec.view == "distribution"
+            and observation.rows_fetched > 0
+            and label_columns
+        ):
             has_label = any(
                 str(row.get(key) or "").strip().upper()
                 not in {"", "NULL", "NONE"}
@@ -127,7 +136,7 @@ def verify_deterministic(
             for row in observation.preview_rows[:10]
             for value in row.values()
         )
-        if not numeric:
+        if observation.rows_fetched > 0 and not numeric:
             issues.append(
                 VerificationIssue(
                     code="missing_numeric_metric",

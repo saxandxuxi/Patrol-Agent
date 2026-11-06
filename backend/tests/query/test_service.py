@@ -19,8 +19,10 @@ from app.query.service import (
     _default_post_calc_executor,
     _default_template_executor,
     _default_wren_executor,
+    _observation_payload,
     _scope_key,
     _simple_spec_mdl,
+    _terminal_sections,
     start_single_turn,
 )
 from app.query.spec_mdl import UnsupportedQuerySpec
@@ -99,6 +101,59 @@ def count_observation() -> ExecutionObservation:
 
 
 class ServiceTests(unittest.TestCase):
+    def test_empty_observation_keeps_logical_columns_for_dependencies(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("problem_type_name",),
+            filters=(),
+            output_projection=("problem_type_name", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+        payload = _observation_payload(
+            ExecutionObservation(
+                node_id="q1",
+                ok=True,
+                engine="wren",
+                sql="SELECT 1",
+                columns=(),
+                rows_fetched=0,
+            ),
+            spec=spec,
+            question="11月2日病害分布",
+            answer="查询返回 0 行",
+        )
+        self.assertEqual(payload["columns"], ["problem_type_name", "count"])
+
+    def test_terminal_sections_keep_only_final_calculation(self):
+        plan = QueryPlan(
+            question="对比",
+            nodes=(
+                PlanNode(id="q1", spec=count_plan().nodes[0].spec),
+                PlanNode(id="q2", spec=count_plan().nodes[0].spec),
+                PlanNode(
+                    id="calc",
+                    spec=count_plan().nodes[0].spec,
+                    depends_on=("q1", "q2"),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+        sections = [
+            {"node_id": "q1", "answer": "第一组", "status": "accepted"},
+            {"node_id": "q2", "answer": "第二组", "status": "accepted"},
+            {"node_id": "calc", "answer": "对比结论", "status": "accepted"},
+        ]
+
+        terminal = _terminal_sections(plan, sections)
+
+        self.assertEqual(terminal, [sections[2]])
+
     @patch("app.query.service.wren_engine.compile_mdl_sql_verbose")
     @patch("app.query.service.sql_engine.generate_mdl_sql", return_value="MDL SQL")
     @patch("app.query.service.nl2sql.retrieve_query_context", return_value={})

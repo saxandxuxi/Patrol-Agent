@@ -17,6 +17,103 @@ def binding(field, op, value):
 
 
 class SpecMdlTests(unittest.TestCase):
+    def test_disease_day_distribution_uses_calendar_day(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("collection_time_day",),
+                filters=(),
+                output_projection=("collection_time_day", "count"),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="按日统计病害数量",
+            )
+        )
+
+        self.assertIn("DATE(disease.collection_time) AS 日期", sql)
+        self.assertIn("GROUP BY DATE(disease.collection_time)", sql)
+
+    def test_month_dimension_aliases_compile_consistently(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("collection_month",),
+                filters=(),
+                output_projection=("collection_month", "count"),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="按月份统计病害数量",
+            )
+        )
+
+        self.assertIn("DATE_FORMAT(disease.collection_time, '%Y-%m') AS 月份", sql)
+
+    def test_disease_identifier_filter_joins_owning_task(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("problem_type_name",),
+                filters=(binding("task_number", "=", "XJJL202611040003"),),
+                output_projection=("problem_type_name", "count"),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="工单任务检出的病害分布",
+            )
+        )
+
+        self.assertIn("JOIN patrol ON patrol.id = disease.patrol_id", sql)
+        self.assertIn("patrol.task_number = 'XJJL202611040003'", sql)
+        self.assertIn("GROUP BY COALESCE(disease.problem_type_name", sql)
+
+    def test_time_between_uses_half_open_interval(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="count",
+                metrics=("count",),
+                dimensions=(),
+                filters=(
+                    binding(
+                        "collection_time",
+                        "between",
+                        ("2026-11-03 00:00:00", "2026-11-04 00:00:00"),
+                    ),
+                ),
+                output_projection=(),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="11月3日病害数量",
+            )
+        )
+
+        self.assertIn(
+            "disease.collection_time >= '2026-11-03 00:00:00'",
+            sql,
+        )
+        self.assertIn(
+            "disease.collection_time < '2026-11-04 00:00:00'",
+            sql,
+        )
+        self.assertNotIn("BETWEEN", sql)
+
     def test_route_level_uses_route_ledger_and_display_labels(self):
         sql = compile_spec_mdl(
             QuerySpec(

@@ -174,7 +174,7 @@ def _print_success_observation(step: dict[str, Any], obs: dict[str, Any]) -> Non
     }
     print(
         "[react][success] "
-        + json.dumps(record, ensure_ascii=False, default=str),
+        + json.dumps(record, ensure_ascii=True, default=str),
         flush=True,
     )
 
@@ -632,10 +632,18 @@ def _section(step: dict[str, Any], obs: dict[str, Any]) -> dict[str, Any]:
         "post_calc": "post_calc",
         "analysis": "analysis",
     }
+    tool = _tool_for_step(step)
+    compact_question = " ".join(question.split())
+    title = (
+        f"{int(step.get('id') or 0)}. {compact_question[:48]}"
+        if compact_question
+        else tool
+    )
     return {
         "id": int(step.get("id") or 0),
         "type": type_map.get(str(step.get("type") or ""), "data"),
-        "title": _tool_for_step(step),
+        "title": title,
+        "tool": tool,
         "question": question,
         "reply": normalize_week_label(
             str(data.get("answer") or obs.get("summary") or "")

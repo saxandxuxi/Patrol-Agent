@@ -2,11 +2,218 @@ import unittest
 from unittest.mock import patch
 
 from app.query.analysis import analyze_single_turn
+from app.query.contracts import ValueBinding
 from app.query.fields import FieldReachSet, PhysicalSchemaView
 from app.services.plan_contract import build_step_contract
 
 
 class QueryPlanningTests(unittest.TestCase):
+    @patch("app.query.analysis.chat_json")
+    def test_route_dependency_uses_display_name_contract(self, chat_json):
+        chat_json.return_value = {
+            "final_goal": "Top路线多指标",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "top",
+                    "action": "query_data",
+                    "subject": "disease",
+                    "view": "top",
+                    "metrics": ["count"],
+                    "dimensions": ["routes_id"],
+                    "filters": [],
+                    "output_projection": ["routes_id", "count"],
+                    "order_by": [{"field": "count", "direction": "desc"}],
+                    "limit": 5,
+                    "required_assertions": [],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "stats",
+                    "action": "query_data",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count", "sum_area"],
+                    "dimensions": ["routes_id"],
+                    "filters": [],
+                    "output_projection": ["routes_id", "count", "sum_area"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": ["top"],
+                    "inputs": [
+                        {
+                            "from_node": "top",
+                            "from_field": "routes_id",
+                            "to_field": "routes_id",
+                            "op": "in",
+                        }
+                    ],
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "病害数量最多的前5条路线分别有多少处、总面积多少平方米？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+
+        self.assertEqual(plan.nodes[0].spec.dimensions, ("route_name",))
+        self.assertEqual(plan.nodes[1].spec.dimensions, ("route_name",))
+        binding = plan.nodes[1].spec.input_bindings[0]
+        self.assertEqual(binding.from_field, "route_name")
+        self.assertEqual(binding.to_field, "route_name")
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_patrol_route_question_is_normalized_to_patrol_subject(
+        self,
+        chat_json,
+        resolve_value,
+    ):
+        chat_json.return_value = {
+            "final_goal": "11月2日巡检路线",
+            "intent_family": "detail",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "route",
+                    "view": "list",
+                    "metrics": [],
+                    "dimensions": ["route_name"],
+                    "filters": [
+                        {
+                            "field": "patrol_date",
+                            "op": ">=",
+                            "raw_value": "2026-11-02",
+                        }
+                    ],
+                    "output_projection": ["route_name"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        resolve_value.return_value = ValueBinding(
+            field="patrol_date",
+            op=">=",
+            storage_value="2026-11-02",
+            display_value="2026-11-02",
+            source="user_explicit",
+            resolver="time_range",
+            raw_text="2026-11-02",
+        )
+
+        plan = analyze_single_turn(
+            "11月2日巡检了哪些线路？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+
+        self.assertEqual(plan.nodes[0].spec.subject, "patrol")
+        self.assertEqual(plan.nodes[0].spec.dimensions, ("route_name",))
+        self.assertEqual(plan.nodes[0].spec.filters[0].field, "create_time")
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_planner_order_alias_is_normalized(self, chat_json, _resolve):
+        chat_json.return_value = {
+            "final_goal": "按数量降序",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["problem_type_name"],
+                    "filters": [],
+                    "output_projection": ["problem_type_name", "count"],
+                    "order_by": [{"field": "count", "order": "desc"}],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "按病害类型统计数量并降序",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+
+        self.assertEqual(plan.nodes[0].spec.order_by[0]["direction"], "desc")
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_identifier_dictionary_normalizes_patrol_task_number(
+        self,
+        chat_json,
+        resolve_value,
+    ):
+        chat_json.return_value = {
+            "final_goal": "任务检出的病害分布",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "统计工单XJJL202611040003检出的病害分布",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["problem_type_name"],
+                    "filters": [
+                        {
+                            "field": "work_order_id",
+                            "op": "=",
+                            "raw_value": "XJJL202611040003",
+                        }
+                    ],
+                    "output_projection": ["problem_type_name", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        resolve_value.return_value = ValueBinding(
+            field="work_order_id",
+            op="=",
+            storage_value="XJJL202611040003",
+            display_value="XJJL202611040003",
+            source="user_explicit",
+            resolver="identity:work_order_id",
+            raw_text="XJJL202611040003",
+        )
+
+        plan = analyze_single_turn(
+            "工单XJJL202611040003检出病害数量以及病害分布情况",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+
+        filters = plan.nodes[0].spec.filters
+        self.assertIn("task_number", {item.field for item in filters})
+        self.assertNotIn("work_order_id", {item.field for item in filters})
+        task = next(item for item in filters if item.field == "task_number")
+        self.assertEqual(task.resolver, "identifier_dictionary:XJJL")
+
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
     def test_analysis_action_is_normalized_to_post_calc(self, chat_json, _resolve):

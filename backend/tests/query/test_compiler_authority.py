@@ -71,7 +71,14 @@ class CompilerAuthorityTests(unittest.TestCase):
 
         mdl_sql = compile_sql.call_args.args[1]
         self.assertNotIn("route_name IS NULL", mdl_sql)
-        self.assertIn("disease.collection_time BETWEEN", mdl_sql)
+        self.assertIn(
+            "disease.collection_time >= '2026-07-01 00:00:00'",
+            mdl_sql,
+        )
+        self.assertIn(
+            "disease.collection_time < '2026-10-01 00:00:00'",
+            mdl_sql,
+        )
         self.assertIn("2026-07-01", mdl_sql)
         build_plan.assert_not_called()
         generate_sql.assert_not_called()

@@ -61,6 +61,7 @@ def _should_execute_as_post_calc(question: str) -> bool:
             text,
             re.I,
         )
+        or re.search(r"对比|比较|差异|变化", text)
     )
 
 

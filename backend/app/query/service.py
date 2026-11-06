@@ -318,6 +318,24 @@ def assemble_answer(sections: list[dict[str, Any]]) -> AnswerPackage:
     return AnswerPackage("；".join(texts) + "。", tuple(sections))
 
 
+def _terminal_sections(
+    plan: QueryPlan,
+    sections: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    dependency_ids = {
+        dependency
+        for node in plan.nodes
+        for dependency in node.depends_on
+    }
+    terminal = [
+        section
+        for section in sections
+        if str(section.get("status") or "accepted") != "accepted"
+        or str(section.get("node_id") or "") not in dependency_ids
+    ]
+    return terminal or sections
+
+
 def _hashable(value: Any) -> Any:
     if isinstance(value, dict):
         return tuple(
@@ -429,13 +447,30 @@ def _numeric_value(observation: Any) -> int | None:
 def _observation_payload(
     observation: Any,
     *,
+    spec: Any,
     question: str,
     answer: str,
 ) -> dict[str, Any]:
     rows = observation.result_rows or observation.preview_rows
+    group_labels: dict[str, Any] = {}
+    for item in spec.filters:
+        if str(item.field).rsplit(".", 1)[-1] == "problem_type_name":
+            group_labels["病害类型"] = item.display_value
+        elif str(item.field).rsplit(".", 1)[-1] == "up_or_down":
+            group_labels["上下行方向"] = item.display_value
     return {
         "question": question,
-        "columns": list(observation.columns),
+        "group_labels": group_labels,
+        "columns": list(observation.columns)
+        or list(
+            dict.fromkeys(
+                [
+                    *spec.output_projection,
+                    *spec.dimensions,
+                    *spec.metrics,
+                ]
+            )
+        ),
         "rows": [dict(row) for row in rows],
         "reply": answer,
         "total_count": observation.total_count,
@@ -490,7 +525,7 @@ def _trace_node_result(
     }
     print(
         "[query][node] "
-        + json.dumps(record, ensure_ascii=False, default=str),
+        + json.dumps(record, ensure_ascii=True, default=str),
         flush=True,
     )
 
@@ -570,6 +605,7 @@ def _execute_plan(
             upstream = {
                 dependency: _observation_payload(
                     accepted_observations[dependency],
+                    spec=accepted_specs.get(dependency),
                     question=next(
                         (
                             candidate_node.spec.question
@@ -644,6 +680,9 @@ def _execute_plan(
                     "answer": answer,
                     "status": "accepted",
                     "rows_fetched": len(rows),
+                    "columns": list(observation.columns),
+                    "preview_rows": list(observation.preview_rows),
+                    "rows": list(observation.result_rows),
                 }
             )
             continue
@@ -756,7 +795,7 @@ def _execute_plan(
                 "truncated": observation.truncated,
             }
         )
-    return assemble_answer(sections)
+    return assemble_answer(_terminal_sections(plan, sections))
 
 
 def _answer_text(spec: Any, observation: Any) -> str:

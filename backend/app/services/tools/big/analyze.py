@@ -45,9 +45,9 @@ def analyze(
         ok=True,
         summary=str(payload.get("reply") or ""),
         data={
-            "row_count": 0,
-            "columns": [],
-            "preview_rows": [],
+            "row_count": len(payload.get("rows") or []),
+            "columns": list(payload.get("columns") or []),
+            "preview_rows": list(payload.get("rows") or [])[:10],
             "produced": {},
             "truncated": False,
             "answer": str(payload.get("reply") or ""),

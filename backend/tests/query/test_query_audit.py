@@ -8,6 +8,36 @@ from app.query.fields import FieldReachSet, PhysicalSchemaView
 
 class QueryAuditTests(unittest.TestCase):
     @patch("app.query.analysis.audit_query_plan")
+    @patch("app.query.analysis._analyze_once")
+    def test_planning_parse_error_gets_one_feedback_retry(
+        self,
+        analyze_once,
+        audit,
+    ):
+        from tests.query.factories import count_plan
+
+        analyze_once.side_effect = [
+            QuerySpecAmbiguity("查询条件缺少可执行值"),
+            count_plan(),
+        ]
+        audit.return_value = {"complete": True, "issues": []}
+
+        plan = analyze_single_turn(
+            "需要重试的问题",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+        )
+
+        self.assertEqual(len(plan.nodes), 1)
+        self.assertEqual(analyze_once.call_count, 2)
+        self.assertIn(
+            "解析失败",
+            analyze_once.call_args_list[1].args[-1],
+        )
+
+    @patch("app.query.analysis.audit_query_plan")
     @patch("app.query.analysis.chat_json")
     def test_unresolved_plan_is_reported_as_ambiguous_scope(
         self,

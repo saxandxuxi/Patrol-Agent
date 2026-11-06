@@ -3,6 +3,7 @@ import unittest
 from app.query.compiler import CompiledQuery
 from app.query.contracts import ExecutionObservation, QuerySpec
 from app.query.verifier import verify_result
+from app.query.contracts import ValueBinding
 from tests.query.factories import count_spec, detail_spec
 
 
@@ -51,6 +52,45 @@ def count_observation() -> ExecutionObservation:
 
 
 class VerifierTests(unittest.TestCase):
+    def test_bounded_empty_distribution_is_valid_zero_result(self):
+        spec = detail_spec(
+            id="q1",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("problem_type_name",),
+            filters=(
+                ValueBinding(
+                    field="collection_time",
+                    op="between",
+                    storage_value=(
+                        "2026-11-02 00:00:00",
+                        "2026-11-03 00:00:00",
+                    ),
+                    display_value="2026-11-02",
+                    source="user_explicit",
+                    resolver="time_range",
+                    raw_text="2026-11-02",
+                ),
+            ),
+            output_projection=("problem_type_name", "count"),
+            limit=None,
+        )
+        report = verify_result(
+            spec,
+            compiled_detail(),
+            ExecutionObservation(
+                node_id="q1",
+                ok=True,
+                engine="wren",
+                sql="SELECT 1",
+                columns=("病害类型", "数量"),
+                row_count=0,
+                rows_fetched=0,
+                preview_rows=(),
+            ),
+        )
+        self.assertEqual(report.status, "accepted")
+
     def test_distribution_rejects_null_group_label(self):
         spec = QuerySpec(
             id="q1",

@@ -2573,8 +2573,15 @@ def _analysis_payload(
     question = str(task.get("question") or "")
     data_parts: list[str] = []
     knowledge_parts: list[str] = []
-    for task_id in task.get("depends_on") or []:
-        dependency = results.get(int(task_id))
+    declared_ids = [int(item) for item in task.get("depends_on") or []]
+    selected_ids = declared_ids or sorted(results)
+    selected_dependencies = [
+        results[task_id]
+        for task_id in selected_ids
+        if task_id in results
+    ]
+    for task_id in selected_ids:
+        dependency = results.get(task_id)
         if not dependency:
             continue
         reply = str(dependency.get("reply") or "").strip()
@@ -2596,7 +2603,7 @@ def _analysis_payload(
             data_parts.append(f"- {label + '：' if label else ''}前置数据无结果：{reply[:400]}")
     # 依赖没标全时兜底：把其余子结果也带上（宁可多给上下文，不可漏）
     for task_id, dependency in results.items():
-        if int(task_id) in (task.get("depends_on") or []):
+        if int(task_id) in selected_ids:
             continue
         reply = str(dependency.get("reply") or "").strip()
         if not reply:
@@ -2609,6 +2616,30 @@ def _analysis_payload(
             data_parts.append(f"- {label + '：' if label else ''}{reply[:300]}")
         else:
             knowledge_parts.append(reply[:800])
+    comparison = _compare_datasets(question, selected_dependencies)
+    if comparison and not knowledge_parts:
+        return {
+            **comparison,
+            "thinking": "",
+            "source": "analysis",
+            "engine": "post_calc",
+            "answer_format": "table",
+            "sql": None,
+            "chart_data": None,
+            "result_id": str(uuid.uuid4()),
+            "references": [],
+        }
+    if comparison:
+        data_parts.append(
+            "\n- 确定性数据对比结果（直接采用，不要重算）：\n"
+            + str(comparison.get("reply") or "")
+            + "\n"
+            + json.dumps(
+                comparison.get("rows") or [],
+                ensure_ascii=False,
+                default=str,
+            )[:8000]
+        )
     if "密度" in question:
         derived = _density_rows(
             question,
@@ -2782,6 +2813,173 @@ def _ratio_and_average_conclusion(
     return "；".join(parts)
 
 
+def _compare_datasets(
+    question: str,
+    deps: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """按唯一业务键对比两组行数据，输出新增、缺失和字段变化。"""
+    if not re.search(r"对比|比较|差异|变化", question):
+        return None
+    candidates = [
+        dep
+        for dep in deps
+        if isinstance(dep.get("rows"), list)
+    ]
+    if len(candidates) < 2:
+        return None
+    left_rows = [
+        dict(row)
+        for row in candidates[0].get("rows") or []
+        if isinstance(row, dict) and row
+    ]
+    right_rows = [
+        dict(row)
+        for row in candidates[1].get("rows") or []
+        if isinstance(row, dict) and row
+    ]
+    left_columns = (
+        list(left_rows[0])
+        if left_rows
+        else [str(item) for item in candidates[0].get("columns") or []]
+    )
+    right_columns = (
+        list(right_rows[0])
+        if right_rows
+        else [str(item) for item in candidates[1].get("columns") or []]
+    )
+    common_columns = [
+        column
+        for column in left_columns
+        if column in right_columns
+    ]
+    if not common_columns:
+        return None
+    if not left_rows and not right_rows:
+        return {
+            "reply": "两组均无匹配记录，未发现可比较的数据差异。",
+            "source": "calc",
+            "engine": "post_calc",
+            "accepted": True,
+            "columns": common_columns,
+            "rows": [],
+        }
+
+    def normalized(value: Any) -> str:
+        return str("" if value is None else value).strip()
+
+    def comparable(value: Any) -> str:
+        text = normalized(value)
+        try:
+            return f"{float(text):.12g}"
+        except (TypeError, ValueError):
+            return text
+
+    hint_pattern = re.compile(
+        r"编号|全称|名称|桩号|代码|id$|路线|路段|任务|工单",
+        re.I,
+    )
+    key_column = ""
+    for column in sorted(
+        common_columns,
+        key=lambda item: (not bool(hint_pattern.search(item)), item),
+    ):
+        left_keys = [normalized(row.get(column)) for row in left_rows]
+        right_keys = [normalized(row.get(column)) for row in right_rows]
+        if (
+            (not left_keys or all(left_keys))
+            and (not right_keys or all(right_keys))
+            and len(set(left_keys)) == len(left_keys)
+            and len(set(right_keys)) == len(right_keys)
+        ):
+            key_column = column
+            break
+    if not key_column:
+        return None
+    compare_columns = [
+        column
+        for column in common_columns
+        if column != key_column
+    ]
+    left_by_key = {
+        normalized(row.get(key_column)): row
+        for row in left_rows
+    }
+    right_by_key = {
+        normalized(row.get(key_column)): row
+        for row in right_rows
+    }
+    output_rows: list[dict[str, Any]] = []
+    added = sorted(set(right_by_key) - set(left_by_key))
+    removed = sorted(set(left_by_key) - set(right_by_key))
+    changed = 0
+    for key in added:
+        output_rows.append(
+            {
+                key_column: key,
+                "差异类型": "新增",
+                "字段": "",
+                "第一组": "",
+                "第二组": json.dumps(
+                    right_by_key[key],
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            }
+        )
+    for key in removed:
+        output_rows.append(
+            {
+                key_column: key,
+                "差异类型": "缺失",
+                "字段": "",
+                "第一组": json.dumps(
+                    left_by_key[key],
+                    ensure_ascii=False,
+                    default=str,
+                ),
+                "第二组": "",
+            }
+        )
+    for key in sorted(set(left_by_key) & set(right_by_key)):
+        left = left_by_key[key]
+        right = right_by_key[key]
+        for column in compare_columns:
+            before = comparable(left.get(column))
+            after = comparable(right.get(column))
+            if before == after:
+                continue
+            changed += 1
+            output_rows.append(
+                {
+                    key_column: key,
+                    "差异类型": "字段变化",
+                    "字段": column,
+                    "第一组": before,
+                    "第二组": after,
+                }
+            )
+    reply = (
+        f"按“{key_column}”匹配两组数据："
+        f"新增 {len(added)}，缺失 {len(removed)}，字段变化 {changed}"
+    )
+    if not output_rows:
+        reply += "；未发现差异"
+    return {
+        "reply": reply + "。",
+        "source": "calc",
+        "engine": "post_calc",
+        "accepted": True,
+        "columns": [
+            key_column,
+            "差异类型",
+            "字段",
+            "第一组",
+            "第二组",
+        ],
+        "rows": output_rows[:500],
+    }
+
+
 def _per_group_max_rows(
     question: str,
     deps: list[dict[str, Any]],
@@ -2889,7 +3087,7 @@ def _density_rows(
     if "密度" not in question:
         return None
     rows = [
-        dict(row)
+        _row_with_group_labels(dep, row)
         for dep in deps
         for row in (dep.get("rows") or [])
         if isinstance(row, dict) and row
@@ -2921,19 +3119,20 @@ def _density_rows(
         ),
         "",
     )
-    label_column = next(
-        (
-            column
-            for column in columns
-            if column not in {count_column, length_column}
-            and any(
-                not re.fullmatch(r"-?\d+(?:\.\d+)?", str(row.get(column) or "").strip())
-                for row in rows
+    label_columns = [
+        column
+        for column in columns
+        if column
+        not in {count_column, length_column, area_column}
+        and any(
+            not re.fullmatch(
+                r"-?\d+(?:\.\d+)?",
+                str(row.get(column) or "").strip(),
             )
-        ),
-        "",
-    )
-    if not (count_column and length_column and label_column):
+            for row in rows
+        )
+    ]
+    if not (count_column and length_column and label_columns):
         return None
     area_density = bool(re.search(r"面积\s*[/÷]\s*长度|面积密度", question))
     out: list[dict[str, Any]] = []
@@ -2945,12 +3144,14 @@ def _density_rows(
             continue
         if length <= 0:
             continue
-        item = {
-            label_column: row.get(label_column),
-            count_column: row.get(count_column),
-            length_column: row.get(length_column),
-            "密度_处_per_km": round(count / length, 4),
-        }
+        item = {column: row.get(column) for column in label_columns}
+        item.update(
+            {
+                count_column: row.get(count_column),
+                length_column: row.get(length_column),
+                "密度_处_per_km": round(count / length, 4),
+            }
+        )
         if area_column:
             try:
                 area = float(str(row.get(area_column)))
@@ -2968,16 +3169,54 @@ def _density_rows(
         key=lambda item: float(item.get(metric) or 0),
         reverse=True,
     )
-    top = out[0]
-    reply = (
-        f"密度最高的是{top[label_column]}，"
-        f"{top['密度_处_per_km']} 处/公里"
-        f"（{top[count_column]} 处 ÷ {top[length_column]} 公里）"
-    )
-    if area_column:
-        reply += f"；面积密度 {top['面积密度_㎡_per_km']} ㎡/公里"
-    reply += "。"
-    selected = [label_column, count_column]
+
+    def density_text(item: dict[str, Any]) -> str:
+        text = (
+            f"{item['密度_处_per_km']} 处/公里"
+            f"（{item[count_column]} 处 ÷ {item[length_column]} 公里）"
+        )
+        if area_column:
+            text += f"；面积密度 {item['面积密度_㎡_per_km']} ㎡/公里"
+        return text
+
+    route_columns = [
+        column
+        for column in label_columns
+        if re.search(r"路线|道路|route", column, re.I)
+    ]
+    subgroup_columns = [
+        column
+        for column in label_columns
+        if column not in route_columns
+    ]
+    if subgroup_columns:
+        grouped_tops: dict[tuple[str, ...], dict[str, Any]] = {}
+        for item in out:
+            key = tuple(
+                str(item.get(column) or "")
+                for column in subgroup_columns
+            )
+            grouped_tops.setdefault(key, item)
+        summaries: list[str] = []
+        for key, top in grouped_tops.items():
+            subgroup_text = " / ".join(part for part in key if part)
+            route_text = " / ".join(
+                str(top.get(column) or "")
+                for column in route_columns
+            )
+            subject = subgroup_text or "全部记录"
+            if route_text:
+                subject += f"：{route_text}"
+            summaries.append(f"{subject} 密度最高，{density_text(top)}")
+        reply = "；".join(summaries) + "。"
+    else:
+        top = out[0]
+        top_label = " / ".join(
+            str(top.get(column) or "")
+            for column in label_columns
+        )
+        reply = f"密度最高的是{top_label}，{density_text(top)}。"
+    selected = [*label_columns, count_column]
     if area_column:
         selected.append(area_column)
     selected.extend([length_column, "密度_处_per_km"])
@@ -3163,6 +3402,16 @@ def _per_group_average_rows(
     }
 
 
+def _row_with_group_labels(
+    dep: dict[str, Any],
+    row: dict[str, Any],
+) -> dict[str, Any]:
+    item = dict(row)
+    for key, value in (dep.get("group_labels") or {}).items():
+        item.setdefault(str(key), value)
+    return item
+
+
 def _post_calc_payload(
     task: dict[str, Any],
     results: dict[int, dict[str, Any]],
@@ -3173,11 +3422,19 @@ def _post_calc_payload(
     更复杂的（比例、增长率）才交给 LLM，且只允许用前序结果里的数字。
     """
     deps = [results[tid] for tid in (task.get("depends_on") or []) if tid in results]
-    rows = [row for dep in deps for row in (dep.get("rows") or [])]
+    rows = [
+        _row_with_group_labels(dep, row)
+        for dep in deps
+        for row in (dep.get("rows") or [])
+        if isinstance(row, dict)
+    ]
     question = str(task.get("question") or "")
     ai_reliability = _ai_reliability_conclusion(question, deps)
     if ai_reliability:
         return ai_reliability
+    comparison = _compare_datasets(question, deps)
+    if comparison:
+        return comparison
     density = _density_rows(question, deps)
     if not density and "严重" in question:
         density = _density_rows("病害密度", deps)
