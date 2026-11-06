@@ -1,0 +1,194 @@
+{
+  "exam_id": "promotion-20261107-012543",
+  "code_fingerprint": "content:2e901ab2befc13e8c132dc9b3cd7211d239e398574e77793724291b9d5c4e4c7",
+  "passed_fresh": 12,
+  "total_fresh": 15,
+  "passed_old": 4,
+  "total_old": 5,
+  "passed_total": 16,
+  "total": 20,
+  "promoted": true,
+  "promotion_reason": "达到 15 新题 80% 和 5 旧题 80% 晋级线",
+  "results": [
+    {
+      "id": "fresh_asset_road_grade_trend",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "compiler",
+      "reason": "系统返回 error 为 null 但 sections 状态为 unsupported，且 failure_code 为 query_plan_not_executable，表明查询计划生成失败。根据规则，section 为 blocked/repairable/error 或执行失败时不得判为 correct_unsupported。此处属于系统内部规划逻辑错误（未正确生成包含 post_calc 节点的 Plan），而非数据能力缺失，故判定为执行失败。",
+      "answer": "无法可靠规划该查询：趋势问题必须增加一个消费数据结果的 post_calc 节点，并使用 view=trend"
+    },
+    {
+      "id": "fresh_disease_type_direction_compare",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了用户问题中的实体（G4京港澳高速）、病害类型（坑槽）和维度（上行/下行）。SQL查询分别统计了上行（0处）和下行（3处）的病害数量，逻辑清晰且执行成功。最终回答基于查询结果准确指出了下行方向更多，并提供了具体数值支撑，完全覆盖了考察重点。",
+      "answer": "下行方向的坑槽病害数量更多。\n\n依据给定的计算结果，G4京港澳高速上行方向统计到的“坑槽”病害数量为 0 处，而下行方向统计到的“坑槽”病害数量为 3 处。通过直接对比这两个明确给出的数值（0 < 3），可以确定下行方向的病害数量高于上行方向。本次判断仅使用了“行驶方向”（上行/下行）这一维度以及“病害数量”这一指标。\n\n需要说明的是，此结论严格基于证据中提供的特定查询结果。由于 `row_count` 均为 1 且未提供其他路段或时间的汇总数据，该比较仅反映当前查询上下文中的状况。此外，这里仅比较了病害的“数量”，未涉及病害面积、严重程度或密度等其他可能影响路况评估的指标，因此不能直接推导为整体健康状况的优劣排名。"
+    },
+    {
+      "id": "fresh_task_device_monthly_detail",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了用户意图，针对设备DEV-5023在2026年10月的时间范围构建了查询。SQL逻辑正确（过滤设备ID和时间范围），执行返回0条记录，最终回答如实反馈“明细返回 0 条”，符合数据实际情况，未进行猜测或错误展示。",
+      "answer": "“q1. 查询设备编号为DEV-5023且在2026年10月期间（>=2026-10-01且<2026-1”返回 0 条，明细已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "fresh_maintenance_district_density",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户问题要求基于'管养片区'（第二管养片区、第一管养片区）进行查询，但系统执行结果显示无法找到名为'第二管养片区'的路线或实体，并明确提示确认编码或名称。根据判定规则，当数据库确实缺少字段、关联或数据能力（此处表现为无法识别业务定义的管养片区实体），且系统明确说明具体缺失原因并停止猜测时，应判为 correct_unsupported。",
+      "answer": "该查询无法执行：没有找到路线“第二管养片区”，请确认路线编码或名称。"
+    },
+    {
+      "id": "fresh_topn_route_area",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确理解了用户关于'全路网'、'单次巡检'（隐含在病害检出记录中，SQL未做额外时间过滤即视为全量历史或当前有效数据聚合，符合常规TopN统计逻辑）、'路段'（映射为route_name）、'病害总面积'和'Top 3'的要求。SQL使用了SUM(area)并按降序排列取前3名，结果非空且展示了具体的路线名称和面积数值。虽然文档中提到'区分上下行'等维度，但用户问题未指定方向，按路线聚合是合理的默认行为。回答清晰列出了前3名及其面积，符合考察重点。",
+      "answer": "“q1. 按路线名称（route_name）分组，统计全路网所有病害的总面积（total_area），并按”查询完成，共 3 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "fresh_detail_pile_range_type",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明数据库中不存在用户指定的路线实体“S20外环高速”，并列举了系统中实际存在的路线名称作为参考。根据判定规则，当数据库确实缺少数据能力时，明确说明具体缺失原因并停止猜测，应判为 correct_unsupported。",
+      "answer": "该查询无法执行：没有找到路线“S20外环高速”。名字相近的路线有：新化文田-东安井头圩、龙山石牌(省界)-凤凰茶田(省界)、慈利-安化县渠江、双峰洪山殿-嘉禾县城、望城乌山-湘潭茶恩寺，请确认是哪一条。"
+    },
+    {
+      "id": "fresh_asset_surface_type_crack_len",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确拒绝执行，指出过滤字段 problem_type_name 使用了不支持的运算符 like。根据规则，当系统明确说明具体缺失原因（此处为查询能力/运算符限制）且未进行猜测时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：过滤字段 problem_type_name 使用了不支持的运算符：like"
+    },
+    {
+      "id": "fresh_disease_size_filter_detail",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了最近一次巡检任务（XCBH202611050000），并针对该任务查询了类型为'横向裂缝'且长度大于5米的病害。SQL逻辑正确，使用了正确的过滤条件和问题类型。查询结果为0处，系统如实回答了数量为0，并说明了明细列表为空（共0条，展示前0条），符合数据实际情况，未进行猜测或错误展示。",
+      "answer": "“q1_patrol. 获取最近一次巡检任务的巡查编号（patrol_number），按创建时间倒序取第一条”返回 1 条，明细已生成，请在结果工作台查看。；共 0处；“q3_list. 列出最近一次巡检任务中，病害类型为'横向裂缝'且实际病害长度大于5米的病害明细，包含路线名称和桩”共 0 条，当前展示前 0 条，完整明细请在结果工作台查看。"
+    },
+    {
+      "id": "fresh_asset_road_admin_grade_breakdown",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户要求按行政等级（县道）筛选并统计病害。系统明确回复当前数据能力不支持，指出病害查询不支持过滤字段 route_level。根据规则，当数据库确实缺少字段或数据能力时，明确说明具体缺失原因并停止猜测，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：病害查询不支持过滤字段：route_level"
+    },
+    {
+      "id": "fresh_disease_type_route_hotspot",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户问题未指定时间范围或巡检批次，而病害统计强依赖时间维度（文档提及'查询某时间的巡检结果'、'某一时间范围内'）。系统在最终回答中明确说明需要补充具体时间范围等口径，且未进行猜测，符合'如果问题本身缺少必要的业务定义，系统明确要求补充口径且没有猜测，可以判为 correct_unsupported'的规则。",
+      "answer": "该查询需要补充明确口径：请补充具体时间范围、巡检批次、比较对象或所需字段。"
+    },
+    {
+      "id": "fresh_time_inspection_date_result",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统首先查询2026年11月15日的巡检任务（q1_patrols），SQL执行成功但返回0条记录。由于上游节点无数据，导致依赖该任务编号的病害统计（q2_disease_count）和路线列表（q3_route_list）无法执行（status: unsupported, failure_code: missing_dependency_value）。最终回答如实反映了‘明细返回 0 条’及后续查询因缺乏输入值而无法执行的情况，未进行猜测，符合数据确实缺失时的处理规范。",
+      "answer": "明细返回 0 条；无法安全执行依赖查询：输入依赖 q1_patrols.patrol_number 没有可传递的值。"
+    },
+    {
+      "id": "fresh_task_device_monthly_mileage",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "verification",
+      "reason": "系统执行状态为 'repairable'，且最终回答明确指出 '查询结果缺少可解析的数值指标'。SQL 执行返回结果为 NULL，未能提供用户要求的里程数值，属于执行失败，不能判为正确或不支持。",
+      "answer": "查询结果缺少可解析的数值指标。"
+    },
+    {
+      "id": "fresh_equipment_status_check",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确声明当前数据能力不支持，指出'巡检任务查询不支持分组字段：task_number'，导致无法执行查询。根据规则，当系统明确说明具体缺失原因且未进行猜测时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：巡检任务查询不支持分组字段：task_number"
+    },
+    {
+      "id": "fresh_maintenance_district_area_ranking",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "用户要求按病害总面积对管养片区排序并给出Top3。系统以'路线名称'作为'管养片区'的代理维度（并在回答中明确说明了这一局限性及假设），执行了按route_name分组、sum(area)降序排列取前3的SQL。SQL逻辑正确，结果非空，最终回答准确列出了前三名及其面积数值，且明确指出了维度映射的潜在偏差，符合在数据模型限制下的最佳实践，未进行无依据的猜测。",
+      "answer": "病害总面积最大的前三个片区（路线）依次是：长沙－芷江高速公路、上海-昆明、平江－洞口高速公路。\n\n判断依据直接引用上游计算工具返回的降序排列结果。第一名“长沙－芷江高速公路”的病害总面积为 305897.21，显著高于其他路线；第二名“上海-昆明”总面积为 161243.22；第三名“平江－洞口高速公路”总面积为 94958.15。证据中的 `compact` 数据也佐证了极值分布，最大值确认为长沙－芷江高速公路，最小值（在前3名范围内）为平江－洞口高速公路。本次分析仅基于“路线名称”这一维度对“总面积”进行排序，未涉及单位长度病害密度或路况等级等其他指标。\n\n局限性说明：此处“片区”由证据中的“路线名称”代理，若业务上“片区”指代更细粒度的行政区域或管养段落，则当前结论可能不匹配。此外，结论严格依赖上游提供的 Top 3 数据，未对剩余路线进行比对，且未对面积数据的采集标准进行校验。"
+    },
+    {
+      "id": "fresh_topn_disease_size_filter",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "wrong_value",
+      "failure_layer": "verification",
+      "reason": "用户要求按长度降序取前5条（TopN），但SQL中使用了LIMIT 5而未配合ORDER BY effective_disease_length DESC进行全局排序。虽然QueryPlan中定义了order_by，但生成的SQL语句 'SELECT ... FROM disease WHERE ... LIMIT 5' 缺失了ORDER BY子句，导致返回的只是任意5条裂缝而非最长的5条。结果样本中的长度（2.32, 4.35, 7.09, 2.24, 3.71）也未呈现降序排列，无法证明是TopN结果。",
+      "answer": "“q1. 在全路网范围内，筛选病害类型为'裂缝'的记录，按实际病害长度降序排列，取前5条，输出路线名称、桩”返回 5 条，明细已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "fresh_task_completion_rate_ranking",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确声明当前数据能力不支持，具体原因为'只有管养单位 ID，缺少可验证的单位名称和台账关联'。根据规则，当最终回答本身明确说明了业务能力、字段、关联或数据确实缺失，且原因具体时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联"
+    },
+    {
+      "id": "fresh_asset_road_grade_comparison",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确拒绝执行，指出无法可靠规划查询，原因是过滤值 patrol_id 来源为 model_inference 且未经过字典、业务规则或受控解析。根据规则，当系统明确要求补充口径或说明具体缺失原因（此处为解析能力缺失导致无法确定‘最新一次巡检’的具体ID）且没有猜测时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：过滤值 patrol_id 来源为 model_inference，但没有经过字典、业务规则或受控解析"
+    },
+    {
+      "id": "route_metrics",
+      "source": "old",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "execution",
+      "reason": "系统执行失败。pc1 节点状态为 'repairable'，错误代码为 'calculation_type_mismatch'，原因是数据中存在 NULL 值（如'未知路线'的总面积为 NULL）导致除法计算失败。最终回答未提供完整的平均单处病害面积结果，且 verification 状态为 repairable，符合执行失败判定规则。",
+      "answer": "“q1. 按 route_name 分组，统计每条路线的病害总数 (count)、病害总面积 (total”查询完成，共 16 行，详细结果已生成，请在结果工作台查看。；部分行不是有效数字。"
+    },
+    {
+      "id": "holdout_03",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了用户意图，按路面类型（road_surface_type）维度对病害数量进行了分组统计。SQL 逻辑清晰，处理了空值映射为'未填写'，结果展示了5种路面类型标签及其对应的病害数量，且明确说明共5行、未截断，完全覆盖了用户要求的实体、维度和指标。",
+      "answer": "“q1. 按路面类型（road_surface_type）分组统计病害数量（count），并输出路面类型标”查询完成，共 5 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "fresh_equipment_mileage_agg",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了用户问题中的时间范围（本月，即2026年11月）、维度（巡检设备）和指标（累计巡检里程）。SQL 逻辑正确，按 equipment_id 分组并对 patrol_mileage 求和，同时按里程降序排列。虽然结果仅返回1行数据，但系统未报错且明确展示了该设备的里程统计结果，符合‘统计所有...并排序’的执行逻辑（若数据库中仅存在一个有效设备或仅有一个设备有本月数据，则结果为真）。回答清晰陈述了查询条件和结果，无猜测或错误单位。",
+      "answer": "“q1. 按设备ID分组，统计2026年11月1日至2026年11月30日期间所有巡检任务的累计巡检里程，”查询完成，共 1 行，详细结果已生成，请在结果工作台查看。"
+    }
+  ]
+}

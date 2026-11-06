@@ -1,0 +1,129 @@
+version: 1
+exam_id: promotion-20261107-012543
+generated_at: '2026-11-07T01:25:43.836146+08:00'
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20261109
+code_fingerprint: content:2e901ab2befc13e8c132dc9b3cd7211d239e398574e77793724291b9d5c4e4c7
+fresh_case_ids:
+- fresh_asset_road_grade_trend
+- fresh_disease_type_direction_compare
+- fresh_task_device_monthly_detail
+- fresh_maintenance_district_density
+- fresh_topn_route_area
+- fresh_detail_pile_range_type
+- fresh_asset_surface_type_crack_len
+- fresh_disease_size_filter_detail
+- fresh_asset_road_admin_grade_breakdown
+- fresh_disease_type_route_hotspot
+- fresh_time_inspection_date_result
+- fresh_task_device_monthly_mileage
+- fresh_equipment_status_check
+- fresh_maintenance_district_area_ranking
+- fresh_topn_disease_size_filter
+old_case_ids:
+- fresh_task_completion_rate_ranking
+- fresh_asset_road_grade_comparison
+- route_metrics
+- holdout_03
+- fresh_equipment_mileage_agg
+cases:
+- id: fresh_asset_road_grade_trend
+  category: 资产/时间
+  question: 请统计过去半年内，行政等级为“省道”的路段中，每月检出的病害总数变化趋势。
+  focus: 验证系统能否结合资产属性（行政等级）与时间维度进行聚合统计，并展示月度趋势数据。
+  source: fresh
+- id: fresh_disease_type_direction_compare
+  category: 病害/资产
+  question: 在G4京港澳高速上，对比上行和下行方向中“坑槽”病害的数量差异，哪边更多？
+  focus: 验证系统能否针对特定路线、特定病害类型，按行驶方向进行分组统计并比较数量。
+  source: fresh
+- id: fresh_task_device_monthly_detail
+  category: 设备/巡检任务
+  question: 查询编号为DEV-5023的设备在2026年10月执行的所有巡检任务列表，包括每次任务的开始时间和结束时间。
+  focus: 验证系统能否根据设备ID和时间范围检索具体的巡检任务明细记录。
+  source: fresh
+- id: fresh_maintenance_district_density
+  category: 管养
+  question: 计算第二管养片区当前的病害密度（病害处数除以管养里程），并与第一管养片区的病害密度进行对比。
+  focus: 验证系统能否获取管养片区的病害数量和管养里程数据，进行除法运算得出密度指标并进行跨片区对比。
+  source: fresh
+- id: fresh_topn_route_area
+  category: TopN/病害
+  question: 列出全路网中，单次巡检检出病害总面积最大的前3个路段，并显示其具体面积数值。
+  focus: 验证系统能否按路段聚合病害面积，进行降序排列并提取Top N结果。
+  source: fresh
+- id: fresh_detail_pile_range_type
+  category: 明细/病害
+  question: 请提供S20外环高速K15+000至K15+500区间内，所有“横向裂缝”病害的详细清单，包括精确桩号和长度。
+  focus: 验证系统能否在指定桩号区间和特定病害类型的双重过滤下，输出详细的病害记录明细。
+  source: fresh
+- id: fresh_asset_surface_type_crack_len
+  category: 资产/病害
+  question: 统计所有水泥混凝土路面路段中，裂缝类病害的总长度是多少米？
+  focus: 验证系统能否关联路面材料类型资产信息与病害尺寸数据，进行特定条件下的累加统计。
+  source: fresh
+- id: fresh_disease_size_filter_detail
+  category: 病害/明细
+  question: 在最近一次巡检中，长度超过5米的横向裂缝共有多少处？请列出这些病害所在的路线和桩号。
+  focus: 验证系统能否根据病害尺寸阈值和类型进行过滤，统计数量并提供符合条件的明细位置信息。
+  source: fresh
+- id: fresh_asset_road_admin_grade_breakdown
+  category: 资产
+  question: 请统计当前路网中，行政等级为“县道”的路段共检出了多少处病害，并按具体的路线名称列出各路线的病害数量。
+  focus: 验证系统能否基于资产属性（行政等级）进行筛选，并下钻到具体路线维度的病害数量统计。
+  source: fresh
+- id: fresh_disease_type_route_hotspot
+  category: 病害
+  question: 在G4京港澳高速上，哪种类型的病害出现频率最高？请给出该病害类型的具体数量以及它在整条路线上的主要分布桩号区间。
+  focus: 验证系统能否针对特定路线识别Top1病害类型，并提供该类型的总量及空间分布概况。
+  source: fresh
+- id: fresh_time_inspection_date_result
+  category: 时间
+  question: 查询2026年11月15日当天执行的所有巡检任务，并汇总当天检出的病害总数和涉及的路线列表。
+  focus: 验证系统能否按具体日期检索巡检结果，并聚合当天的病害总量及覆盖范围。
+  source: fresh
+- id: fresh_task_device_monthly_mileage
+  category: 巡检任务
+  question: 统计编号为DEV-305的巡检设备在2026年10月份累计完成的巡检里程是多少公里？
+  focus: 验证系统能否针对特定设备和特定时间段，准确累加其完成的巡检里程数据。
+  source: fresh
+- id: fresh_equipment_status_check
+  category: 设备
+  question: 列出所有在最近一次巡检任务中状态标记为“异常”或“需维护”的巡检设备编号及其最后执行任务的时间。
+  focus: 验证系统能否根据设备状态字段筛选出非正常工作的设备，并关联其最近的活动时间。
+  source: fresh
+- id: fresh_maintenance_district_area_ranking
+  category: 管养
+  question: 请按病害总面积从大到小对所有管养片区进行排序，并指出病害总面积最大的前三个片区分别是哪些。
+  focus: 验证系统能否以管养单位为维度聚合病害面积，并进行降序排列输出Top3结果。
+  source: fresh
+- id: fresh_topn_disease_size_filter
+  category: TopN
+  question: 找出全路网中单次检出长度最长的前5条裂缝病害，显示它们所在的路线、桩号及具体长度。
+  focus: 验证系统能否针对特定病害类型（裂缝）按尺寸指标（长度）进行全局TopN排序并展示明细。
+  source: fresh
+- id: fresh_task_completion_rate_ranking
+  category: 巡检任务
+  question: 对各管养片区上个月的巡检任务完成率进行排名，完成率最低的片区是哪个？
+  focus: 验证系统能否计算任务完成率（实际/计划），并按片区进行排序找出最小值。
+  source: old
+- id: fresh_asset_road_grade_comparison
+  category: 资产
+  question: 请对比分析一级公路和二级公路在最新一次巡检中的病害总数及平均单处病害面积。
+  focus: 验证系统能否按道路等级筛选资产，并计算指定时间窗口内的病害统计指标（数量、平均值）。
+  source: old
+- id: route_metrics
+  category: 历史题
+  question: 按路线分组，统计每条路线的病害总数、病害总面积、平均单处病害面积，并关联获取该路线的长度
+  focus: ''
+  source: old
+- id: holdout_03
+  category: 资产角度
+  question: 按路面类型统计病害数量，并列出各路面类型标签。
+  focus: 检查路面类型维度、存储值到展示值的映射。
+  source: old
+- id: fresh_equipment_mileage_agg
+  category: 设备
+  question: 统计所有巡检设备在本月累计完成的巡检总里程，并按里程从高到低排序。
+  focus: 验证系统能否对设备维度的巡检里程进行聚合求和及排序操作。
+  source: old
