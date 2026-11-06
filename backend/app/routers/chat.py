@@ -276,10 +276,18 @@ def query_review(payload: QueryReviewRequest) -> dict:
             "decision": "accept",
             "repair_required": False,
         }
+    from ..query.review_repair import repair_review_evidence
+
+    repaired = repair_review_evidence(evidence)
     return {
-        "accepted": False,
+        "accepted": not bool(repaired.stopped_reason),
         "decision": "reject",
-        "repair_required": True,
+        "repair_required": False,
+        "attempts": repaired.attempts,
+        "stopped_reason": repaired.stopped_reason,
+        "reply": repaired.answer.text,
+        "sections": list(repaired.answer.sections),
+        "review_gate": repaired.answer.review_gate,
     }
 
 

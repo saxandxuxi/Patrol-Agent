@@ -196,6 +196,37 @@ def scope_hash(spec: QuerySpec) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def immutable_scope_hash(spec: QuerySpec) -> str:
+    scope = {
+        "subject": spec.subject,
+        "filters": [
+            {
+                "field": item.field,
+                "op": item.op,
+                "storage_value": item.storage_value,
+            }
+            for item in spec.filters
+        ],
+        "input_bindings": [
+            {
+                "from_node": item.from_node,
+                "from_field": item.from_field,
+                "to_field": item.to_field,
+                "op": item.op,
+            }
+            for item in spec.input_bindings
+        ],
+    }
+    payload = json.dumps(
+        scope,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def plan_scope_hash(plan: QueryPlan) -> str:
     nodes = [
         {"id": node.id, "scope_hash": scope_hash(node.spec)}

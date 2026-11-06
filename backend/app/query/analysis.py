@@ -1078,8 +1078,9 @@ def analyze_single_turn(
     audit: bool = False,
     registry: CapabilityRegistry | None = None,
     subject: str = "",
+    planning_feedback: str = "",
 ) -> QueryPlan:
-    feedback = ""
+    feedback = str(planning_feedback or "")
     for attempt in range(3):
         try:
             plan = _analyze_once(

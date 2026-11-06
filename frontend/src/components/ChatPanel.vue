@@ -956,8 +956,33 @@ async function decideReview(msg, decision) {
     msg.review_gate = null
     if (decision === 'accept') {
       ElMessage.success('已按你的判断保留这次结果')
-    } else if (out?.repair_required) {
-      ElMessage.info('已提交错误判断，正在进入受限重新规划')
+    } else if (out?.reply) {
+      result.value = {
+        reply: out.reply,
+        sections: out.sections || [],
+        review_gate: out.review_gate || null,
+      }
+      messages.value.push({
+        role: 'assistant',
+        content: out.reply,
+        time: nowText(),
+        elapsed_ms: 0,
+        references: [],
+        thinking: '',
+        result_id: '',
+        reviewable: false,
+        choices: [],
+        asked: msg.asked || '',
+        workflow_events: [],
+        process: null,
+        review_gate: out.review_gate || null,
+      })
+      if (out.accepted) {
+        ElMessage.success(`重新规划完成，共修复 ${out.attempts || 1} 轮`)
+      } else {
+        ElMessage.warning(out.stopped_reason || '两轮修复后仍未得到可靠答案')
+      }
+      scrollToBottom()
     }
   } catch (err) {
     ElMessage.error(err.message)

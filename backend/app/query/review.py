@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from typing import Any, Literal
 
 from .contracts import AnswerPackage
@@ -34,6 +34,8 @@ class ReviewNodeEvidence:
     result_sample: tuple[dict[str, Any], ...]
     reason: str
     failure_code: str = ""
+    spec: dict[str, Any] = field(default_factory=dict)
+    immutable_scope_hash: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -45,6 +47,7 @@ class ReviewNodeEvidence:
             "result_sample": [dict(row) for row in self.result_sample],
             "reason": self.reason,
             "failure_code": self.failure_code,
+            "spec": dict(self.spec),
         }
 
 
@@ -84,6 +87,30 @@ def _row_sample(section: dict[str, Any], limit: int = 5) -> tuple[dict[str, Any]
     )
 
 
+def serialize_query_spec(spec: Any) -> dict[str, Any]:
+    calculation = getattr(spec, "calculation", None)
+    return {
+        "id": spec.id,
+        "kind": spec.kind,
+        "subject": spec.subject,
+        "view": spec.view,
+        "metrics": list(spec.metrics),
+        "dimensions": list(spec.dimensions),
+        "filters": [asdict(item) for item in spec.filters],
+        "output_projection": list(spec.output_projection),
+        "order_by": list(spec.order_by),
+        "limit": spec.limit,
+        "required_assertions": list(spec.required_assertions),
+        "question": spec.question,
+        "input_bindings": [asdict(item) for item in spec.input_bindings],
+        "calculation": (
+            asdict(calculation)
+            if calculation is not None and is_dataclass(calculation)
+            else calculation
+        ),
+    }
+
+
 def issue_review_gate(
     answer: AnswerPackage,
     suspicions: list[ReviewSuspicion] | tuple[ReviewSuspicion, ...],
@@ -111,6 +138,10 @@ def issue_review_gate(
             result_sample=_row_sample(section),
             reason=suspicion.reason,
             failure_code=suspicion.failure_code,
+            spec=dict(section.get("spec") or {}),
+            immutable_scope_hash=str(
+                section.get("immutable_scope_hash") or ""
+            ),
         )
         nodes.append(evidence)
         evidence_sections.append(evidence)
@@ -127,13 +158,9 @@ def issue_review_gate(
     )
     scope_hashes = tuple(
         dict.fromkeys(
-            str(
-                (section_by_node.get(suspicion.node_id) or {}).get(
-                    "scope_hash"
-                )
-                or ""
-            )
-            for suspicion in suspicions
+            evidence.immutable_scope_hash
+            for evidence in evidence_sections
+            if evidence.immutable_scope_hash
         )
     )
     token = uuid.uuid4().hex

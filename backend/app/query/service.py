@@ -34,12 +34,13 @@ from .contracts import (
     QuerySpecError,
     UserDecision,
     ValueBinding,
+    immutable_scope_hash,
     scope_hash,
 )
 from .executor import execute_compiled
 from .fields import FieldReachHit, FieldReachSet, PhysicalSchemaView
 from .preset_bindings import apply_overrides, values_from_spec
-from .review import ReviewSuspicion, issue_review_gate
+from .review import ReviewSuspicion, issue_review_gate, serialize_query_spec
 from .template_sources import (
     AutoTemplateProvider,
     BuiltinTemplateProvider,
@@ -647,6 +648,10 @@ def _section_identity(node: Any) -> dict[str, Any]:
         "type": "post_calc" if node.node_type == "post_calc" else "data",
         "view": node.spec.view,
         "scope_hash": scope_hash(node.spec),
+        "immutable_scope_hash": immutable_scope_hash(node.spec),
+        "node_type": node.node_type,
+        "depends_on": list(node.depends_on),
+        "spec": serialize_query_spec(node.spec),
     }
 
 

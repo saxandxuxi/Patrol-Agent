@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 from app.query.contracts import AnswerPackage
 from app.query.review import ReviewSuspicion, issue_review_gate
+from app.query.review_repair import ReviewRepairResult
 from app.query.service import TurnStart
 from app.query.templates import (
     CandidateSet,
@@ -78,7 +79,8 @@ class AgentIntegrationTests(unittest.TestCase):
                     "status": "repairable",
                     "failure_code": "wrong_shape",
                     "answer": "结果像聚合值",
-                    "scope_hash": "scope-1",
+                    "scope_hash": "shape-scope",
+                    "immutable_scope_hash": "scope-1",
                     "sql": "SELECT SUM(effective_disease_length) FROM ai_problem",
                     "rows": [{"有效病害总长度": "151579.56"}],
                 },
@@ -113,15 +115,25 @@ class AgentIntegrationTests(unittest.TestCase):
         self.assertEqual(result["decision"], "accept")
         self.assertFalse(result.get("repair_required"))
 
-    def test_review_reject_is_deferred_to_repair_stage(self):
+    @patch("app.query.review_repair.repair_review_evidence")
+    def test_review_reject_runs_bounded_repair(self, repair):
         token = self._issue_review_token()
+        repair.return_value = ReviewRepairResult(
+            answer=AnswerPackage(
+                "已重新规划并返回前5条明细",
+                ({"status": "accepted", "rows": [{"problem_number": "P1"}]},),
+            ),
+            attempts=1,
+        )
         result = query_review(
             QueryReviewRequest(review_token=token, decision="reject")
         )
 
-        self.assertFalse(result["accepted"])
+        self.assertTrue(result["accepted"])
         self.assertEqual(result["decision"], "reject")
-        self.assertTrue(result["repair_required"])
+        self.assertFalse(result["repair_required"])
+        self.assertEqual(result["attempts"], 1)
+        self.assertIn("前5条明细", result["reply"])
 
     def test_review_token_cannot_be_consumed_twice(self):
         token = self._issue_review_token()
