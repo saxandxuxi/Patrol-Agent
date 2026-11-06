@@ -169,10 +169,16 @@ def test_column_zero_denominator_reports_row():
 
 ```python
 def test_percentage_share():
-    self.assertEqual(calculate_scalar(request("percentage_share", 25, 200)).value, Decimal("12.5"))
+    self.assertEqual(
+        calculate_scalar(request("percentage_share", numerator=25, total=200)).value,
+        Decimal("12.5"),
+    )
 
 def test_percentage_change():
-    self.assertEqual(calculate_scalar(request("percentage_change", 80, 100)).value, Decimal("-20"))
+    self.assertEqual(
+        calculate_scalar(request("percentage_change", old=100, new=80)).value,
+        Decimal("-20"),
+    )
 
 def test_series_preserves_zero_batches():
     result = calculate_series("subtract", ["b1", "b2", "b3"], [0, 3, 15])

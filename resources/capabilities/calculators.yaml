@@ -1,0 +1,18 @@
+calculators:
+  calculate_scalar:
+    input_shapes: [scalar_list]
+    operations:
+      [add, subtract, multiply, divide, ratio, percentage_share, percentage_change]
+    precision: 6
+    zero_denominator: error
+  calculate_columns:
+    input_shapes: [rows]
+    operations:
+      [add, subtract, multiply, divide, ratio, percentage_share, percentage_change]
+    precision: 6
+    zero_denominator: row_error
+  calculate_series:
+    input_shapes: [series]
+    operations: [subtract, percentage_change]
+    precision: 6
+    zero_denominator: error

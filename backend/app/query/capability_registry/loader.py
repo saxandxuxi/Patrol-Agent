@@ -30,6 +30,7 @@ _FILE_ROOT_KEYS = {
     "result_words.yaml": "result_words",
     "repair_policy.yaml": "repair_policy",
     "templates.yaml": "templates",
+    "calculators.yaml": "calculators",
 }
 
 

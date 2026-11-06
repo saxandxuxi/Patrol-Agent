@@ -103,6 +103,7 @@ class CapabilitySnapshot:
     result_words: dict[str, Any]
     repair_policy: dict[str, Any]
     templates: dict[str, Any]
+    calculators: dict[str, Any]
 
 
 @dataclass(frozen=True)

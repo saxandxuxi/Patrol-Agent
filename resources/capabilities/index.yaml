@@ -17,3 +17,4 @@ files:
   - result_words.yaml
   - repair_policy.yaml
   - templates.yaml
+  - calculators.yaml

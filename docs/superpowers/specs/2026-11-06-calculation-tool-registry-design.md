@@ -115,8 +115,8 @@ QuerySpec 的 `post_calc` 节点新增可选 `calculation` 对象：
   "tool": "calculate_columns",
   "operation": "divide",
   "operands": [
-    {"source": {"node": "q1", "field": "count"}},
-    {"source": {"node": "q1", "field": "route_length_km"}}
+    {"name": "numerator", "source": {"node": "q1", "field": "count"}},
+    {"name": "denominator", "source": {"node": "q1", "field": "route_length_km"}}
   ],
   "output": {
     "name": "disease_density",
@@ -141,8 +141,14 @@ QuerySpec 的 `post_calc` 节点新增可选 `calculation` 对象：
 - `multiply`：`a * b`
 - `divide`：`a / b`
 - `ratio`：`a / b`
-- `percentage_share`：`a / total * 100`
+- `percentage_share`：`numerator / total * 100`
 - `percentage_change`：`(new - old) / old * 100`
+
+比例、占比和百分比变化必须使用命名操作数：
+
+- `divide` / `ratio`：`numerator`、`denominator`
+- `percentage_share`：`numerator`、`total`
+- `percentage_change`：`old`、`new`
 
 所有输入先转为 `Decimal`。空值、不可解析数字、除数为零和输出列缺失均返回结构化失败，不做静默零值替换。
 

@@ -170,6 +170,7 @@ class CapabilityRegistry:
             result_words=dict(docs["result_words"]),
             repair_policy=dict(docs["repair_policy"]),
             templates=dict(docs["templates"]),
+            calculators=dict(docs["calculators"]),
         )
         registry = cls(snapshot)
         registry._augment_physical_fields(kind)
