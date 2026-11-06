@@ -251,6 +251,45 @@ class AgentIntegrationTests(unittest.TestCase):
         self.assertIn("device_code", payload["process"]["steps"][0]["error"])
 
     @patch("app.services.agent._persist_conversation_turn")
+    @patch("app.services.agent.intent_service.classify_intent", return_value="data")
+    @patch(
+        "app.services.agent.chat_settings.load",
+        return_value={"single_turn_compiler_enabled": True},
+    )
+    @patch("app.query.service.start_single_turn")
+    def test_structured_unsupported_is_not_top_level_system_error(
+        self,
+        start,
+        _settings,
+        _intent,
+        _persist,
+    ):
+        start.return_value = TurnStart(
+            plan=count_plan(),
+            answer=AnswerPackage(
+                "当前数据能力不支持：只有管养单位 ID",
+                (
+                    {
+                        "node_id": "q1",
+                        "question": "按管养片区比较",
+                        "type": "data",
+                        "status": "unsupported",
+                        "failure_code": "unsupported_query_spec",
+                        "answer": "当前数据能力不支持：只有管养单位 ID",
+                    },
+                ),
+            ),
+        )
+
+        payload = agent.handle_message("按管养片区比较", session_id="s1")
+
+        self.assertNotIn("error", payload)
+        self.assertEqual(
+            payload["process"]["steps"][0]["failure_code"],
+            "unsupported_query_spec",
+        )
+
+    @patch("app.services.agent._persist_conversation_turn")
     @patch("app.services.agent.nl2sql.verify_answer")
     @patch("app.services.agent.intent_service.classify_intent", return_value="data")
     @patch(

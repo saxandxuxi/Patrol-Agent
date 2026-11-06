@@ -4256,6 +4256,8 @@ def _single_turn_compiler_payload(turn: Any, ticket_token: str = "") -> dict[str
             str(step.get("error") or "")
             for step in process["steps"]
             if step.get("error")
+            and str(step.get("status") or "")
+            in {"error", "failed", "blocked", "repairable"}
         ]
         payload = {
             "reply": turn.answer.text,
