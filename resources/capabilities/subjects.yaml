@@ -5,44 +5,44 @@ subjects:
       route:
         table: basic_facilities_routes
         on: disease.routes_id = route.id
-    allowed_views: [count, distribution, list, detail, top, trend]
+    allowed_views: [count, distribution, list, detail, top_records, top_groups, trend]
   patrol:
     base_table: ai_maintain_patrol
     joins: {}
-    allowed_views: [count, distribution, list, detail, top, trend]
+    allowed_views: [count, distribution, list, detail, top_records, top_groups, trend]
   route:
     base_table: basic_facilities_routes
     joins: {}
-    allowed_views: [count, distribution, list, detail, top]
+    allowed_views: [count, distribution, list, detail, top_records, top_groups]
   section:
     base_table: basic_facilities_sections
     joins: {}
-    allowed_views: [count, distribution, list, detail, top]
+    allowed_views: [count, distribution, list, detail, top_records, top_groups]
   pile_point:
     base_table: basic_facilities_sections_pile_detail
     joins: {}
-    allowed_views: [count, distribution, list, detail, top]
+    allowed_views: [count, distribution, list, detail, top_records, top_groups]
   asset:
     base_table: ai_asset_main
     joins: {}
-    allowed_views: [count, distribution, list, detail, top]
+    allowed_views: [count, distribution, list, detail, top_records, top_groups]
   work_order:
     base_table: ai_work_order
     joins: {}
-    allowed_views: [count, distribution, list, detail, top, trend]
+    allowed_views: [count, distribution, list, detail, top_records, top_groups, trend]
   bridge:
     base_table: basic_facilities_bridges
     joins: {}
-    allowed_views: [count, distribution, list, detail, top]
+    allowed_views: [count, distribution, list, detail, top_records, top_groups]
   tunnel:
     base_table: basic_facilities_tunnels
     joins: {}
-    allowed_views: [count, distribution, list, detail, top]
+    allowed_views: [count, distribution, list, detail, top_records, top_groups]
   slope:
     base_table: basic_facilities_slope
     joins: {}
-    allowed_views: [count, distribution, list, detail, top]
+    allowed_views: [count, distribution, list, detail, top_records, top_groups]
   project:
     base_table: project_manage_project_main
     joins: {}
-    allowed_views: [count, distribution, list, detail, top]
+    allowed_views: [count, distribution, list, detail, top_records, top_groups]

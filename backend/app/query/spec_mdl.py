@@ -311,6 +311,8 @@ def _disease_dimension(
         return "disease.unit_id", "管养单位"
     if normalized == "lane_index":
         return "disease.lane_index", "车道"
+    if normalized == "device_code":
+        return "disease.device_code", "巡检设备编号"
     raise UnsupportedQuerySpec(f"病害查询不支持分组字段：{field}")
 
 
@@ -425,6 +427,7 @@ def _disease_output(field: str) -> tuple[str, str] | None:
         "lane_index": ("disease.lane_index", "车道"),
         "road_surface_type": ("disease.road_surface_type", "路面类型"),
         "unit_id": ("disease.unit_id", "管养单位ID"),
+        "device_code": ("disease.device_code", "巡检设备编号"),
     }
     return mapping.get(normalized)
 
@@ -472,11 +475,21 @@ def _join_sql(joins: set[str]) -> list[str]:
 
 
 def compile_spec_mdl(spec: QuerySpec) -> str | None:
+    from .shape_contracts import normalize_top_view
+
+    spec = normalize_top_view(spec)
     if spec.kind != "mysql" or spec.subject not in {"disease", "patrol"}:
         return None
     from .capabilities import validate_capabilities
+    from .capability_registry import CapabilityRegistry
+    from .shape_contracts import validate_shape_contract
 
     validate_capabilities(spec)
+    shape_issues = validate_shape_contract(spec, CapabilityRegistry.load())
+    if shape_issues:
+        raise UnsupportedQuerySpec(
+            "；".join(issue.reason for issue in shape_issues)
+        )
     joins: set[str] = set()
     where: list[str] = []
     if spec.subject == "disease":
@@ -492,7 +505,7 @@ def compile_spec_mdl(spec: QuerySpec) -> str | None:
     effective_dimensions = tuple(
         field
         for field in spec.dimensions
-        if spec.view != "top" or _base_field(field) not in metric_names
+        if spec.view != "top_groups" or _base_field(field) not in metric_names
     )
     dimensions: list[tuple[str, str]] = []
     for field in effective_dimensions:
@@ -517,7 +530,20 @@ def compile_spec_mdl(spec: QuerySpec) -> str | None:
             effective_view = "distinct"
 
     selects: list[str] = []
-    if effective_view in {"count", "sum", "avg"}:
+    output_mapping = (
+        _disease_output
+        if spec.subject == "disease"
+        else _patrol_output
+    )
+    if effective_view == "top_records":
+        for field in spec.output_projection:
+            resolved = output_mapping(field)
+            if not resolved:
+                raise UnsupportedQuerySpec(
+                    f"TopN 明细不支持输出字段：{field}"
+                )
+            selects.append(f"{resolved[0]} AS {resolved[1]}")
+    elif effective_view in {"count", "sum", "avg"}:
         if (
             spec.view == "count"
             and len(metrics) == 1
@@ -530,18 +556,13 @@ def compile_spec_mdl(spec: QuerySpec) -> str | None:
                 f"{expression} AS {label}"
                 for expression, label in metrics
             ]
-    elif effective_view in {"distribution", "trend", "top", "distinct"}:
+    elif effective_view in {"distribution", "trend", "top_groups", "distinct"}:
         selects = [
             f"{expression} AS {label}"
             for expression, label in dimensions
         ]
         selects.extend(f"{expression} AS {label}" for expression, label in metrics)
     else:
-        output_mapping = (
-            _disease_output
-            if spec.subject == "disease"
-            else _patrol_output
-        )
         output_fields = [
             *spec.output_projection,
             *(
@@ -568,7 +589,7 @@ def compile_spec_mdl(spec: QuerySpec) -> str | None:
     group_by = [
         expression
         for expression, _label in dimensions
-        if effective_view in {"distribution", "trend", "top", "distinct"}
+        if effective_view in {"distribution", "trend", "top_groups", "distinct"}
     ]
     order_parts: list[str] = []
     dimension_aliases = {
@@ -588,6 +609,9 @@ def compile_spec_mdl(spec: QuerySpec) -> str | None:
             continue
         field = _base_field(str(order.get("field") or ""))
         expression = dimension_aliases.get(field) or metric_aliases.get(field)
+        if not expression and effective_view == "top_records":
+            resolved = output_mapping(field)
+            expression = resolved[0] if resolved else None
         if not expression and spec.subject == "disease":
             expression = {
                 "create_time": "disease.create_time",
@@ -603,7 +627,7 @@ def compile_spec_mdl(spec: QuerySpec) -> str | None:
         if expression:
             direction = str(order.get("direction") or "asc").upper()
             order_parts.append(f"{expression} {direction}")
-    if not order_parts and effective_view in {"distribution", "top"} and metrics:
+    if not order_parts and effective_view in {"distribution", "top_groups"} and metrics:
         alias = (
             metric_labels.get(_base_field(spec.metrics[0]))
             if spec.metrics

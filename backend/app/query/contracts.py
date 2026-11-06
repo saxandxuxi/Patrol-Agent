@@ -8,6 +8,23 @@ from typing import Any
 from ..calculations.models import CalculationRequest
 
 
+SUPPORTED_QUERY_VIEWS = (
+    "count",
+    "sum",
+    "avg",
+    "distribution",
+    "list",
+    "detail",
+    "top",
+    "top_records",
+    "top_groups",
+    "trend",
+    "bucket_compare",
+    "photo",
+    "data",
+)
+
+
 class QuerySpecError(ValueError):
     """Raised when model output cannot become a trustworthy QuerySpec."""
 

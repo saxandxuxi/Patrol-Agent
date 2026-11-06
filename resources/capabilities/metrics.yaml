@@ -7,45 +7,45 @@ metrics:
       allowed_views:
       - count
       - distribution
-      - top
+      - top_groups
       - trend
     total_area:
       expression: SUM({alias}.area)
       label: 总面积
       unit: ㎡
-      allowed_views: [count, distribution, top, trend]
+      allowed_views: [count, distribution, top_groups, trend]
     average_area:
       expression: AVG({alias}.area)
       label: 平均面积
       unit: ㎡
-      allowed_views: [count, distribution, top, trend]
+      allowed_views: [count, distribution, top_groups, trend]
     sum_disease_length:
       expression: SUM({alias}.effective_disease_length)
       label: 病害总长度
       unit: 米
-      allowed_views: [count, distribution, top, trend]
+      allowed_views: [count, distribution, top_groups, trend]
     sum_effective_disease_length:
       expression: SUM({alias}.effective_disease_length)
       label: 有效病害总长度
       unit: 米
-      allowed_views: [count, distribution, top, trend]
+      allowed_views: [count, distribution, top_groups, trend]
     route_length_km:
       expression: "{route}.route_length_km"
       label: 路线长度
       unit: km
-      allowed_views: [count, distribution, top]
+      allowed_views: [count, distribution, top_groups]
       requires_join: [route]
   patrol:
     count:
       expression: COUNT(*)
       label: 数量
       unit: 次
-      allowed_views: [count, distribution, top, trend]
+      allowed_views: [count, distribution, top_groups, trend]
     patrol_mileage:
       expression: SUM({alias}.patrol_mileage)
       label: 巡检里程
       unit: km
-      allowed_views: [count, distribution, top, trend]
+      allowed_views: [count, distribution, top_groups, trend]
   _lexicon:
     metric_expressions:
     - fallback_words:

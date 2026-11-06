@@ -1,22 +1,10 @@
 from __future__ import annotations
 
-from .contracts import QuerySpec, VerificationIssue
+from .contracts import QuerySpec, SUPPORTED_QUERY_VIEWS, VerificationIssue
 from .fields import OutputProjection, PhysicalSchemaView
 
 
-_SUPPORTED_VIEWS = {
-    "count",
-    "sum",
-    "avg",
-    "distribution",
-    "list",
-    "detail",
-    "top",
-    "trend",
-    "bucket_compare",
-    "photo",
-    "data",
-}
+_SUPPORTED_VIEWS = set(SUPPORTED_QUERY_VIEWS)
 _SUPPORTED_OPS = {
     "=",
     "!=",

@@ -18,6 +18,55 @@ def binding(field, op, value):
 
 
 class SpecMdlTests(unittest.TestCase):
+    def test_top_records_compiles_detail_order_and_limit(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="top_records",
+                metrics=(),
+                dimensions=(),
+                filters=(),
+                output_projection=("problem_number", "area"),
+                order_by=({"field": "area", "direction": "desc"},),
+                limit=5,
+                required_assertions=(),
+                question="按面积取前5条病害记录",
+            )
+        )
+
+        self.assertIn("disease.problem_number AS 病害编号", sql)
+        self.assertIn("disease.area AS 面积", sql)
+        self.assertIn("ORDER BY disease.area DESC", sql)
+        self.assertIn("LIMIT 5", sql)
+        self.assertNotIn("GROUP BY", sql)
+        self.assertNotIn("SELECT FROM", sql)
+
+    def test_top_groups_compiles_group_order_and_limit(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="top_groups",
+                metrics=("count",),
+                dimensions=("route_name",),
+                filters=(),
+                output_projection=(),
+                order_by=({"field": "count", "direction": "desc"},),
+                limit=5,
+                required_assertions=(),
+                question="按病害数量取前5条路线",
+            )
+        )
+
+        self.assertIn("COUNT(*) AS 数量", sql)
+        self.assertIn("disease.route_name AS 路线名称", sql)
+        self.assertIn("GROUP BY disease.route_name", sql)
+        self.assertIn("ORDER BY COUNT(*) DESC", sql)
+        self.assertIn("LIMIT 5", sql)
+
     def test_unsupported_metric_error_lists_supported_metrics(self):
         with self.assertRaises(UnsupportedQuerySpec) as caught:
             compile_spec_mdl(
@@ -60,6 +109,27 @@ class SpecMdlTests(unittest.TestCase):
 
         self.assertIn("disease.patrol_number AS 任务编号", sql)
         self.assertIn("GROUP BY disease.patrol_number", sql)
+
+    def test_disease_distribution_can_group_by_device_code(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("device_code",),
+                filters=(binding("device_code", "=", "102367594561"),),
+                output_projection=("device_code", "count"),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="每台巡检设备检出了多少处病害",
+            )
+        )
+
+        self.assertIn("disease.device_code AS 巡检设备编号", sql)
+        self.assertIn("GROUP BY disease.device_code", sql)
 
     def test_patrol_list_can_output_end_date(self):
         sql = compile_spec_mdl(

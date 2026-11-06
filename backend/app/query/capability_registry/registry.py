@@ -368,7 +368,12 @@ class CapabilityRegistry:
                         metric_id=metric_id,
                         expression=f"{aggregate}({{alias}}.{field.physical_column})",
                         label=f"{field.label}{'合计' if prefix == 'sum_' else '平均' if prefix == 'avg_' else '最小' if prefix == 'min_' else '最大'}",
-                        allowed_views=("count", "distribution", "top", "trend"),
+                        allowed_views=(
+                            "count",
+                            "distribution",
+                            "top_groups",
+                            "trend",
+                        ),
                     )
             self.snapshot.metrics[subject_id] = metrics
 

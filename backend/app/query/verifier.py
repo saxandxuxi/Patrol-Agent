@@ -52,7 +52,14 @@ def verify_deterministic(
     bounded_empty = (
         observation.rows_fetched == 0
         and bool(spec.filters)
-        and spec.view in {"distribution", "trend", "top", "list", "detail"}
+        and spec.view in {
+            "distribution",
+            "trend",
+            "top_groups",
+            "top_records",
+            "list",
+            "detail",
+        }
     )
     if observation.rows_fetched == 0 and not bounded_empty:
         issues.append(
@@ -85,7 +92,7 @@ def verify_deterministic(
                 stage="fact",
             )
         )
-    if spec.view in {"detail", "list"}:
+    if spec.view in {"detail", "list", "top_records"}:
         if spec.output_projection and not observation.columns:
             if observation.rows_fetched > 0:
                 issues.append(
@@ -96,7 +103,14 @@ def verify_deterministic(
                         stage="fact",
                     )
                 )
-    elif spec.view in {"distribution", "trend", "count", "sum", "avg", "top"}:
+    elif spec.view in {
+        "distribution",
+        "trend",
+        "count",
+        "sum",
+        "avg",
+        "top_groups",
+    }:
         label_columns = [
             key
             for key in observation.columns

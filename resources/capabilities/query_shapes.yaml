@@ -11,7 +11,8 @@ query_shapes:
     - avg
     - distribution
     - list
-    - top
+    - top_records
+    - top_groups
     - trend
     - bucket_compare
     subjects:

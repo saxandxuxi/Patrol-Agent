@@ -24,6 +24,7 @@ from .contracts import (
 )
 from .fields import FieldReachSet, OutputProjection, PhysicalSchemaView
 from .planner import build_query_plan
+from .shape_contracts import normalize_top_view
 from .spec_mdl import UnsupportedQuerySpec, compile_spec_mdl
 from .validator import validate_query_spec
 from .values import resolve_value
@@ -529,23 +530,26 @@ def _analyze_once(
             raise QuerySpecError(
                 f"calculation_output_invalid: {exc}"
             ) from exc
+        normalized_spec = QuerySpec(
+            id=spec_id,
+            kind=kind,
+            subject=selected_subject,
+            view=view,
+            metrics=metrics,
+            dimensions=dimensions,
+            filters=tuple(filters),
+            output_projection=output_projection,
+            order_by=_order_items(raw.get("order_by")),
+            limit=limit,
+            required_assertions=_string_tuple(raw.get("required_assertions")),
+            question=str(raw.get("question") or original).strip(),
+            input_bindings=tuple(input_bindings),
+            calculation=calculation,
+        )
         specs.append(
-            QuerySpec(
-                id=spec_id,
-                kind=kind,
-                subject=selected_subject,
-                view=view,
-                metrics=metrics,
-                dimensions=dimensions,
-                filters=tuple(filters),
-                output_projection=output_projection,
-                order_by=_order_items(raw.get("order_by")),
-                limit=limit,
-                required_assertions=_string_tuple(raw.get("required_assertions")),
-                question=str(raw.get("question") or original).strip(),
-                input_bindings=tuple(input_bindings),
-                calculation=calculation,
-            )
+            normalize_top_view(normalized_spec)
+            if node_type == "query_data"
+            else normalized_spec
         )
         dependencies[spec_id] = _string_tuple(raw.get("depends_on"))
         node_types[spec_id] = node_type
@@ -642,7 +646,11 @@ def _apply_audit_patches(plan: QueryPlan, verdict: dict[str, Any]) -> QueryPlan:
         nodes.append(
             node.__class__(
                 id=node.id,
-                spec=QuerySpec(**values),
+                spec=(
+                    normalize_top_view(QuerySpec(**values))
+                    if node.node_type == "query_data"
+                    else QuerySpec(**values)
+                ),
                 depends_on=node.depends_on,
                 node_type=node.node_type,
             )

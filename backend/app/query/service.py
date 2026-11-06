@@ -37,6 +37,7 @@ from .contracts import (
 )
 from .executor import execute_compiled
 from .fields import FieldReachHit, FieldReachSet, PhysicalSchemaView
+from .preset_bindings import apply_overrides, values_from_spec
 from .template_sources import (
     AutoTemplateProvider,
     BuiltinTemplateProvider,
@@ -113,14 +114,17 @@ def _default_template_executor(
     if candidate.contract.adapter_id == "preset":
         query = preset_lib.query_by_id(candidate.contract.native_id)
         if not query:
-            return ""
-        values = {
-            item.field: str(item.storage_value)
-            for item in spec.filters
-        }
-        values.update(override_values)
-        sql, _reason = preset_lib.bind(query, values)
-        return sql or ""
+            raise ValueError(
+                f"查询模板不存在：{candidate.contract.native_id}"
+            )
+        values = values_from_spec(spec)
+        apply_overrides(values, override_values)
+        sql, reason = preset_lib.bind(query, values)
+        if not sql:
+            raise ValueError(
+                f"模板 {candidate.contract.native_id} 无法绑定参数：{reason}"
+            )
+        return sql
     if candidate.contract.adapter_id == "builtin":
         registry = load_capability_file("templates.yaml", {}) or {}
         declaration = next(
@@ -346,14 +350,14 @@ def _data_answer_text(section: dict[str, Any]) -> str:
     total_count = section.get("total_count")
     if section_type == "post_calc":
         return str(section.get("answer") or "").strip()
-    if view in {"list", "detail"}:
+    if view in {"list", "detail", "top_records"}:
         if total_count is not None:
             return (
                 f"{prefix}共 {int(total_count)} 条，当前展示前 {rows_fetched} 条，"
                 "完整明细请在结果工作台查看。"
             )
         return f"{prefix}返回 {rows_fetched} 条，明细已生成，请在结果工作台查看。"
-    if view in {"distribution", "trend", "top"}:
+    if view in {"distribution", "trend", "top_groups"}:
         return (
             f"{prefix}查询完成，共 {rows_fetched} 行，"
             "详细结果已生成，请在结果工作台查看。"
@@ -530,7 +534,7 @@ def _observation_payload(
     answer: str,
 ) -> dict[str, Any]:
     rows = observation.result_rows or observation.preview_rows
-    if spec.view in {"distribution", "trend", "top", "bucket_compare"}:
+    if spec.view in {"distribution", "trend", "top_groups", "bucket_compare"}:
         logical_fields = [*spec.dimensions, *spec.metrics]
     else:
         logical_fields = [
@@ -833,6 +837,26 @@ def _execute_plan(
                 }
             )
             continue
+        except (ValueError, RuntimeError) as exc:
+            reason = str(exc) or "查询编译失败"
+            console_json(
+                "[query][compile_failed] ",
+                {
+                    "node_id": node.id,
+                    "question": effective_spec.question,
+                    "candidate": candidate.candidate_id if candidate else None,
+                    "reason": reason,
+                },
+            )
+            sections.append(
+                {
+                    **_section_identity(node),
+                    "answer": f"查询编译失败：{reason}",
+                    "status": "unsupported",
+                    "failure_code": "query_compile_failed",
+                }
+            )
+            continue
         observation = execute_compiled(
             compiled,
             lambda current_kind, sql: _default_execute_sql(
@@ -890,11 +914,17 @@ def _execute_plan(
         report = verify_result(effective_spec, compiled, observation)
         _trace_node_result(node, compiled, observation, report)
         if report.status != "accepted":
+            failure_code = (
+                report.issues[0].code
+                if report.issues
+                else "verification_failed"
+            )
             sections.append(
                 {
                     **_section_identity(node),
                     "answer": "；".join(issue.message for issue in report.issues),
                     "status": report.status,
+                    "failure_code": failure_code,
                     "sql": compiled.sql,
                     "engine": compiled.engine,
                     "shape": effective_spec.view,
@@ -937,7 +967,7 @@ def _execute_plan(
 
 
 def _answer_text(spec: Any, observation: Any) -> str:
-    if spec.view in {"detail", "list"}:
+    if spec.view in {"detail", "list", "top_records"}:
         preview = list(observation.preview_rows)
         text = "；".join(
             "，".join(f"{key} {value}" for key, value in row.items())
