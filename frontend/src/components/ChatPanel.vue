@@ -149,6 +149,58 @@
                   </span>
                 </div>
                 <div class="message-bubble markdown-body" v-html="renderMarkdown(msg.content)"></div>
+                <div
+                  v-if="msg.role === 'assistant' && msg.review_gate"
+                  class="review-gate-card"
+                >
+                  <div class="review-gate-head">
+                    <span class="review-gate-mark">?</span>
+                    <div>
+                      <strong>{{ msg.review_gate.title }}</strong>
+                      <p>{{ msg.review_gate.reason }}</p>
+                    </div>
+                  </div>
+                  <div
+                    v-for="node in msg.review_gate.nodes || []"
+                    :key="node.node_id"
+                    class="review-gate-node"
+                  >
+                    <div class="review-gate-question">
+                      <span>{{ node.node_id }}</span>
+                      {{ node.question }}
+                    </div>
+                    <div class="review-gate-result">
+                      返回 {{ node.result_sample?.length || 0 }} 行样本
+                      <template v-if="node.columns?.length">
+                        · 字段：{{ node.columns.join('、') }}
+                      </template>
+                    </div>
+                    <el-collapse v-if="node.sql" class="review-gate-evidence">
+                      <el-collapse-item title="查看 SQL 和疑点" :name="`review-${node.node_id}`">
+                        <p class="review-gate-reason">{{ node.reason }}</p>
+                        <pre>{{ node.sql }}</pre>
+                        <pre v-if="node.result_sample?.length">{{ JSON.stringify(node.result_sample, null, 2) }}</pre>
+                      </el-collapse-item>
+                    </el-collapse>
+                  </div>
+                  <div class="review-gate-actions">
+                    <el-button
+                      type="primary"
+                      size="small"
+                      :loading="msg.review_busy"
+                      @click="decideReview(msg, 'accept')"
+                    >
+                      回答正确，继续
+                    </el-button>
+                    <el-button
+                      size="small"
+                      :loading="msg.review_busy"
+                      @click="decideReview(msg, 'reject')"
+                    >
+                      回答错误，重新规划
+                    </el-button>
+                  </div>
+                </div>
                 <!-- 执行链路：像看 skill 的步骤一样看这次回答的数据流——
                      每步的问法 / 类型 / 走的引擎 / 取到多少行、多少图，以及链式题的回填键值。
                      结构化数据来自后端的 payload.process；**默认折叠**，标题里先给一眼可见的线路。 -->
@@ -173,6 +225,13 @@
                         </span>
                         <span v-if="step.wants_images" class="pipeline-tag">要图</span>
                         <span class="pipeline-q" :title="step.question">{{ step.question }}</span>
+                        <span
+                          v-if="step.error || step.failure_code"
+                          class="pipeline-error"
+                          :title="step.error"
+                        >
+                          {{ step.failure_code || '执行失败' }}<template v-if="step.error"> · {{ step.error }}</template>
+                        </span>
                       </li>
                     </ol>
                     <div v-if="hasChainValues(msg.process)" class="pipeline-chain">
@@ -562,6 +621,9 @@ const activeResultId = ref('')
 const confirmPrompt = ref('')
 let confirmedNext = false
 const pendingQuestion = ref('')
+let conversationEpoch = 0
+let activeRequestId = 0
+let messageLoadEpoch = 0
 // 能力确认卡：候选列表 / 当前选中 / 用户改过的槽位值 / 暂存 token
 const capabilityChoices = ref([])
 const capabilityPick = ref('')
@@ -790,8 +852,10 @@ async function saveChatOptions() {
 }
 
 async function loadConversationMessages(id) {
+  const loadEpoch = ++messageLoadEpoch
   try {
     const detail = await api.conversation(id)
+    if (loadEpoch !== messageLoadEpoch || sessionId.value !== id) return
     messages.value = (detail.messages || []).map((item) => ({
       role: item.role,
       content: item.content,
@@ -802,6 +866,7 @@ async function loadConversationMessages(id) {
     }))
     scrollToBottom()
   } catch (err) {
+    if (loadEpoch !== messageLoadEpoch || sessionId.value !== id) return
     ElMessage.error(err.message)
   }
 }
@@ -880,6 +945,24 @@ async function sendFeedback(msg, kind) {
     }
   } catch (err) {
     ElMessage.error(err.message)
+  }
+}
+
+async function decideReview(msg, decision) {
+  if (!msg?.review_gate?.review_token || msg.review_busy) return
+  msg.review_busy = true
+  try {
+    const out = await api.queryReview(msg.review_gate.review_token, decision)
+    msg.review_gate = null
+    if (decision === 'accept') {
+      ElMessage.success('已按你的判断保留这次结果')
+    } else if (out?.repair_required) {
+      ElMessage.info('已提交错误判断，正在进入受限重新规划')
+    }
+  } catch (err) {
+    ElMessage.error(err.message)
+  } finally {
+    msg.review_busy = false
   }
 }
 
@@ -991,7 +1074,14 @@ function rejectQuery() {
 
 async function showResult(resultId) {
   try {
-    result.value = await api.result(resultId)
+    const requestConversationEpoch = conversationEpoch
+    const requestSessionId = sessionId.value
+    const data = await api.result(resultId)
+    if (
+      requestConversationEpoch !== conversationEpoch ||
+      requestSessionId !== sessionId.value
+    ) return
+    result.value = data
     activeResultId.value = resultId
     if (props.embedded) resultDrawerOpen.value = true
   } catch (err) {
@@ -1001,8 +1091,10 @@ async function showResult(resultId) {
 
 function openConversation(id) {
   if (id === sessionId.value) return
+  invalidateConversationActivity()
   sessionId.value = id
   persistSessionId()
+  messages.value = []
   result.value = null
   loadConversationMessages(id)
 }
@@ -1061,12 +1153,29 @@ async function newConversation() {
 }
 
 function resetConversationState() {
+  invalidateConversationActivity()
   sessionId.value = crypto.randomUUID()
   messages.value = []
   result.value = null
   question.value = ''
   activeResultId.value = ''
   resultDrawerOpen.value = false
+  capabilityChoices.value = []
+  capabilityPick.value = ''
+  capabilityToken.value = ''
+  stepCount.value = 0
+  confirmPrompt.value = ''
+  pendingQuestion.value = ''
+}
+
+function invalidateConversationActivity() {
+  conversationEpoch += 1
+  activeRequestId += 1
+  loading.value = false
+  liveEvents.value = []
+  submitting.value = false
+  confirmedNext = false
+  turnElapsedMs = 0
   capabilityChoices.value = []
   capabilityPick.value = ''
   capabilityToken.value = ''
@@ -1179,6 +1288,13 @@ async function sendDirect() {
 // useSaved：选择式澄清的回执（true=用已确认过的固化查询，false=让 AI 重新查）
 async function sendMessage(text, useSaved = null, extra = {}) {
   if (!text || loading.value) return
+  const requestConversationEpoch = conversationEpoch
+  const requestSessionId = sessionId.value
+  const requestId = ++activeRequestId
+  const isCurrentRequest = () =>
+    requestConversationEpoch === conversationEpoch &&
+    requestSessionId === sessionId.value &&
+    requestId === activeRequestId
   // 确认卡上的"用这口径查询"是对**已经上屏的那条问题**选口径，不是又问了一遍：
   // 带 choose_token 的重发不再 push 用户气泡（否则对话里会出现两条一模一样的问题）。
   const reissue = Boolean((extra || {}).choose_token)
@@ -1202,13 +1318,19 @@ async function sendMessage(text, useSaved = null, extra = {}) {
     let payload
     try {
       payload = await api.chatStream(requestPayload, (event) => {
+        if (!isCurrentRequest()) return
         liveEvents.value.push(event)
         scrollToBottom()
       })
     } catch {
+      if (!isCurrentRequest()) return
       // SSE 被网关拦截、浏览器不支持 ReadableStream，或流在 final 前中断时回退同步。
       liveEvents.value = []
       payload = await api.chat(requestPayload)
+    }
+    if (!isCurrentRequest()) {
+      await loadConversations()
+      return
     }
     turnElapsedMs += performance.now() - startedAt
     confirmedNext = false
@@ -1245,10 +1367,12 @@ async function sendMessage(text, useSaved = null, extra = {}) {
       workflow_events: liveEvents.value.slice(),
       // 执行链路（复合题才有）：每步的问法/引擎/行数/图片 + 链路回填的键值
       process: payload.process || null,
+      review_gate: payload.review_gate || null,
     })
     activeResultId.value = payload.result_id || ''
     await loadConversations()
   } catch (err) {
+    if (!isCurrentRequest()) return
     turnElapsedMs += performance.now() - startedAt
     messages.value.push({
       role: 'assistant',
@@ -1257,9 +1381,11 @@ async function sendMessage(text, useSaved = null, extra = {}) {
       elapsed_ms: Math.round(turnElapsedMs),
     })
   } finally {
-    loading.value = false
-    liveEvents.value = []
-    scrollToBottom()
+    if (isCurrentRequest()) {
+      loading.value = false
+      liveEvents.value = []
+      scrollToBottom()
+    }
   }
 }
 
@@ -1844,6 +1970,7 @@ onBeforeUnmount(() => {
 
 .pipeline-step {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -1905,6 +2032,14 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.pipeline-error {
+  flex: 0 0 calc(100% - 22px);
+  margin-left: 22px;
+  color: #b42318;
+  line-height: 1.45;
+  white-space: normal;
 }
 
 .pipeline-chain {
@@ -2244,6 +2379,104 @@ onBeforeUnmount(() => {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+}
+
+.review-gate-card {
+  margin-top: 10px;
+  padding: 13px 14px;
+  border: 1px solid #f0c36a;
+  border-radius: 14px;
+  background: #fffaf0;
+  box-shadow: 0 8px 22px rgba(120, 82, 10, 0.08);
+}
+
+.review-gate-head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.review-gate-mark {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #b7791f;
+  color: #fff;
+  font-weight: 700;
+  line-height: 24px;
+  text-align: center;
+}
+
+.review-gate-head p {
+  margin: 3px 0 0;
+  color: #7b5b1d;
+  line-height: 1.5;
+}
+
+.review-gate-node {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #f3dfb2;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.review-gate-question {
+  color: var(--ink);
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.review-gate-question span {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #f6e5bd;
+  color: #80540d;
+  font-size: 11px;
+}
+
+.review-gate-result {
+  margin-top: 4px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.review-gate-evidence {
+  margin-top: 4px;
+}
+
+.review-gate-evidence :deep(.el-collapse-item__header),
+.review-gate-evidence :deep(.el-collapse-item__wrap) {
+  border-bottom: 0;
+  background: transparent;
+}
+
+.review-gate-evidence pre {
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.review-gate-reason {
+  margin: 0 0 6px;
+  color: #9a3412;
+}
+
+.review-gate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .message-actions {

@@ -10,6 +10,9 @@ async function request(path, options = {}) {
     try {
       const parsed = JSON.parse(text)
       if (parsed && typeof parsed.detail === 'string') message = parsed.detail
+      else if (parsed?.detail && typeof parsed.detail === 'object') {
+        message = parsed.detail.reason || parsed.detail.failure_code || message
+      }
     } catch {
       // 不是 JSON 就按原文提示
     }
@@ -70,6 +73,11 @@ export const api = {
   },
   approveResult: (resultId) =>
     request('/api/feedback/approve', { method: 'POST', body: JSON.stringify({ result_id: resultId }) }),
+  queryReview: (reviewToken, decision) =>
+    request('/api/query/review', {
+      method: 'POST',
+      body: JSON.stringify({ review_token: reviewToken, decision }),
+    }),
   history: () => request('/api/history'),
   clearSession: (sessionId) =>
     request(`/api/session/${encodeURIComponent(sessionId)}`, { method: 'DELETE' }),
@@ -194,6 +202,8 @@ export const api = {
   purgeExamplePairs: (payload) =>
     request('/api/knowledge/example-pairs/purge', { method: 'POST', body: JSON.stringify(payload) }),
   models: () => request('/api/models'),
+  modelCatalog: () => request('/api/models/catalog'),
+  refreshModelCatalog: () => request('/api/models/catalog/refresh', { method: 'POST' }),
   saveModel: (payload) => request('/api/models', { method: 'POST', body: JSON.stringify(payload) }),
   testModel: (payload) => request('/api/models/test', { method: 'POST', body: JSON.stringify(payload) }),
   deleteModel: (id) => request(`/api/models/${id}`, { method: 'DELETE' }),

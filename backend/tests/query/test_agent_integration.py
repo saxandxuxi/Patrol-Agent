@@ -1,7 +1,10 @@
 import unittest
 from unittest.mock import patch
 
+from fastapi import HTTPException
+
 from app.query.contracts import AnswerPackage
+from app.query.review import ReviewSuspicion, issue_review_gate
 from app.query.service import TurnStart
 from app.query.templates import (
     CandidateSet,
@@ -10,6 +13,7 @@ from app.query.templates import (
     TemplateContract,
 )
 from app.services import agent
+from app.routers.chat import QueryReviewRequest, query_review
 from tests.query.factories import count_plan
 
 
@@ -63,6 +67,76 @@ def turn_with_confirmation_card() -> TurnStart:
 
 
 class AgentIntegrationTests(unittest.TestCase):
+    def _issue_review_token(self) -> str:
+        answer = AnswerPackage(
+            "结果可能有误",
+            (
+                {
+                    "node_id": "q1",
+                    "question": "按长度取前5条明细",
+                    "view": "top_records",
+                    "status": "repairable",
+                    "failure_code": "wrong_shape",
+                    "answer": "结果像聚合值",
+                    "scope_hash": "scope-1",
+                    "sql": "SELECT SUM(effective_disease_length) FROM ai_problem",
+                    "rows": [{"有效病害总长度": "151579.56"}],
+                },
+            ),
+        )
+        gate = issue_review_gate(
+            answer,
+            [
+                ReviewSuspicion(
+                    original_question="把面积前五名和长度前五名的病害调出来",
+                    node_id="q1",
+                    reason="结果像聚合值",
+                    failure_code="wrong_shape",
+                )
+            ],
+        )
+        return gate.review_token
+
+    def test_review_request_does_not_accept_client_plan_or_sql(self):
+        self.assertEqual(
+            set(QueryReviewRequest.model_fields),
+            {"review_token", "decision"},
+        )
+
+    def test_review_accept_returns_without_repair(self):
+        token = self._issue_review_token()
+        result = query_review(
+            QueryReviewRequest(review_token=token, decision="accept")
+        )
+
+        self.assertTrue(result["accepted"])
+        self.assertEqual(result["decision"], "accept")
+        self.assertFalse(result.get("repair_required"))
+
+    def test_review_reject_is_deferred_to_repair_stage(self):
+        token = self._issue_review_token()
+        result = query_review(
+            QueryReviewRequest(review_token=token, decision="reject")
+        )
+
+        self.assertFalse(result["accepted"])
+        self.assertEqual(result["decision"], "reject")
+        self.assertTrue(result["repair_required"])
+
+    def test_review_token_cannot_be_consumed_twice(self):
+        token = self._issue_review_token()
+        query_review(QueryReviewRequest(review_token=token, decision="reject"))
+
+        with self.assertRaises(HTTPException) as caught:
+            query_review(
+                QueryReviewRequest(review_token=token, decision="reject")
+            )
+
+        self.assertEqual(
+            caught.exception.detail["failure_code"],
+            "review_token_consumed",
+        )
+
     @patch("app.services.agent._persist_conversation_turn")
     @patch("app.services.agent.chat_settings.load", return_value={"single_turn_compiler_enabled": False})
     @patch("app.query.service.start_single_turn")
@@ -123,3 +197,104 @@ class AgentIntegrationTests(unittest.TestCase):
             payload = agent.handle_message("泛油有多少处？", session_id="s1")
         self.assertEqual(payload["reply"], "共 10 处。")
         self.assertEqual(payload["source"], "single_turn_compiler")
+
+    @patch("app.services.agent._persist_conversation_turn")
+    @patch("app.services.agent.intent_service.classify_intent", return_value="data")
+    @patch(
+        "app.services.agent.chat_settings.load",
+        return_value={"single_turn_compiler_enabled": True},
+    )
+    @patch("app.query.service.start_single_turn")
+    def test_structured_query_failure_is_visible_in_process(
+        self,
+        start,
+        _settings,
+        _intent,
+        _persist,
+    ):
+        start.return_value = TurnStart(
+            plan=count_plan(),
+            answer=AnswerPackage(
+                "无法可靠规划该查询：病害查询不支持分组字段：device_code",
+                (
+                    {
+                        "node_id": "q1",
+                        "question": "每台设备检出了多少病害",
+                        "type": "data",
+                        "status": "unsupported",
+                        "failure_code": "query_plan_not_executable",
+                        "answer": "病害查询不支持分组字段：device_code",
+                    },
+                ),
+            ),
+        )
+
+        payload = agent.handle_message("每台设备检出了多少病害", session_id="s1")
+
+        self.assertEqual(payload["process"]["steps"][0]["engine"], "single_turn_compiler")
+        self.assertEqual(
+            payload["process"]["steps"][0]["failure_code"],
+            "query_plan_not_executable",
+        )
+        self.assertIn("device_code", payload["process"]["steps"][0]["error"])
+
+    @patch("app.services.agent._persist_conversation_turn")
+    @patch(
+        "app.services.agent.chat_settings.load",
+        return_value={"single_turn_compiler_enabled": True},
+    )
+    @patch("app.query.service.pending_confirmation", return_value=None)
+    def test_expired_confirmation_token_never_falls_back_to_legacy_flow(
+        self,
+        _pending,
+        _settings,
+        _persist,
+    ):
+        with patch.object(
+            agent,
+            "_handle_message",
+            side_effect=AssertionError("legacy flow must not run"),
+        ):
+            payload = agent.handle_message(
+                "102367594561设备一共检出多少病害",
+                session_id="s1",
+                choose_token="expired",
+                capability_id="preset:device_month_records:q1:v1",
+            )
+
+        self.assertEqual(payload["source"], "error")
+        self.assertEqual(
+            payload["process"]["steps"][0]["failure_code"],
+            "confirmation_ticket_missing",
+        )
+
+    @patch("app.services.agent._persist_conversation_turn")
+    @patch(
+        "app.services.agent.chat_settings.load",
+        return_value={"single_turn_compiler_enabled": True},
+    )
+    @patch("app.query.service.pending_confirmation")
+    def test_unknown_confirmed_candidate_never_silently_uses_first(
+        self,
+        pending_confirmation,
+        _settings,
+        _persist,
+    ):
+        pending_confirmation.return_value = turn_with_confirmation_card()
+        with patch.object(
+            agent,
+            "_handle_message",
+            side_effect=AssertionError("legacy flow must not run"),
+        ):
+            payload = agent.handle_message(
+                "102367594561设备一共检出多少病害",
+                session_id="s1",
+                choose_token="ticket",
+                capability_id="not-a-candidate",
+            )
+
+        self.assertEqual(payload["source"], "error")
+        self.assertEqual(
+            payload["process"]["steps"][0]["failure_code"],
+            "confirmation_candidate_missing",
+        )

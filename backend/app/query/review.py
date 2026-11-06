@@ -11,6 +11,7 @@ from .contracts import AnswerPackage
 
 _TOKEN_TTL_SECONDS = 600.0
 _PENDING: dict[str, tuple[float, ReviewEvidence]] = {}
+_CONSUMED: dict[str, float] = {}
 _LOCK = threading.Lock()
 
 
@@ -171,4 +172,17 @@ def consume_review_gate(
     created_at, evidence = item
     if time.monotonic() - created_at > _TOKEN_TTL_SECONDS:
         return None
+    with _LOCK:
+        _CONSUMED[str(token)] = time.monotonic()
     return replace(evidence, decision=decision)
+
+
+def review_gate_error(token: str) -> str:
+    with _LOCK:
+        now = time.monotonic()
+        for key, created_at in list(_CONSUMED.items()):
+            if now - created_at > _TOKEN_TTL_SECONDS:
+                _CONSUMED.pop(key, None)
+        if str(token or "") in _CONSUMED:
+            return "review_token_consumed"
+    return "review_token_missing"

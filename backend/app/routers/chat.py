@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import queue
 import threading
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from starlette.responses import StreamingResponse
 
 from ..services import nl2sql
@@ -226,6 +227,60 @@ class FeedbackReport(BaseModel):
     kind: str = "bad"
     # 这次结果的 id：后端据此取出"用的哪条模板/示例 + 本轮条件"，自动补齐上下文
     result_id: str = ""
+
+
+class QueryReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    review_token: str
+    decision: Literal["accept", "reject"]
+
+
+@router.post("/query/review", dependencies=[Depends(require_token)])
+def query_review(payload: QueryReviewRequest) -> dict:
+    from ..query.review import consume_review_gate, review_gate_error
+
+    evidence = consume_review_gate(payload.review_token, payload.decision)
+    if evidence is None:
+        code = review_gate_error(payload.review_token)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "failure_code": code,
+                "reason": (
+                    "该裁决已经提交过"
+                    if code == "review_token_consumed"
+                    else "该裁决已失效，请重新提问"
+                ),
+            },
+        )
+    if payload.decision == "accept":
+        sql = evidence.sections[0].sql if evidence.sections else ""
+        save_user_feedback(
+            evidence.original_question,
+            sql_text=sql,
+            reply="用户确认该结果回答了问题",
+            comment="用户裁决：回答正确",
+            kind="good",
+            context=json.dumps(
+                {
+                    "review_decision": "accept",
+                    "suspect_node_ids": list(evidence.suspect_node_ids),
+                    "scope_hash": evidence.scope_hash,
+                },
+                ensure_ascii=False,
+            ),
+        )
+        return {
+            "accepted": True,
+            "decision": "accept",
+            "repair_required": False,
+        }
+    return {
+        "accepted": False,
+        "decision": "reject",
+        "repair_required": True,
+    }
 
 
 @router.post("/feedback/report", dependencies=[Depends(require_token)])

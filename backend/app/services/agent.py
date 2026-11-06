@@ -4177,18 +4177,104 @@ def _persist_conversation_turn(
     )
 
 
+def _compiler_process(
+    sections: list[dict[str, Any]],
+    fallback_question: str,
+) -> dict[str, Any]:
+    steps: list[dict[str, Any]] = []
+    for index, section in enumerate(sections, 1):
+        status = str(section.get("status") or "accepted")
+        failure_code = str(section.get("failure_code") or "")
+        error = (
+            str(section.get("answer") or section.get("error") or "")
+            if status != "accepted" or failure_code
+            else ""
+        )
+        steps.append(
+            {
+                "id": section.get("node_id") or index,
+                "type": section.get("type") or "data",
+                "label": section.get("title") or "",
+                "engine": section.get("engine") or "single_turn_compiler",
+                "rows": len(section.get("rows") or section.get("preview_rows") or []),
+                "question": section.get("question") or fallback_question,
+                "status": status,
+                "failure_code": failure_code or None,
+                "error": error or None,
+            }
+        )
+    if not steps:
+        steps.append(
+            {
+                "id": 1,
+                "type": "data",
+                "engine": "single_turn_compiler",
+                "rows": 0,
+                "question": fallback_question,
+                "status": "unsupported",
+                "failure_code": "query_not_executed",
+                "error": "查询未生成可执行结果",
+            }
+        )
+    return {"steps": steps, "chain_values": {}}
+
+
+def _single_turn_failure_payload(
+    question: str,
+    failure_code: str,
+    reason: str,
+) -> dict[str, Any]:
+    section = {
+        "node_id": "confirmation",
+        "question": question,
+        "type": "data",
+        "status": "unsupported",
+        "failure_code": failure_code,
+        "answer": reason,
+        "engine": "single_turn_compiler",
+        "rows": [],
+    }
+    return {
+        "reply": reason,
+        "source": "error",
+        "error": reason,
+        "sections": [section],
+        "rows": [],
+        "columns": [],
+        "references": [],
+        "result_id": str(uuid.uuid4()),
+        "engine": "single_turn_compiler",
+        "process": _compiler_process([section], question),
+    }
+
+
 def _single_turn_compiler_payload(turn: Any, ticket_token: str = "") -> dict[str, Any]:
     if turn.answer is not None:
-        return {
+        sections = list(turn.answer.sections)
+        process = _compiler_process(sections, turn.plan.question)
+        failures = [
+            str(step.get("error") or "")
+            for step in process["steps"]
+            if step.get("error")
+        ]
+        payload = {
             "reply": turn.answer.text,
             "source": "single_turn_compiler",
-            "sections": list(turn.answer.sections),
+            "sections": sections,
             "rows": [],
             "columns": [],
             "references": [],
             "result_id": str(uuid.uuid4()),
             "engine": "single_turn_compiler",
+            "process": process,
         }
+        if turn.answer.review_gate:
+            review_gate = dict(turn.answer.review_gate)
+            review_gate["result_id"] = payload["result_id"]
+            payload["review_gate"] = review_gate
+        if failures:
+            payload["error"] = "；".join(failures)
+        return payload
     cards: list[dict[str, Any]] = []
     for candidate in turn.candidate_set.candidates:
         card = candidate.confirmation_card
@@ -4253,7 +4339,18 @@ def _maybe_single_turn_compiler(
     if choose_token:
         pending = single_turn_service.pending_confirmation(choose_token)
         if pending is None or pending.candidate_set is None:
-            return None
+            log_event(
+                "agent",
+                "WARNING",
+                "single_turn_confirmation_ticket_missing",
+                capability_id=str(capability_id or ""),
+                question=message[:80],
+            )
+            return _single_turn_failure_payload(
+                message,
+                "confirmation_ticket_missing",
+                "你刚才选择的查询口径已失效，请重新发送问题后再选择。系统没有改用其他查询路径。",
+            )
         picked = next(
             (
                 candidate
@@ -4263,14 +4360,43 @@ def _maybe_single_turn_compiler(
             None,
         )
         if picked is None:
-            picked = pending.candidate_set.candidates[0]
+            log_event(
+                "agent",
+                "WARNING",
+                "single_turn_confirmation_candidate_missing",
+                capability_id=str(capability_id or ""),
+                candidates="、".join(
+                    str(candidate.candidate_id)
+                    for candidate in pending.candidate_set.candidates
+                )[:300],
+                question=message[:80],
+            )
+            return _single_turn_failure_payload(
+                message,
+                "confirmation_candidate_missing",
+                "你选择的查询口径已经对不上，请重新发送问题后再选择。系统没有擅自改用其他口径。",
+            )
         choices = {picked.node_id: picked.candidate_id}
         overrides = {picked.node_id: dict(slot_values or {})}
-        answer = single_turn_service.confirm_single_turn(
-            choose_token,
-            choices,
-            overrides,
-        )
+        try:
+            answer = single_turn_service.confirm_single_turn(
+                choose_token,
+                choices,
+                overrides,
+            )
+        except ValueError as exc:
+            log_event(
+                "agent",
+                "WARNING",
+                "single_turn_confirmation_consumed",
+                capability_id=str(capability_id or ""),
+                reason=str(exc),
+            )
+            return _single_turn_failure_payload(
+                message,
+                "confirmation_ticket_missing",
+                f"你刚才选择的查询口径已失效：{exc}",
+            )
         return _single_turn_compiler_payload(
             single_turn_service.TurnStart(
                 plan=pending.plan,
