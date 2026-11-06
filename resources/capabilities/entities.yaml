@@ -1,0 +1,8 @@
+entities:
+  disease_type:
+    source:
+      table: ai_problem_base
+      value_column: problem_type
+      code_column: problem_code
+      alias_column: problem_alias
+    identity: problem_code

@@ -1,0 +1,7 @@
+metrics:
+  disease:
+    count:
+      expression: COUNT(*)
+      label: 数量
+      unit: 处
+      allowed_views: [count, distribution, top, trend]

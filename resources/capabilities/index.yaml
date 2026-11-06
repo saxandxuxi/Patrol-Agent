@@ -1,0 +1,19 @@
+version: "1"
+files:
+  - subjects.yaml
+  - fields.yaml
+  - field_overrides.yaml
+  - metrics.yaml
+  - derived_metrics.yaml
+  - enums.yaml
+  - entities.yaml
+  - entity_hierarchies.yaml
+  - aliases.yaml
+  - identifiers.yaml
+  - query_shapes.yaml
+  - dimensions.yaml
+  - predicates.yaml
+  - time_buckets.yaml
+  - result_words.yaml
+  - repair_policy.yaml
+  - templates.yaml

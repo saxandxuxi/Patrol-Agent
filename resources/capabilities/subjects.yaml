@@ -1,0 +1,8 @@
+subjects:
+  disease:
+    base_table: ai_problem
+    joins:
+      route:
+        table: basic_facilities_routes
+        on: disease.routes_id = route.id
+    allowed_views: [count, distribution, list, detail, top, trend]

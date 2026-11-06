@@ -1,0 +1,13 @@
+enums:
+  ai_problem.up_or_down:
+    table: ai_problem
+    column: up_or_down
+    label: 上下行
+    values:
+      "0":
+        label: 全部
+        display: 全部/未区分
+      "1":
+        label: 上行
+      "2":
+        label: 下行

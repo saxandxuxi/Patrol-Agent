@@ -1,0 +1,12 @@
+families:
+  crack:
+    entity: disease_type
+    label: 裂缝
+    aliases: [裂缝类, 裂缝病害]
+    members:
+      - 横向裂缝
+      - 纵向裂缝
+      - 网状裂缝
+    resolution:
+      default: expand_family
+      ambiguity: confirm

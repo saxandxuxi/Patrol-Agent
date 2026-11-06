@@ -1,0 +1,5 @@
+query_shapes:
+  count:
+    allowed_views: [count]
+  distribution:
+    requires_dimensions: true

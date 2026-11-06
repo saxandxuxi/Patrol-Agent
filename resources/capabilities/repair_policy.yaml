@@ -1,0 +1,8 @@
+repair_policy:
+  failures:
+    unknown_metric:
+      actions: [rewrite_query_spec]
+      max_rounds: 2
+    unresolved_enum:
+      actions: [ask_confirmation]
+      max_rounds: 0
