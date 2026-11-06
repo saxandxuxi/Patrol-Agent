@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Any
 
 from ..services import parsers, route_resolver
-from ..services.nl2sql import known_problem_types
 from .contracts import QuerySpecAmbiguity, QuerySpecError, ValueBinding
 
 
@@ -58,22 +57,35 @@ def _relative_time_range(question: str) -> tuple[datetime, datetime] | None:
     return _shift_months(now, -months), now
 
 
-def _resolve_damage_type(raw_value: Any, question: str, kind: str) -> ValueBinding:
+def _resolve_damage_type(
+    raw_value: Any,
+    question: str,
+    kind: str,
+    registry: Any,
+) -> ValueBinding:
+    from .capability_registry import resolve_entity
+
     text = str(raw_value or "").strip()
     if not text:
         raise QuerySpecAmbiguity(
             "查询条件缺少可执行的病害类型，请补充具体病害名称。"
         )
-    known = [str(item) for item in known_problem_types(kind) if str(item).strip()]
-    matches = [
-        value
-        for value in known
-        if value == text or text in value or value in text
-    ]
-    if not matches:
+    resolution = resolve_entity(
+        registry,
+        "disease_type",
+        text,
+        kind,
+    )
+    if resolution.status == "ambiguous":
+        labels = "、".join(item.label for item in resolution.values[:8])
+        raise QuerySpecAmbiguity(
+            f"病害类型“{text}”匹配到多个值：{labels}"
+        )
+    if resolution.status == "unsupported" or not resolution.values:
         raise QuerySpecError(f"病害类型不在数据库字典中：{text}")
-    exact = len(matches) == 1 and matches[0] == text
-    storage_value: Any = matches[0] if exact else matches
+    labels = [item.label for item in resolution.values]
+    exact = len(labels) == 1 and labels[0] == text
+    storage_value: Any = labels[0] if exact else labels
     return ValueBinding(
         field="problem_type_name",
         op="=",
@@ -83,7 +95,11 @@ def _resolve_damage_type(raw_value: Any, question: str, kind: str) -> ValueBindi
         resolver=(
             "damage_type_dictionary"
             if exact
-            else "damage_type_dictionary_expand"
+            else (
+                f"entity_family:{resolution.family}"
+                if resolution.family
+                else "damage_type_dictionary_expand"
+            )
         ),
         raw_text=text,
     )
@@ -147,7 +163,11 @@ def resolve_value(
     registry: Any = None,
 ) -> ValueBinding:
     if field == "problem_type_name":
-        value = _resolve_damage_type(raw_value, question, kind)
+        if registry is None:
+            from .capability_registry import CapabilityRegistry
+
+            registry = CapabilityRegistry.load(kind)
+        value = _resolve_damage_type(raw_value, question, kind, registry)
         return ValueBinding(**{**value.__dict__, "op": op})
     enum_registry = registry
     if enum_registry is None:

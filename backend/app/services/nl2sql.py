@@ -121,8 +121,6 @@ from .sql_engine import extract_sql, generate_sql, validate_sql as sql_engine_va
 #    docs/代码走查与目录结构重构方案.md 第三节）：这里 re-export，外部按老名字用即可。
 from .route_resolver import (  # noqa: E402
     QueryPlanError,
-    _DAMAGE_TYPES,
-    _DAMAGE_TYPES_TTL,
     _GENERIC_ROUTE_WORDS,
     _QUESTION_WORDS,
     _ROUTE_ROWS,
@@ -3945,29 +3943,6 @@ def known_problem_types(kind: str = "mysql") -> list[str]:
     return names
 
 
-def expand_problem_types(names: list[str], kind: str = "mysql") -> list[str]:
-    """把用户说的类型名对齐到库里**真实存在**的类型名。
-
-    两个作用：
-      · "裂缝" 这种**上位的口语名** → 展开成所有包含它的真实类型（横向裂缝、纵向裂缝…），
-        否则 `IN ('裂缝')` 永远 0 行（实测）；
-      · 库里没有的名字原样保留（上层会如实回答"没有这个类型"）。
-    """
-    known = known_problem_types(kind)
-    if not known:
-        return [str(item) for item in names if str(item or "").strip()]
-    out: list[str] = []
-    for name in names:
-        text = str(name or "").strip()
-        if not text:
-            continue
-        hits = [value for value in known if value == text or text in value or value in text]
-        for value in hits or [text]:
-            if value not in out:
-                out.append(value)
-    return out
-
-
 def _names_other_image_column(message: str) -> bool:
     """句子里点名的图片列是不是**别的表**上的（不是 ai_problem.problem_url）？
 
@@ -4032,8 +4007,23 @@ def _build_photo_template(plan: dict[str, Any]) -> str | None:
     where = ["p.del_flag = 0"]
     damage = slots.get("damage_matches") or []
     # 类型过滤只使用语义模型已经给出的实体。
-    type_names = [str(item.get("problem_type")) for item in damage if item.get("problem_type")]
-    type_values = expand_problem_types(type_names)
+    type_names = [
+        str(item.get("problem_type"))
+        for item in damage
+        if item.get("problem_type")
+    ]
+    type_values: list[str] = []
+    if type_names:
+        from app.query.capability_registry import (
+            CapabilityRegistry,
+            resolve_entity,
+        )
+
+        registry = CapabilityRegistry.load()
+        for name in type_names:
+            resolution = resolve_entity(registry, "disease_type", name)
+            type_values.extend(item.label for item in resolution.values)
+        type_values = list(dict.fromkeys(type_values))
     # 类型过滤口径（方案 §4.1 + 数据现实）：图片题里的"XX病害"可能来自 **AI 标注**
     # （JSON pic_type）也可能来自台账字典（damage_type），两条路 **OR**，谁有数据就用谁。
     # 实测库里 damage_type 只有 10/NULL/5："横向裂缝"只在 JSON（61 行）、"泛油"只在字典

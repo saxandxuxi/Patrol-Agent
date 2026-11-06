@@ -1,4 +1,14 @@
 aliases:
+  query_rewrite:
+    fillers: [请问, 麻烦, 帮我, 帮忙, 一下, 呢, 啊, 吧, 嘛, 哈, 哦, 呀, 啦]
+    retrieval_synonyms:
+      横缝: 横向裂缝
+      纵缝: 纵向裂缝
+      竖缝: 纵向裂缝
+      龟裂: 网状裂缝
+      网裂: 网状裂缝
+      里程: 桩号
+      定位: GPS
   disease_type:
     横缝: 横向裂缝
     纵缝: 纵向裂缝

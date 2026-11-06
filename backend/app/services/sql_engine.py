@@ -82,18 +82,6 @@ _LENGTH_FALLBACK_NULL_SAFE = re.compile(
     r"COALESCE\s*\(\s*(?P<width>(?:\w+\.)?area_width)\s*,\s*0\s*\)\s*\)\s*\)",
     re.IGNORECASE,
 )
-_PROBLEM_TYPE_EQ = re.compile(
-    r"(?P<column>(?:\b\w+\.)?(?:problem_type_name|problem_type))\s*=\s*"
-    r"'(?P<value>[^']+)'",
-    re.IGNORECASE,
-)
-_PROBLEM_TYPE_IN_SINGLE = re.compile(
-    r"(?P<column>(?:\b\w+\.)?(?:problem_type_name|problem_type))\s+IN\s*"
-    r"\(\s*'(?P<value>[^']+)'\s*\)",
-    re.IGNORECASE,
-)
-
-
 def table_names(lowered_sql: str) -> set[str]:
     """SQL 里引用的表名，只取基础表名（Wren 编译产物是 schema.table 全限定名）。"""
     return {
@@ -217,46 +205,6 @@ def normalize_disease_length_expr(sql: str) -> str:
     return _LENGTH_FALLBACK_SIMPLE.sub(_replace, text)
 
 
-def expand_problem_type_filters(sql: str) -> str:
-    """把“裂缝”这类泛称按当前字典确定性展开成所有真实子类型。"""
-    text = str(sql or "")
-    try:
-        from .route_resolver import _resolve_damage_type
-    except Exception:  # noqa: BLE001
-        return text
-
-    def _expanded(value: str) -> list[str]:
-        try:
-            rows = _resolve_damage_type(value)
-        except Exception:  # noqa: BLE001
-            return []
-        return list(
-            dict.fromkeys(
-                str(row.get("problem_type") or "")
-                for row in rows
-                if row.get("problem_type")
-            )
-        )
-
-    def _in_list(values: list[str]) -> str:
-        return ", ".join("'" + value.replace("'", "''") + "'" for value in values)
-
-    def _replace_eq(match: re.Match[str]) -> str:
-        values = _expanded(match.group("value"))
-        if len(values) <= 1:
-            return match.group(0)
-        return f"{match.group('column')} IN ({_in_list(values)})"
-
-    def _replace_in(match: re.Match[str]) -> str:
-        values = _expanded(match.group("value"))
-        if len(values) <= 1:
-            return match.group(0)
-        return f"{match.group('column')} IN ({_in_list(values)})"
-
-    text = _PROBLEM_TYPE_EQ.sub(_replace_eq, text)
-    return _PROBLEM_TYPE_IN_SINGLE.sub(_replace_in, text)
-
-
 def dialect_issues(sql: str, kind: str) -> list[str]:
     """检测 SQL 是否混用了错误数据库方言的语法。"""
     lowered = sql.lower()
@@ -321,7 +269,6 @@ def validate_sql(sql: str, kind: str) -> tuple[bool, str, str]:
     if kind == "mysql":
         sql = normalize_damage_code_joins(sql)
         sql = normalize_disease_length_expr(sql)
-        sql = expand_problem_type_filters(sql)
         if has_legacy_damage_type_join(sql):
             return (
                 False,

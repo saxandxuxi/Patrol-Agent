@@ -29,50 +29,18 @@ class QueryPlanError(RuntimeError):
 _ROUTE_TABLE = "basic_facilities_routes"
 
 
-_DAMAGE_TYPES: tuple[float, list[dict[str, str]]] | None = None
-_DAMAGE_TYPES_TTL = settings.reference_data_ttl_seconds
-_DAMAGE_ALIASES = {
-    "龟裂": "裂缝",
-    "网裂": "网状裂缝",
-    "坑洞": "坑槽",
-    "坑洼": "坑槽",
-}
-
-
 def _known_damage_types() -> list[dict[str, str]]:
-    """病害类型字典（带 5 分钟缓存）：以前每次规划/每次骨架化都去库里查一遍
-    （库在 SSH 隧道后面，单次 0.3 秒），是纯重复开销。字典变了最迟 5 分钟生效。"""
-    global _DAMAGE_TYPES
-    now = time.time()
-    if _DAMAGE_TYPES and now - _DAMAGE_TYPES[0] < _DAMAGE_TYPES_TTL:
-        return _DAMAGE_TYPES[1]
-    try:
-        rows = db_manager.query(
-            "mysql",
-            "SELECT DISTINCT problem_code, problem_type, problem_alias "
-            "FROM ai_problem_base WHERE problem_type IS NOT NULL "
-            "AND (del_flag = 0 OR del_flag IS NULL) "
-            "ORDER BY problem_type",
-        )["rows"]
-    except Exception as exc:  # noqa: BLE001
-        log_error("nl2sql", "damage_types_failed", exc)
-        rows = []
-    types = [
+    from app.query.capability_registry import CapabilityRegistry, list_entities
+
+    registry = CapabilityRegistry.load()
+    return [
         {
-            "problem_code": row["problem_code"],
-            "problem_type": row["problem_type"],
-            "problem_alias": str(row.get("problem_alias") or ""),
+            "problem_code": item.code,
+            "problem_type": item.label,
+            "problem_alias": "、".join(item.aliases),
         }
-        for row in rows
-        if row.get("problem_type")
+        for item in list_entities(registry, "disease_type")
     ]
-    if types:
-        _DAMAGE_TYPES = (now, types)
-    elif _DAMAGE_TYPES is None:
-        # 拿不到类型、又没有旧缓存：**不写缓存**（一次失败不该把"没有病害类型"钉死 5 分钟），
-        # 下次请求重新试；有旧缓存就继续用旧的（哪怕已过期）。
-        return []
-    return _DAMAGE_TYPES[1]
 
 
 def _resolve_route(route_text: str) -> dict[str, Any]:
@@ -131,47 +99,28 @@ def _resolve_route(route_text: str) -> dict[str, Any]:
 
 
 def _resolve_damage_type(damage_text: str) -> list[dict[str, str]]:
-    damage_text = _DAMAGE_ALIASES.get(str(damage_text or "").strip(), damage_text)
-    escaped = damage_text.replace("'", "''")
-    # 同样走缓存的字典（字典在 ai_problem_base，几百行的表没必要每次查库）
-    def aliases_of(item: dict[str, str]) -> list[str]:
-        return [
-            part.strip()
-            for part in re.split(r"[,，、/;；|]", str(item.get("problem_alias") or ""))
-            if part.strip()
-        ]
+    from app.query.capability_registry import CapabilityRegistry, resolve_entity
 
-    rows = [
-        dict(item)
-        for item in _known_damage_types()
-        if escaped
-        and (
-            escaped in str(item.get("problem_type") or "")
-            or any(escaped in alias or alias in escaped for alias in aliases_of(item))
+    text = str(damage_text or "").strip()
+    registry = CapabilityRegistry.load()
+    resolution = resolve_entity(registry, "disease_type", text)
+    if resolution.status == "ambiguous":
+        names = "、".join(item.label for item in resolution.values[:8])
+        raise QueryPlanError(
+            f"病害类型“{text}”匹配到多个值：{names}，请补充具体名称。"
         )
-    ][:20]
-    if not rows and escaped:
-        ranked = text_match.rank_rows(
-            escaped,
-            [dict(item) for item in _known_damage_types()],
-            ("problem_type", "problem_alias"),
-            min_score=0.80,
-            ambiguity_gap=0.08,
+    if resolution.status == "unsupported" or not resolution.values:
+        raise QueryPlanError(
+            f"没有识别到病害类型“{damage_text}”，请使用病害字典里的标准名称。"
         )
-        best = text_match.unique_best(ranked, ambiguity_gap=0.08)
-        rows = [best] if best else []
-    if not rows:
-        raise QueryPlanError(f"没有识别到病害类型“{damage_text}”，请使用病害字典里的标准名称。")
-    # 泛称（"裂缝"）同时命中泛称行和具体子类型（横向裂缝/纵向裂缝）时，
-    # 不能因为字典里恰好有一个同名泛称行就丢掉子类型；保留全部去重后的真实类型。
-    deduped: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for row in rows:
-        name = str(row.get("problem_type") or "")
-        if name and name not in seen:
-            seen.add(name)
-            deduped.append(row)
-    return deduped
+    return [
+        {
+            "problem_code": item.code,
+            "problem_type": item.label,
+            "problem_alias": "、".join(item.aliases),
+        }
+        for item in resolution.values
+    ]
 
 
 _GENERIC_ROUTE_WORDS = (

@@ -93,11 +93,7 @@ class ValueAnalysisTests(unittest.TestCase):
         self.assertEqual(value.display_value, "长沙－芷江高速公路")
         self.assertEqual(value.resolver, "route_dictionary")
 
-    @patch("app.query.values.known_problem_types", return_value=["泛油", "纵向裂缝"])
-    def test_damage_type_resolution_preserves_display_and_source(
-        self,
-        _known_problem_types,
-    ):
+    def test_damage_type_resolution_preserves_display_and_source(self):
         value = resolve_value(
             "problem_type_name",
             "=",
@@ -110,11 +106,7 @@ class ValueAnalysisTests(unittest.TestCase):
         self.assertEqual(value.source, "user_explicit")
         self.assertEqual(value.resolver, "damage_type_dictionary")
 
-    @patch("app.query.values.known_problem_types", return_value=["纵向裂缝", "横向裂缝"])
-    def test_umbrella_damage_type_expands_to_dictionary_values(
-        self,
-        _known_problem_types,
-    ):
+    def test_umbrella_damage_type_expands_to_dictionary_values(self):
         value = resolve_value(
             "problem_type_name",
             "=",
@@ -123,8 +115,10 @@ class ValueAnalysisTests(unittest.TestCase):
             "mysql",
         )
         self.assertEqual(value.display_value, "裂缝")
-        self.assertEqual(value.storage_value, ["纵向裂缝", "横向裂缝"])
-        self.assertEqual(value.resolver, "damage_type_dictionary_expand")
+        self.assertIn("横向裂缝", value.storage_value)
+        self.assertIn("纵向裂缝", value.storage_value)
+        self.assertIn("网状裂缝", value.storage_value)
+        self.assertEqual(value.resolver, "entity_family:crack")
 
     def test_quarter_value_is_normalized_to_exact_time_bounds(self):
         value = resolve_value(
