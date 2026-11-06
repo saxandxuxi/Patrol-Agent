@@ -178,6 +178,32 @@ def _entity_values(
             if part.strip()
         )
         values.append(EntityValue(code=code, label=label, aliases=aliases))
+    seen_labels = {item.label for item in values}
+    for source_item in source.get("auxiliary_sources") or []:
+        if not isinstance(source_item, dict):
+            continue
+        table_name = str(source_item.get("table") or "")
+        column_name = str(source_item.get("value_column") or "")
+        json_path = str(source_item.get("json_path") or "")
+        if not table_name or not column_name or not json_path:
+            continue
+        try:
+            extra_rows = db_manager.query(
+                kind,
+                f"SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(`{column_name}`, "
+                f"'{json_path}')) AS entity_label FROM `{table_name}` "
+                f"WHERE `{column_name}` IS NOT NULL",
+            )["rows"]
+        except Exception:
+            continue
+        for row in extra_rows:
+            label = str(row.get("entity_label") or "")
+            if not label or label in seen_labels:
+                continue
+            seen_labels.add(label)
+            values.append(
+                EntityValue(code=label, label=label, aliases=())
+            )
     result = tuple(values)
     _CACHE[key] = (now, result)
     return result

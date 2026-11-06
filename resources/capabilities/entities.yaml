@@ -5,4 +5,8 @@ entities:
       value_column: problem_type
       code_column: problem_code
       alias_column: problem_alias
+    auxiliary_sources:
+      - table: ai_problem
+        value_column: pic_position
+        json_path: $.type
     identity: problem_code

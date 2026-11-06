@@ -3903,44 +3903,15 @@ def _build_per_km_template(plan: dict[str, Any]) -> str | None:
     )
 
 
-_PROBLEM_TYPES_CACHE: tuple[float, list[str]] | None = None
-
-
 def known_problem_types(kind: str = "mysql") -> list[str]:
-    """库里**真实存在**的病害类型名：字典表 ∪ pic_position JSON 的 `$.type`（带缓存）。
+    """库里真实存在的病害类型，统一委托给 CapabilityRegistry。"""
+    from app.query.capability_registry import CapabilityRegistry, list_entities
 
-    为什么两边都要：字典里 936 条"泛油"，JSON 里 574 条"纵向裂缝"——单看一边都会漏。
-    """
-    global _PROBLEM_TYPES_CACHE
-    now = time.time()
-    ttl = float(getattr(settings, "reference_data_ttl_seconds", 300) or 300)
-    if _PROBLEM_TYPES_CACHE and now - _PROBLEM_TYPES_CACHE[0] < ttl:
-        return _PROBLEM_TYPES_CACHE[1]
-    names: list[str] = []
-    try:
-        for row in db_manager.query(
-            kind,
-            "SELECT DISTINCT problem_type AS v FROM ai_problem_base "
-            "WHERE problem_type IS NOT NULL AND problem_type <> '' "
-            "AND (del_flag = 0 OR del_flag IS NULL)",
-        )["rows"]:
-            value = str(row.get("v") or "").strip()
-            if value:
-                names.append(value)
-        for row in db_manager.query(
-            kind,
-            "SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(pic_position, '$.type')) AS v "
-            "FROM ai_problem WHERE del_flag = 0 AND pic_position IS NOT NULL "
-            "AND JSON_UNQUOTE(JSON_EXTRACT(pic_position, '$.type')) IS NOT NULL",
-        )["rows"]:
-            value = str(row.get("v") or "").strip()
-            if value and value not in names:
-                names.append(value)
-    except Exception as exc:  # noqa: BLE001
-        log_error("nl2sql", "known_problem_types_failed", exc)
-        return _PROBLEM_TYPES_CACHE[1] if _PROBLEM_TYPES_CACHE else []
-    _PROBLEM_TYPES_CACHE = (now, names)
-    return names
+    registry = CapabilityRegistry.load(kind)
+    return [
+        item.label
+        for item in list_entities(registry, "disease_type", kind)
+    ]
 
 
 def _names_other_image_column(message: str) -> bool:
