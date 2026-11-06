@@ -1,0 +1,129 @@
+version: 1
+exam_id: promotion-20261107-010850
+generated_at: '2026-11-07T01:08:50.586479+08:00'
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20261108
+code_fingerprint: 90d5375ea2d33aa7ecd13705d19c8793465ea00b:339a11323da39cef3111096231a83114b8e01b2b484db4b2d6d923741bc7182e
+fresh_case_ids:
+- fresh_asset_road_grade_comparison
+- fresh_disease_pile_interval_stats
+- fresh_time_monthly_trend_single_route
+- fresh_task_device_status_check
+- fresh_equipment_mileage_agg
+- fresh_maintenance_plan_vs_actual
+- fresh_topn_severity_area
+- fresh_detail_large_crack_list
+- fresh_treatment_priority_suggestion
+- fresh_unsupported_lane_distribution
+- fresh_asset_surface_type_breakdown
+- fresh_disease_direction_hotspot
+- fresh_time_inter_inspection_gap
+- fresh_task_completion_rate_ranking
+- fresh_maintenance_cross_district_compare
+old_case_ids:
+- holdout_16
+- patrol_lines_nov_2
+- holdout_10
+- holdout_15
+- holdout_20
+cases:
+- id: fresh_asset_road_grade_comparison
+  category: 资产
+  question: 请对比分析一级公路和二级公路在最新一次巡检中的病害总数及平均单处病害面积。
+  focus: 验证系统能否按道路等级筛选资产，并计算指定时间窗口内的病害统计指标（数量、平均值）。
+  source: fresh
+- id: fresh_disease_pile_interval_stats
+  category: 病害
+  question: 统计G4京港澳高速K200至K210区间内，坑槽和裂缝两类病害的具体分布桩号及数量。
+  focus: 验证系统能否在指定桩号区间内，针对特定病害类型提取明细数据（桩号、类型、数量）。
+  source: fresh
+- id: fresh_time_monthly_trend_single_route
+  category: 时间
+  question: 展示S20外环高速在过去三个月中，每月检出的病害总数量变化趋势。
+  focus: 验证系统能否按月度聚合指定路线的病害数量，并生成时间序列趋势数据。
+  source: fresh
+- id: fresh_task_device_status_check
+  category: 巡检任务
+  question: 查询编号为DEV-9901的设备在最近一周内执行了哪些巡检任务，以及每个任务的完成状态。
+  focus: 验证系统能否关联设备ID与巡检任务，并返回指定时间范围内的任务列表及状态字段。
+  source: fresh
+- id: fresh_equipment_mileage_agg
+  category: 设备
+  question: 统计所有巡检设备在本月累计完成的巡检总里程，并按里程从高到低排序。
+  focus: 验证系统能否对设备维度的巡检里程进行聚合求和及排序操作。
+  source: fresh
+- id: fresh_maintenance_plan_vs_actual
+  category: 管养
+  question: 列出第三管养片区本季度的计划巡检里程与实际完成里程，并计算偏差百分比。
+  focus: 验证系统能否获取管养单位的计划与实际数据，并进行基本的数学运算（偏差计算）。
+  source: fresh
+- id: fresh_topn_severity_area
+  category: TopN
+  question: 找出全路网中单次检出病害总面积最大的前5个路段，并显示其具体面积数值。
+  focus: 验证系统能否按路段聚合病害面积，并进行降序排列取Top N的结果。
+  source: fresh
+- id: fresh_detail_large_crack_list
+  category: 明细
+  question: 请列出最近一次巡检中，所有长度超过3米的纵向裂缝的详细记录，包括所在路线、桩号和精确长度。
+  focus: 验证系统能否根据病害尺寸阈值和类型筛选，输出完整的明细字段列表。
+  source: fresh
+- id: fresh_treatment_priority_suggestion
+  category: 趋势
+  question: 分析过去四次巡检中，哪些路段的裂缝类病害数量呈现连续上升趋势？
+  focus: 验证系统能否识别时间序列上的单调递增趋势，并定位到具体路段和病害类型。
+  source: fresh
+- id: fresh_unsupported_lane_distribution
+  category: 不支持能力
+  question: 我想查看G60沪昆高速第三车道上所有病害的类型分布比例，系统能提供吗？
+  focus: 验证系统是否能识别当前数据缺失（车道分布未更新），并明确告知用户该维度暂不支持或数据不可用。
+  source: fresh
+- id: fresh_asset_surface_type_breakdown
+  category: 资产
+  question: 按路面材料类型（如沥青、水泥）统计当前路网中的病害总数，哪类路面的病害更多？
+  focus: 验证系统能否基于资产属性（路面类型）进行分组统计和比较。
+  source: fresh
+- id: fresh_disease_direction_hotspot
+  category: 病害
+  question: 在长沙－芷江高速公路段，上行方向和下行方向哪个方向的坑槽病害更密集？
+  focus: 验证系统能否区分上下行方向，计算特定病害类型的密度或数量并进行对比。
+  source: fresh
+- id: fresh_time_inter_inspection_gap
+  category: 时间
+  question: 查询某路段在最近两次巡检之间的时间间隔是多少天，以及期间是否有新增病害记录？
+  focus: 验证系统能否计算相邻巡检任务的时间差，并关联检查该时间段内的病害增量情况。
+  source: fresh
+- id: fresh_task_completion_rate_ranking
+  category: 巡检任务
+  question: 对各管养片区上个月的巡检任务完成率进行排名，完成率最低的片区是哪个？
+  focus: 验证系统能否计算任务完成率（实际/计划），并按片区进行排序找出最小值。
+  source: fresh
+- id: fresh_maintenance_cross_district_compare
+  category: 管养
+  question: 对比第一和第二管养片区在主要病害类型构成上的差异，例如裂缝占比谁更高？
+  focus: 验证系统能否跨管养单位统计病害类型占比，并进行横向对比分析。
+  source: fresh
+- id: holdout_16
+  category: 设备和任务
+  question: 2026年11月每台巡检设备分别完成了哪些路线、各多少次任务？
+  focus: 检查设备维度、路线关联和任务计数；能力不足时必须说明原因。
+  source: old
+- id: patrol_lines_nov_2
+  category: 历史题
+  question: 11月2日巡检了哪些线路？
+  focus: ''
+  source: old
+- id: holdout_10
+  category: 时间维度
+  question: 2026年10月检出的病害按路线分布，各路线多少处？
+  focus: 检查月份起止边界、路线分组和数量。
+  source: old
+- id: holdout_15
+  category: 超出能力
+  question: 2号车道上的病害类型和数量分别是什么？
+  focus: 若当前车道数据不可用，必须明确说明缺失能力，不能猜测。
+  source: old
+- id: holdout_20
+  category: 长期变化
+  question: 比较最近两次巡检，哪些路线的病害面积增长最快？
+  focus: 必须能够可靠配对同一路线的前后巡检；无法配对时必须明确说明限制。
+  source: old
