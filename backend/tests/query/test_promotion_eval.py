@@ -1,10 +1,17 @@
 import unittest
+import tempfile
+from pathlib import Path
 
-from evals.promotion.case_factory import generate_exam_cases, sample_old_cases
+from evals.promotion.case_factory import (
+    generate_exam_cases,
+    load_old_cases,
+    sample_old_cases,
+)
 from evals.promotion.models import ExamCase, ExamManifest
 from evals.promotion.runner import (
     StaleExamError,
     assert_promotion,
+    code_fingerprint,
     run_exam,
 )
 
@@ -137,6 +144,27 @@ class PromotionEvalTests(unittest.TestCase):
             [item.id for item in second],
         )
         self.assertEqual(len({item.id for item in first}), 5)
+
+    def test_old_pool_includes_previously_frozen_exam_questions(self):
+        ids = {item.id for item in load_old_cases()}
+        self.assertIn("fresh_topn_route_types", ids)
+
+    def test_code_fingerprint_ignores_docs_and_tracks_runtime_code(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "backend" / "app").mkdir(parents=True)
+            (root / "docs").mkdir()
+            code = root / "backend" / "app" / "logic.py"
+            code.write_text("value = 1\n", encoding="utf-8")
+            (root / "docs" / "readme.md").write_text("v1\n", encoding="utf-8")
+            first = code_fingerprint(root)
+            (root / "docs" / "readme.md").write_text("v2\n", encoding="utf-8")
+            second = code_fingerprint(root)
+            code.write_text("value = 2\n", encoding="utf-8")
+            third = code_fingerprint(root)
+
+        self.assertEqual(first, second)
+        self.assertNotEqual(second, third)
 
     def test_fresh_generation_excludes_seen_questions(self):
         def generator(document, exclude_ids, count):

@@ -153,6 +153,36 @@ class ReviewRepairTests(unittest.TestCase):
         self.assertEqual(execute.call_count, 1)
         self.assertIsNone(result.answer.review_gate)
 
+    @patch("app.query.review_repair._execute_plan")
+    @patch("app.query.review_repair.analyze_single_turn")
+    def test_explicit_unsupported_is_not_treated_as_success(self, analyze, execute):
+        original_q1 = spec("q1")
+        original_q2 = spec("q2")
+        analyze.return_value = plan(
+            spec(
+                "q1",
+                view="top_groups",
+                metrics=("count",),
+                dimensions=("problem_type_name",),
+            ),
+            original_q2,
+        )
+        execute.return_value = AnswerPackage(
+            "当前数据能力不支持该查询",
+            (
+                {
+                    "status": "unsupported",
+                    "failure_code": "unsupported_query_spec",
+                    "answer": "当前数据能力不支持该查询",
+                },
+            ),
+        )
+
+        result = repair_review_evidence(evidence_for(original_q1, original_q2))
+
+        self.assertEqual(result.stopped_reason, "repair_unsupported")
+        self.assertIn("不支持", result.answer.text)
+
 
 if __name__ == "__main__":
     unittest.main()

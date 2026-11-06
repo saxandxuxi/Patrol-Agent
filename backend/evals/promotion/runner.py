@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
@@ -18,21 +17,28 @@ class StaleExamError(RuntimeError):
 
 def code_fingerprint(root: Path | None = None) -> str:
     root = (root or Path(__file__).resolve().parents[3]).resolve()
-    head = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    diff = subprocess.run(
-        ["git", "diff", "--binary", "--no-ext-diff"],
-        cwd=root,
-        capture_output=True,
-        check=True,
-    ).stdout
-    digest = hashlib.sha256(diff).hexdigest()
-    return f"{head}:{digest}"
+    roots = (
+        root / "backend" / "app",
+        root / "backend" / "evals" / "promotion",
+        root / "resources" / "capabilities",
+        root / "prompts",
+        root / "frontend" / "src",
+    )
+    digest = hashlib.sha256()
+    for base in roots:
+        if not base.exists():
+            continue
+        for path in sorted(item for item in base.rglob("*") if item.is_file()):
+            if "runs" in path.parts or "__pycache__" in path.parts:
+                continue
+            if path.suffix.lower() in {".pyc", ".pyo"}:
+                continue
+            relative = path.relative_to(root).as_posix()
+            digest.update(relative.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return f"content:{digest.hexdigest()}"
 
 
 def _validate_manifest(manifest: ExamManifest) -> None:

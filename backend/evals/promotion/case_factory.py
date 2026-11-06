@@ -120,7 +120,30 @@ def load_old_cases() -> list[ExamCase]:
                     source="old",
                 )
             )
-    return result
+    runs_dir = _PROMOTION_DIR / "runs"
+    if runs_dir.exists():
+        for path in sorted(runs_dir.glob("*.yaml")):
+            manifest = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            for item in manifest.get("cases") or []:
+                if not isinstance(item, dict):
+                    continue
+                case_id = str(item.get("id") or "").strip()
+                question = str(item.get("question") or "").strip()
+                if not case_id or not question:
+                    continue
+                result.append(
+                    ExamCase(
+                        id=case_id,
+                        category=str(item.get("category") or "历史考试题"),
+                        question=question,
+                        focus=str(item.get("focus") or ""),
+                        source="old",
+                    )
+                )
+    deduped: dict[str, ExamCase] = {}
+    for item in result:
+        deduped.setdefault(item.id, item)
+    return list(deduped.values())
 
 
 def sample_old_cases(seed: int, count: int = 5) -> list[ExamCase]:

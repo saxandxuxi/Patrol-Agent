@@ -122,6 +122,16 @@ def _planning_feedback(evidence: ReviewEvidence) -> str:
     )
 
 
+def _answer_is_accepted(answer: AnswerPackage) -> bool:
+    if answer.review_gate is not None or not answer.sections:
+        return False
+    return all(
+        str(section.get("status") or "accepted") == "accepted"
+        for section in answer.sections
+        if isinstance(section, dict)
+    )
+
+
 def repair_review_evidence(evidence: ReviewEvidence) -> ReviewRepairResult:
     original = {section.node_id: section for section in evidence.sections}
     first_spec = next(
@@ -187,11 +197,17 @@ def repair_review_evidence(evidence: ReviewEvidence) -> ReviewRepairResult:
             )
             return replace(result, attempts=attempt)
         last_answer = answer
-        if answer.review_gate is None:
+        if _answer_is_accepted(answer):
             return ReviewRepairResult(
                 answer=answer,
                 attempts=attempt,
                 stopped_reason="",
+            )
+        if answer.review_gate is None:
+            return ReviewRepairResult(
+                answer=answer,
+                attempts=attempt,
+                stopped_reason="repair_unsupported",
             )
         feedback = json.dumps(
             {
