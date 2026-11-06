@@ -11,9 +11,10 @@ def as_decimal(value: Any) -> Decimal | None:
     if text.endswith("%"):
         text = text[:-1].strip()
     try:
-        return Decimal(text)
+        number = Decimal(text)
     except (InvalidOperation, ValueError):
         return None
+    return number if number.is_finite() else None
 
 
 def quantize(value: Decimal, precision: int) -> Decimal:
@@ -34,9 +35,12 @@ def numeric_value(
     for row in dependency.get("rows") or []:
         if not isinstance(row, dict):
             continue
-        for name, item in row.items():
-            if field and field not in str(name):
-                continue
+        if field:
+            value = as_decimal(row.get(field))
+            if value is not None:
+                return value
+            continue
+        for item in row.values():
             value = as_decimal(item)
             if value is not None:
                 return value

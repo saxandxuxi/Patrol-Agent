@@ -8,7 +8,7 @@ from typing import Any, Callable
 from . import prompts, react_repair, tools
 from . import event_bus
 from .llm import chat_json, role_model
-from .logging_service import log_error
+from .logging_service import console_json, log_error
 from .tools.observation import normalize_week_label, observation
 from ..store import get_result
 
@@ -172,11 +172,7 @@ def _print_success_observation(step: dict[str, Any], obs: dict[str, Any]) -> Non
         "summary": str(obs.get("summary") or "")[:1000],
         "verification_warning": obs.get("verification_warning"),
     }
-    print(
-        "[react][success] "
-        + json.dumps(record, ensure_ascii=True, default=str),
-        flush=True,
-    )
+    console_json("[react][success] ", record)
 
 
 def _run_atomic_tool(
@@ -371,8 +367,15 @@ def _deviation_decision(
 
 def _allowed_tools(failure: dict[str, Any]) -> list[dict[str, Any]]:
     allowed: list[dict[str, Any]] = []
+    evidence = failure.get("evidence") or {}
+    input_shape = str(
+        evidence.get("input_shape")
+        or (evidence.get("calculation") or {}).get("input_shape")
+        or ""
+    )
     for name in react_repair.candidate_tool_names(
-        str(failure.get("failure_code") or "tool_error")
+        str(failure.get("failure_code") or "tool_error"),
+        input_shape,
     ):
         try:
             item = tools.get_tool(name)

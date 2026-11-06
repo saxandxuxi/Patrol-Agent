@@ -32,8 +32,15 @@ def analyze_evidence(
                 "field_labels": json_value(
                     dependency.get("field_labels") or {}
                 ),
-                "compact": compact_table_evidence(
-                    list(dependency.get("rows") or [])
+                "row_count": int(
+                    dependency.get("row_count")
+                    or len(dependency.get("rows") or [])
+                ),
+                "compact": (
+                    dependency.get("compact")
+                    or compact_table_evidence(
+                        list(dependency.get("rows") or [])
+                    )
                 ),
             }
             for dependency in dependencies

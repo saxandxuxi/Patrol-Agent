@@ -343,6 +343,14 @@
           "precision": {
             "type": "integer",
             "default": 6
+          },
+          "zero_denominator": {
+            "type": "string",
+            "enum": [
+              "error",
+              "skip_rows"
+            ],
+            "default": "skip_rows"
           }
         },
         "required": [

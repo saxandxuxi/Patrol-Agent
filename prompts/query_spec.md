@@ -110,6 +110,8 @@
 26. AI 识别可靠性问题使用两个计数节点：总病害数、置信度匹配 `low_confidence`
     的低置信度数，再由 `calculate_scalar/percentage_share` 计算占比。
     不得发明 `confidence_bucket` 等未注册分组字段。
+27. 所有 `post_calc` 必须二选一：需要算术时声明 `calculation`；只解释已有值、
+    不产生新数字时，在 `required_assertions` 中声明 `analysis_only`。
 
 允许的 view：
 count / sum / avg / distribution / list / detail / top / trend / bucket_compare / photo / data

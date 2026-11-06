@@ -206,6 +206,57 @@ class CalculationContractTests(unittest.TestCase):
             "business_value:confidence:low_confidence",
         )
 
+    @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
+    @patch("app.query.analysis.chat_json")
+    def test_duplicate_operand_roles_are_rejected(
+        self,
+        chat_json,
+        _audit,
+    ):
+        payload = calculation_payload()
+        operands = payload["views"][1]["calculation"]["operands"]
+        operands.append(dict(operands[0]))
+        chat_json.return_value = payload
+
+        with self.assertRaisesRegex(
+            QuerySpecError,
+            "calculation_operand_missing",
+        ):
+            analyze_single_turn(
+                "计算每条道路的病害密度",
+                "mysql",
+                PhysicalSchemaView(columns=frozenset()),
+                FieldReachSet(),
+                audit=True,
+                registry=self.registry,
+                subject="disease",
+            )
+
+    @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
+    @patch("app.query.analysis.chat_json")
+    def test_non_object_calculation_is_rejected(
+        self,
+        chat_json,
+        _audit,
+    ):
+        payload = calculation_payload()
+        payload["views"][1]["calculation"] = "numerator / denominator"
+        chat_json.return_value = payload
+
+        with self.assertRaisesRegex(
+            QuerySpecError,
+            "calculation_output_invalid",
+        ):
+            analyze_single_turn(
+                "计算每条道路的病害密度",
+                "mysql",
+                PhysicalSchemaView(columns=frozenset()),
+                FieldReachSet(),
+                audit=True,
+                registry=self.registry,
+                subject="disease",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

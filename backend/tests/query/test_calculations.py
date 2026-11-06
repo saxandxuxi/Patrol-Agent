@@ -4,6 +4,7 @@ from decimal import Decimal
 from app.calculations.columns import calculate_columns
 from app.calculations.evidence import compact_table_evidence
 from app.calculations.models import CalculationOperand, CalculationRequest
+from app.calculations.numbers import as_decimal, numeric_value
 from app.calculations.registry import CalculationRegistry
 from app.calculations.scalar import calculate_scalar
 from app.calculations.series import calculate_series
@@ -109,6 +110,49 @@ class ScalarCalculationTests(unittest.TestCase):
             "divide",
             registry.snapshot.calculators["calculate_scalar"].operations,
         )
+
+    def test_precision_zero_is_preserved(self):
+        request = scalar_request("add", left=1, right=2)
+        request = CalculationRequest(
+            tool=request.tool,
+            operation=request.operation,
+            operands=request.operands,
+            precision=0,
+        )
+
+        result = calculate_scalar(request)
+
+        self.assertEqual(result.value.as_tuple().exponent, 0)
+
+    def test_invalid_precision_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "precision"):
+            CalculationRequest.from_dict(
+                {
+                    "tool": "calculate_scalar",
+                    "operation": "add",
+                    "operands": [],
+                    "precision": "bad",
+                }
+            )
+
+    def test_infinity_is_not_a_valid_number(self):
+        self.assertIsNone(as_decimal("Infinity"))
+        self.assertIsNone(as_decimal("NaN"))
+
+    def test_numeric_value_uses_exact_field_name(self):
+        value = numeric_value(
+            {
+                "rows": [
+                    {
+                        "count_total": "99",
+                        "count": "7",
+                    }
+                ]
+            },
+            "count",
+        )
+
+        self.assertEqual(value, Decimal("7"))
 
 
 class ColumnCalculationTests(unittest.TestCase):

@@ -25,6 +25,7 @@ class AnswerExperienceTests(unittest.TestCase):
                 "required_assertions": [
                     "lower_is_better",
                     "multi_metric_comparison",
+                    "analysis_only",
                 ],
             },
             {
@@ -81,6 +82,67 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertTrue(payload["accepted"])
         self.assertIn("综合", payload["reply"])
         self.assertIn("病害密度", payload["reply"])
+
+    @patch("app.calculations.executor.analyze_evidence")
+    def test_large_calculation_sends_preview_and_full_compact_evidence(
+        self,
+        analyze,
+    ):
+        analyze.return_value = {
+            "reply": "ok",
+            "source": "calc",
+            "engine": "post_calc",
+            "accepted": True,
+        }
+        rows = [
+            {
+                "路线名称": f"路线{index}",
+                "数量": index + 1,
+                "路线长度": 10,
+            }
+            for index in range(15)
+        ]
+
+        execute_post_calc(
+            {
+                "question": "计算密度",
+                "depends_on": ["q1"],
+                "calculation": {
+                    "tool": "calculate_columns",
+                    "operation": "divide",
+                    "operands": [
+                        {
+                            "name": "numerator",
+                            "source": {"node": "q1", "field": "数量"},
+                        },
+                        {
+                            "name": "denominator",
+                            "source": {"node": "q1", "field": "路线长度"},
+                        },
+                    ],
+                    "output": {"name": "密度", "unit": "处/km"},
+                    "precision": 4,
+                },
+            },
+            {
+                "q1": {
+                    "rows": rows,
+                    "field_labels": {
+                        "route_name": "路线名称",
+                        "count": "数量",
+                        "route_length_km": "路线长度",
+                    },
+                }
+            },
+        )
+
+        calculation_dependency = analyze.call_args.args[1][-1]
+        self.assertEqual(calculation_dependency["row_count"], 15)
+        self.assertEqual(len(calculation_dependency["rows"]), 10)
+        self.assertEqual(
+            calculation_dependency["compact"]["metrics"]["密度"]["max"]["group"],
+            "路线14",
+        )
 
     @patch(
         "app.calculations.domain.analysis.chat",
@@ -379,7 +441,10 @@ class AnswerExperienceTests(unittest.TestCase):
             {
                 "question": "哪条路的健康状况最好？",
                 "depends_on": [1],
-                "required_assertions": ["lower_is_better"],
+                "required_assertions": [
+                    "lower_is_better",
+                    "analysis_only",
+                ],
             },
             {
                 1: {
@@ -406,7 +471,10 @@ class AnswerExperienceTests(unittest.TestCase):
             {
                 "question": "哪条路的健康状况最好？",
                 "depends_on": [1],
-                "required_assertions": ["lower_is_better"],
+                "required_assertions": [
+                    "lower_is_better",
+                    "analysis_only",
+                ],
             },
             {
                 1: {

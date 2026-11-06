@@ -78,7 +78,7 @@ def calculate_series(
                 )
             result_value = quantize(
                 result_value,
-                precision or capability.precision,
+                precision,
             )
         rows.append(
             {
@@ -99,7 +99,7 @@ def calculate_series(
             else "(current - previous) / previous * 100"
         ),
         evidence={
-            "precision": precision or capability.precision,
+            "precision": precision,
             "point_count": len(rows),
         },
     )

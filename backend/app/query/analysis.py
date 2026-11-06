@@ -265,7 +265,13 @@ def _plan_shaping_issue(plan: QueryPlan, intent_family: str) -> str:
 def _spec_order_issue(spec: QuerySpec, registry: CapabilityRegistry | None) -> str:
     if registry is None:
         return ""
-    allowed = set(registry.snapshot.fields.get(spec.subject, {}))
+    allowed = {
+        *registry.snapshot.fields.get(spec.subject, {}),
+        *registry.snapshot.metrics.get(spec.subject, {}),
+        *registry.snapshot.derived_metrics.get(spec.subject, {}),
+        *spec.dimensions,
+        *spec.output_projection,
+    }
     for item in spec.order_by:
         if not isinstance(item, dict):
             continue
@@ -506,11 +512,23 @@ def _analyze_once(
                 )
             )
         raw_calculation = raw.get("calculation")
-        calculation = (
-            CalculationRequest.from_dict(raw_calculation)
-            if isinstance(raw_calculation, dict)
-            else None
-        )
+        if raw_calculation is not None and not isinstance(
+            raw_calculation,
+            dict,
+        ):
+            raise QuerySpecError(
+                "calculation_output_invalid: calculation 必须是对象"
+            )
+        try:
+            calculation = (
+                CalculationRequest.from_dict(raw_calculation)
+                if isinstance(raw_calculation, dict)
+                else None
+            )
+        except (TypeError, ValueError) as exc:
+            raise QuerySpecError(
+                f"calculation_output_invalid: {exc}"
+            ) from exc
         specs.append(
             QuerySpec(
                 id=spec_id,
@@ -844,6 +862,24 @@ def _query_plan_calculation_issue(
                 reason="calculation 只能用于 post_calc 节点",
                 node_id=node.id,
             )
+        if (
+            calculation is None
+            and "analysis_only" not in node.spec.required_assertions
+        ):
+            return CapabilityIssue(
+                code="calculation_required",
+                original_value=node.id,
+                reason=(
+                    "post_calc 必须声明 calculation 工具和参数；"
+                    "只解释已有值时声明 analysis_only"
+                ),
+                suggested_repair=(
+                    "使用 calculate_scalar、calculate_columns 或 calculate_series。"
+                ),
+                node_id=node.id,
+            )
+        if calculation is None:
+            continue
         capability = registry.snapshot.calculators.get(calculation.tool)
         if not isinstance(capability, Mapping):
             return CapabilityIssue(
@@ -881,6 +917,16 @@ def _query_plan_calculation_issue(
                 node_id=node.id,
             )
         operand_names = tuple(item.name for item in calculation.operands)
+        if len(set(operand_names)) != len(operand_names):
+            return CapabilityIssue(
+                code="calculation_operand_missing",
+                original_value=calculation.operation,
+                reason="计算操作数角色不能重复",
+                allowed_values=roles,
+                suggested_repair="每个命名操作数只能出现一次。",
+                node_id=node.id,
+                evidence={"actual_roles": list(operand_names)},
+            )
         missing_roles = [role for role in roles if role not in operand_names]
         extra_roles = [role for role in operand_names if role not in roles]
         if missing_roles or extra_roles:

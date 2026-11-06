@@ -96,7 +96,7 @@ calculators:
     input_shapes: [rows]
     operations: [add, subtract, multiply, divide, ratio, percentage_share, percentage_change]
     precision: 6
-    zero_denominator: row_error
+    zero_denominator: skip_rows
   calculate_series:
     input_shapes: [series]
     operations: [subtract, percentage_change]
@@ -151,6 +151,9 @@ QuerySpec 的 `post_calc` 节点新增可选 `calculation` 对象：
 - `percentage_change`：`old`、`new`
 
 所有输入先转为 `Decimal`。空值、不可解析数字、除数为零和输出列缺失均返回结构化失败，不做静默零值替换。
+
+列计算允许配置 `skip_rows`：只跳过除数为零的行，最终结果必须返回
+`excluded_row_ids`。标量除法和百分比变化仍使用失败策略。
 
 ## 八、结果契约
 

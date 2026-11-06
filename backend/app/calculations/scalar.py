@@ -23,6 +23,12 @@ def calculate_scalar(request: CalculationRequest) -> CalculationResult:
             f"未注册计算工具：{request.tool}",
             tool=request.tool,
         )
+    if request.tool != "calculate_scalar":
+        return result.failure(
+            "calculation_tool_unknown",
+            "calculate_scalar 收到其他工具的计算请求",
+            tool=request.tool,
+        )
     if request.operation not in capability.operations:
         return result.failure(
             "calculation_operation_unknown",
@@ -73,12 +79,12 @@ def calculate_scalar(request: CalculationRequest) -> CalculationResult:
         accepted=True,
         tool=request.tool,
         operation=request.operation,
-        value=quantize(raw, request.precision or capability.precision),
+        value=quantize(raw, request.precision),
         formula=operation_result.formula,
         evidence={
             "operands": {
                 name: str(values[name]) for name in roles
             },
-            "precision": request.precision or capability.precision,
+            "precision": request.precision,
         },
     )

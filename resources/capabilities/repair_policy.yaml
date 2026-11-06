@@ -53,6 +53,7 @@ repair_policy:
     max_repair_rounds: 2
     retryable: true
   calculation_tool_unknown: *calculation_repair
+  calculation_required: *calculation_repair
   calculation_operation_unknown: *calculation_repair
   calculation_operand_missing: *calculation_repair
   calculation_type_mismatch: *calculation_repair

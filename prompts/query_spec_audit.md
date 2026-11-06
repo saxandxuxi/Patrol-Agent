@@ -57,6 +57,8 @@
     阈值不能进入过滤条件。
 26. AI 可靠性计划必须用总记录数和 `low_confidence` 记录数计算占比；不得使用未注册的
     置信度分桶维度。
+27. 每个 `post_calc` 必须有 `calculation`，或显式声明 `analysis_only`；否则返回
+    `calculation_required`。
 
 如果计划完整，返回：
 {

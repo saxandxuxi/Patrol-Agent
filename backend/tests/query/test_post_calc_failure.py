@@ -23,3 +23,58 @@ class PostCalcFailureTests(unittest.TestCase):
         self.assertEqual(payload["source"], "error")
         self.assertFalse(result["ok"])
         self.assertEqual(result["failure"]["failure_code"], "post_calc_empty")
+
+    def test_series_without_common_key_does_not_create_zero_series(self):
+        payload = execute_post_calc(
+            {
+                "question": "计算变化",
+                "view": "trend",
+                "depends_on": ["q1", "q2"],
+                "calculation": {
+                    "tool": "calculate_series",
+                    "operation": "subtract",
+                    "operands": [
+                        {
+                            "name": "labels",
+                            "source": {"node": "q1", "field": "patrol_number"},
+                        },
+                        {
+                            "name": "values",
+                            "source": {"node": "q2", "field": "count"},
+                        },
+                    ],
+                },
+            },
+            {
+                "q1": {
+                    "field_labels": {"patrol_number": "任务编号"},
+                    "rows": [{"任务编号": "P1"}],
+                },
+                "q2": {
+                    "field_labels": {"count": "数量"},
+                    "rows": [{"其他编号": "P1", "数量": "3"}],
+                },
+            },
+        )
+
+        self.assertFalse(payload["accepted"])
+        self.assertEqual(
+            payload["failure"]["failure_code"],
+            "calculation_operand_missing",
+        )
+
+    def test_arithmetic_post_calc_without_calculation_is_rejected(self):
+        payload = execute_post_calc(
+            {
+                "question": "计算变化",
+                "view": "trend",
+                "depends_on": ["q1"],
+            },
+            {"q1": {"rows": [{"月份": "10月", "数量": 1}]}},
+        )
+
+        self.assertFalse(payload["accepted"])
+        self.assertEqual(
+            payload["failure"]["failure_code"],
+            "calculation_required",
+        )

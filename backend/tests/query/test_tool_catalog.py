@@ -70,6 +70,14 @@ class CalculationToolCatalogTests(unittest.TestCase):
         self.assertIn("calculate_columns", names)
         self.assertIn("calculate_series", names)
 
+    def test_column_tool_schema_exposes_registry_zero_policy(self):
+        tool = tools.get_tool("calculate_columns")
+
+        self.assertEqual(
+            tool.input_schema["properties"]["zero_denominator"]["enum"],
+            ["error", "skip_rows"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

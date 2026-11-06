@@ -3,9 +3,15 @@ from __future__ import annotations
 from typing import Any
 
 from ....calculations.columns import calculate_columns as run_calculation
+from ....calculations.registry import default_calculation_registry
 from ....calculations.serialization import failure_payload, result_payload
 from ..observation import observation
 from ..registry import tool
+
+_CAPABILITY = default_calculation_registry().capability("calculate_columns")
+_DEFAULT_ZERO_POLICY = (
+    _CAPABILITY.zero_denominator if _CAPABILITY is not None else "error"
+)
 
 
 @tool(
@@ -21,6 +27,11 @@ from ..registry import tool
             "operands": {"type": "object"},
             "output_field": {"type": "string"},
             "precision": {"type": "integer", "default": 6},
+            "zero_denominator": {
+                "type": "string",
+                "enum": ["error", "skip_rows"],
+                "default": _DEFAULT_ZERO_POLICY,
+            },
         },
         "required": ["operation", "rows", "operands", "output_field"],
     },
@@ -32,8 +43,10 @@ def calculate_columns(
     operands: dict[str, str],
     output_field: str,
     precision: int = 6,
-    zero_denominator: str = "error",
+    zero_denominator: str = "",
 ) -> dict[str, Any]:
+    if not zero_denominator:
+        zero_denominator = _DEFAULT_ZERO_POLICY
     result = run_calculation(
         operation,
         rows,

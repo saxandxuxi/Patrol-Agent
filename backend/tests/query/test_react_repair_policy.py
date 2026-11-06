@@ -33,6 +33,22 @@ class ReactRepairPolicyTests(unittest.TestCase):
             ],
         )
 
+    def test_calculation_repair_filters_by_input_shape(self):
+        self.assertEqual(
+            react_repair.candidate_tool_names(
+                "calculation_zero_denominator",
+                "scalar_list",
+            ),
+            ["calculate_scalar"],
+        )
+        self.assertEqual(
+            react_repair.candidate_tool_names(
+                "calculation_zero_denominator",
+                "series",
+            ),
+            ["calculate_series"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

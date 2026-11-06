@@ -116,7 +116,7 @@ def calculate_columns(
                 **row,
                 output_field: quantize(
                     operation_result.value,
-                    precision or capability.precision,
+                    precision,
                 ),
             }
         )
@@ -149,7 +149,7 @@ def calculate_columns(
         evidence={
             "operands": dict(operands),
             "output_field": output_field,
-            "precision": precision or capability.precision,
+            "precision": precision,
             "excluded_row_ids": excluded_row_ids,
         },
     )

@@ -413,6 +413,43 @@ class QueryPlanningTests(unittest.TestCase):
         self.assertEqual(chat_json.call_count, 2)
         self.assertEqual(plan.nodes[0].spec.dimensions, ("equipment_id",))
 
+    @patch("app.query.analysis.chat_json")
+    def test_order_by_registered_metric_is_valid(self, chat_json):
+        chat_json.return_value = {
+            "final_goal": "按数量排序路线",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "按路线统计数量并排序",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["route_name"],
+                    "filters": [],
+                    "output_projection": ["route_name", "count"],
+                    "order_by": [
+                        {"field": "count", "direction": "desc"}
+                    ],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "按数量排序路线",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+        )
+
+        self.assertEqual(plan.nodes[0].spec.order_by[0]["field"], "count")
+
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
     def test_completion_question_accepts_model_status_distribution(

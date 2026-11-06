@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -35,7 +36,11 @@ class CalculationRequest:
             CalculationOperand(
                 name=str(item.get("name") or ""),
                 value=item.get("value"),
-                source=dict(item.get("source") or {}),
+                source=(
+                    dict(item.get("source"))
+                    if isinstance(item.get("source"), Mapping)
+                    else {}
+                ),
             )
             for item in (raw_operands if isinstance(raw_operands, list) else ())
             if isinstance(item, dict)
@@ -50,12 +55,22 @@ class CalculationRequest:
             if isinstance(raw_output, dict) and raw_output.get("name")
             else None
         )
+        raw_precision = value.get("precision")
+        if raw_precision in (None, ""):
+            precision = 6
+        else:
+            try:
+                precision = int(raw_precision)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("precision must be an integer") from exc
+            if precision < 0 or precision > 12:
+                raise ValueError("precision must be between 0 and 12")
         return cls(
             tool=str(value.get("tool") or ""),
             operation=str(value.get("operation") or ""),
             operands=operands,
             output=output,
-            precision=int(value.get("precision") or 6),
+            precision=precision,
             zero_denominator=str(value.get("zero_denominator") or ""),
         )
 

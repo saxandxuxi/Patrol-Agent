@@ -37,8 +37,24 @@ def _entry(failure_code: str) -> dict[str, Any]:
     }
 
 
-def candidate_tool_names(failure_code: str) -> list[str]:
-    return list(_entry(str(failure_code or "tool_error"))["candidates"])
+def candidate_tool_names(
+    failure_code: str,
+    input_shape: str = "",
+) -> list[str]:
+    code = str(failure_code or "tool_error")
+    candidates = list(_entry(code)["candidates"])
+    if code.startswith("calculation_"):
+        expected = {
+            "scalar_list": "calculate_scalar",
+            "rows": "calculate_columns",
+            "series": "calculate_series",
+        }.get(str(input_shape or ""))
+        if expected:
+            return [expected]
+        return [
+            item for item in candidates if item.startswith("calculate_")
+        ]
+    return candidates
 
 
 def build_failure(
@@ -57,6 +73,11 @@ def build_failure(
     safe_evidence = json.loads(
         json.dumps(evidence or {}, ensure_ascii=False, default=str)
     )
+    input_shape = str(
+        safe_evidence.get("input_shape")
+        or (safe_evidence.get("calculation") or {}).get("input_shape")
+        or ""
+    )
     return {
         "accepted": False,
         "failure_code": code,
@@ -64,7 +85,7 @@ def build_failure(
         "retryable": policy["retryable"],
         "reason": str(reason or "工具执行失败"),
         "evidence": safe_evidence,
-        "candidate_tools": list(policy["candidates"]),
+        "candidate_tools": candidate_tool_names(code, input_shape),
         "attempt": max(1, int(attempt or 1)),
         "max_repair_rounds": policy["max_repair_rounds"],
     }

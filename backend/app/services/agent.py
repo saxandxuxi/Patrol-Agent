@@ -38,6 +38,9 @@ from ..calculations.domain.comparison import (
     compare_datasets as calculation_compare_datasets,
     difference_conclusion as calculation_difference_conclusion,
 )
+from ..calculations.domain.ranking import (
+    render_extreme_conclusion as calculation_extreme_conclusion,
+)
 from ..calculations.post_calc import execute_post_calc
 from . import wren_engine
 from .db import DatabaseError, db_manager
@@ -781,7 +784,7 @@ def _grouped_summary(
     text = "分布：" + "，".join(parts) + tail + "。"
     # 分组问题必须给结论：用户问"哪个方向/哪种类型更多"，光列分布等于没答。
     if len(pairs) >= 2:
-        text += _extreme_conclusion(
+        text += calculation_extreme_conclusion(
             pairs,
             label_text="处数" if unit in _SUMMABLE_UNITS else str(metric),
             partial=_is_top_subset(spec),
@@ -905,7 +908,7 @@ def _multi_metric_summary(
         pairs.append((str(row.get(label) or "").strip(), value))
     conclusion = ""
     if len(pairs) >= 2:
-        conclusion = _extreme_conclusion(
+        conclusion = calculation_extreme_conclusion(
             pairs,
             label_text=str(primary),
             partial=_is_top_subset(spec),
@@ -1141,7 +1144,7 @@ def _comparison_conclusion(
                 pairs.append((name, float(row.get(metric_many))))
             except (TypeError, ValueError):
                 continue
-        return _extreme_conclusion(
+        return calculation_extreme_conclusion(
             pairs,
             str((labels_extra or {}).get(metric_many) or _RESULT_LABELS.get(str(metric_many), "") or metric_many),
         )
@@ -1196,42 +1199,6 @@ def _is_top_subset(spec: dict[str, Any] | None) -> bool:
     if not isinstance(spec, dict):
         return False
     return str(spec.get("shape") or "") == "top" or bool(spec.get("limit"))
-
-
-def _extreme_conclusion(
-    pairs: list[tuple[str, float]],
-    label_text: str = "数量",
-    partial: bool = False,
-    unit: str = "",
-    prefix: str = "",
-    with_metric_label: bool = False,
-) -> str:
-    """分组/多对象：给"谁最多、谁最少、差多少"的结论（不靠关键词，靠数据本身）。
-
-    partial=True 表示这只是前几名（有 LIMIT），只敢说"最多"。
-    prefix 给二维分组用：结论前面先补一句"哪个维度全是 0"这类二维信息。
-    with_metric_label 给二维分组用：结论里带上指标名（"西乡段的车辆巡检发现数最多"），
-    否则一维那句"西乡段最多"看不出比的是哪个维度。
-    """
-    if len(pairs) < 2:
-        return ""
-    top = max(pairs, key=lambda item: item[1])
-    top_name = f"{top[0]}的{label_text}" if with_metric_label else str(top[0])
-    if partial:
-        body = f"{top[0]}的{label_text}最多（{top[1]:g}{unit}）"
-        return f"（结论：{prefix}{body}。）"
-    bottom = min(pairs, key=lambda item: item[1])
-    if top[1] == bottom[1]:
-        body = f"{len(pairs)} 个{label_text}一样多，都是 {top[1]:g}{unit}"
-        return f"（结论：{prefix}{body}。）"
-    if bottom[1] == 0:
-        body = f"{top_name}最多（{top[1]:g}{unit}），{bottom[0]}没有记录"
-        return f"（结论：{prefix}{body}。）"
-    body = (
-        f"{top_name}最多（{top[1]:g}{unit}），{bottom[0]}最少（{bottom[1]:g}{unit}），"
-        f"相差 {top[1] - bottom[1]:g}{unit}"
-    )
-    return f"（结论：{prefix}{body}。）"
 
 
 def _summarize_rows(message: str, result: dict[str, Any]) -> str:
