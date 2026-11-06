@@ -551,6 +551,24 @@ _OPTIMIZER_GENERIC_DIMENSIONS = (
     "来源",
     "时间范围",
 )
+_OPTIMIZER_METRICS = {
+    "count": "数量",
+    "total_area": "总面积",
+    "average_area": "平均面积",
+    "max_area": "最大面积",
+    "min_area": "最小面积",
+    "average_length": "平均长度",
+    "sum_effective_disease_length": "总长度",
+    "confidence": "置信度",
+    "ratio": "占比",
+    "density": "病害密度",
+    "interval": "平均间距",
+    "rate": "平均水平",
+    "distinct_pile": "不同桩号数",
+    "duration": "持续时间",
+    "change": "变化量",
+    "trend": "趋势",
+}
 
 
 def question_optimization_context(
@@ -1803,12 +1821,41 @@ def expand_question_for_planning(question: str) -> dict[str, Any] | None:
             except (ValueError, TypeError):
                 pass
     if payload:
-        expanded = str(payload.get("question") or "").strip()
+        optimizer_question = str(payload.get("question") or "").strip()
+        lost = _lost_entities(original, optimizer_question)
+        if lost:
+            log_event(
+                "nl2sql",
+                "INFO",
+                "expand_question_rejected",
+                lost="、".join(lost)[:80],
+                question=original[:80],
+            )
+            return None
         dimensions = [
             str(item).strip()
             for item in payload.get("required_dimensions") or []
             if str(item).strip()
         ]
+        required_fields = [
+            str(
+                item.get("column")
+                if isinstance(item, dict)
+                else item
+            ).strip()
+            for item in payload.get("required_fields") or []
+            if str(
+                item.get("column")
+                if isinstance(item, dict)
+                else item
+            ).strip()
+        ]
+        required_metrics = [
+            str(item).strip()
+            for item in payload.get("required_metrics") or []
+            if str(item).strip()
+        ]
+        include_detail = payload.get("include_detail") is True
         unsupported_dimensions = [
             item
             for item in dimensions
@@ -1817,7 +1864,7 @@ def expand_question_for_planning(question: str) -> dict[str, Any] | None:
                 list(optimization_scope.get("display_columns") or []),
             )
         ]
-        if unsupported_dimensions and optimization_scope.get("table"):
+        if unsupported_dimensions:
             log_event(
                 "nl2sql",
                 "INFO",
@@ -1827,14 +1874,69 @@ def expand_question_for_planning(question: str) -> dict[str, Any] | None:
                 question=original[:80],
             )
             return None
-    else:
-        lines = [
-            re.sub(r"^(优化后|补全后|输出)[:：]\s*", "", line.strip())
-            for line in raw.strip("`").splitlines()
-            if line.strip()
+        display_columns = {
+            str(item.get("column") or ""): str(
+                item.get("label") or item.get("column") or ""
+            )
+            for item in optimization_scope.get("display_columns") or []
+        }
+        unsupported_fields = [
+            field for field in required_fields if field not in display_columns
         ]
-        expanded = " ".join(lines).strip()
-        dimensions = []
+        if unsupported_fields:
+            log_event(
+                "nl2sql",
+                "INFO",
+                "expand_question_rejected_physical_fields",
+                fields="、".join(unsupported_fields)[:80],
+                table=str(optimization_scope.get("table") or ""),
+                question=original[:80],
+            )
+            return None
+        unsupported_metrics = [
+            metric for metric in required_metrics if metric not in _OPTIMIZER_METRICS
+        ]
+        if unsupported_metrics:
+            log_event(
+                "nl2sql",
+                "INFO",
+                "expand_question_rejected_metrics",
+                metrics="、".join(unsupported_metrics)[:80],
+                question=original[:80],
+            )
+            return None
+        contract_lines = []
+        if required_fields:
+            contract_lines.append(
+                "真实物理字段："
+                + "、".join(
+                    f"{display_columns[field]}（{field}）"
+                    for field in required_fields
+                )
+            )
+        if dimensions:
+            contract_lines.append("需要输出或分组：" + "、".join(dimensions))
+        if required_metrics:
+            contract_lines.append(
+                "需要计算："
+                + "、".join(
+                    f"{_OPTIMIZER_METRICS[metric]}（{metric}）"
+                    for metric in required_metrics
+                )
+            )
+        if include_detail:
+            contract_lines.append(
+                "先给出精确总数；再按完全相同的过滤范围列出命中记录，"
+                "默认最多展示 500 条，并说明命中总数和是否截断。"
+            )
+        expanded = original
+        if contract_lines:
+            expanded += (
+                "\n查询口径（不得改变原问题中的路线、时间、病害类型等过滤范围）：\n"
+                + "\n".join(f"- {line}" for line in contract_lines)
+            )
+    else:
+        return None
     if len(expanded) < 4:
         return None
     # 预规划补全只能增加汇总维度；用户没要明细时，扩写不得把查询变成全表逐条记录。
@@ -1867,6 +1969,9 @@ def expand_question_for_planning(question: str) -> dict[str, Any] | None:
         "source": "question_optimizer",
         "mode": "preplan",
         "required_dimensions": list(dict.fromkeys(dimensions)),
+        "required_fields": list(dict.fromkeys(required_fields)),
+        "required_metrics": list(dict.fromkeys(required_metrics)),
+        "include_detail": include_detail,
         "optimization_scope": {
             "source": optimization_scope["source"],
             "table": optimization_scope["table"],
@@ -1876,6 +1981,9 @@ def expand_question_for_planning(question: str) -> dict[str, Any] | None:
                 str(item.get("column") or "")
                 for item in optimization_scope.get("display_columns") or []
             ],
+            "required_fields": list(dict.fromkeys(required_fields)),
+            "required_metrics": list(dict.fromkeys(required_metrics)),
+            "include_detail": include_detail,
         },
     }
 

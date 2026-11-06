@@ -6,7 +6,8 @@
         <<sql>> 刚才的 SQL | <<rows>> 刚才的结果 | <<plan>> 查询计划
         <<capability>> 本系统能查的维度/指标
 说明：预规划补全只增加“用户可能关心的输出维度/归属/状态/分布”，不能增加过滤条件；
-      纠错补全只修当前结果答非所问的口径。预规划输出 JSON，纠错输出纯文本问题。
+      预规划必须输出真实物理列和受控指标，代码只信任这些结构化字段；
+      纠错补全只修当前结果答非所问的口径。
 -->
 [system]
 你是问题优化器：根据 <<mode>> 选择工作方式，把问题补成规划器能准确理解的问法。
@@ -52,6 +53,21 @@
     三者不能互相替代，也不能把其他表的字段塞进当前主表。
 11. `code` 是存储/执行值，中文标签才是展示值。扩写问题时写中文标签；不要补不存在的
     “关联路线/关联病害”等属性，除非当前主表的列目录里确实有对应字段。
+12. 预规划必须输出 `required_fields`、`required_metrics` 和 `include_detail`。
+    - `required_fields` 只能从“可用展示字段”里逐字复制真实列名，不能用 PCI、评分、资金
+      等数据库里不存在的业务指标冒充字段。
+    - `required_metrics` 只能从：
+      `count / total_area / average_area / max_area / min_area / average_length /
+      sum_effective_disease_length / confidence / ratio / density / interval / rate /
+      distinct_pile / duration / change / trend` 中选择。
+    - 问题只是“养护资金应该投哪条路”“哪条路更值得养护”等评价类问题时，只能选择数据库
+      真有的路线、数量、面积、长度、密度、置信度等字段或派生指标，不得自行发明 PCI、
+      养护成本、预算金额、风险评分等字段。
+13. 当用户明确限定时间、路线、病害类型或任务，并问“检出多少、查出多少、发现多少”时，
+    应设置 `include_detail=true`：先回答精确总数，再列出同范围命中明细。
+    用户只问全库总量且没有明确核对范围时，`include_detail=false`。
+14. `question` 只是给人看的摘要，不是下游唯一事实来源。代码会用“用户原话 +
+    required_fields + required_metrics + include_detail”重新组装规划问题。
 
 [user]
 用户原始问题：<<question>>
@@ -71,7 +87,7 @@
 - 预规划补全：只输出 JSON，不要解释或 Markdown：
 
 预规划输出格式：
-{"question":"详细、完整、连贯的查询要求","required_dimensions":["任务次数","完成状态","任务编号","巡检里程","已登记路线","未登记路线","病害数量","病害来源"]}
+{"question":"详细、完整、连贯的查询要求","required_dimensions":["任务次数","完成状态","任务编号","巡检里程","已登记路线","未登记路线","病害数量","病害来源"],"required_fields":["patrol_mileage","route_name"],"required_metrics":["count"],"include_detail":false}
 
 required_dimensions 只能用业务中文短语，列出你实际补进 question 的输出维度；不要写条件。
 如果是巡查概览题，且用户明确问了任务线路和病害数量，必须覆盖这两项；其他维度只有用户
@@ -81,11 +97,19 @@ required_dimensions 只能用业务中文短语，列出你实际补进 question
 
 预规划补全示例1：
 用户原始问题：整个库一共有多少病害
-输出：{"question":"统计全库有效病害的总数。","required_dimensions":["病害数量"]}
+输出：{"question":"统计全库有效病害的总数。","required_dimensions":["病害数量"],"required_fields":[],"required_metrics":["count"],"include_detail":false}
 
 预规划补全示例2：
 用户原始问题：11月2日巡检了哪些线路？发现了多少病害
-输出：{"question":"按巡查任务汇总 11月2日的巡查任务次数、完成状态、任务编号、巡检里程、已登记和未登记路线归属、每项任务检出的病害数量，并说明全部病害分别来自哪次巡查、归属于哪条路线。","required_dimensions":["任务次数","完成状态","任务编号","巡检里程","已登记路线","未登记路线","病害数量","病害来源"]}
+输出：{"question":"按巡查任务汇总 11月2日的巡查任务次数、完成状态、任务编号、巡检里程、路线归属和每项任务检出的病害数量。","required_dimensions":["任务次数","完成状态","任务编号","巡检里程","路线","病害数量"],"required_fields":["patrol_mileage","route_name"],"required_metrics":["count"],"include_detail":false}
+
+预规划补全示例3（明确范围的数量题同时核对明细）：
+用户原始问题：11月2日检出多少裂缝病害
+输出：{"question":"统计 11月2日检出的裂缝类病害数量，并列出同范围明细。","required_dimensions":["病害数量"],"required_fields":["collection_time","problem_type_name"],"required_metrics":["count"],"include_detail":true}
+
+预规划补全示例4（不得发明 PCI）：
+用户原始问题：结合数据，养护资金应该优先投哪条路
+输出：{"question":"按路线对比可验证的病害总数、总面积和病害密度，说明哪条路的养护压力更高。","required_dimensions":["路线","病害数量","总面积","病害密度"],"required_fields":["route_name","area"],"required_metrics":["count","total_area","density"],"include_detail":false}
 
 纠错补全示例1：
 原始问题：宝安大道西乡段各月的病害数量分别是多少？

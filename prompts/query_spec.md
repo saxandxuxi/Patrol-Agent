@@ -48,6 +48,19 @@
 10. 下游 `query_data` 消费前序键值时，必须在 `inputs` 中声明 `from_node`、`from_field`、`to_field`、`op`，不得把依赖写成 SQL 或过滤值字符串。
 11. `post_calc` 只使用 `depends_on` 消费完整前序结果，不需要 `inputs`。
 12. 业务编号优先作为该编号所属字段的过滤条件；不得丢掉编号后又按“所有病害类型”之类无关口径查询。
+13. 每个 `view.question` 是给执行器看的可执行子问题，必须写清对象、会使用的真实字段名、
+    过滤条件、分组和指标。派生指标必须说明公式和来源列，例如
+    “按 `route_name` 分组，统计 `COUNT(*)`、`SUM(area)` 和病害密度（数量 ÷ 路线长度）”。
+14. 不能发明数据库没有的业务指标。诸如 PCI、养护资金、预算金额、风险评分，只有真实字段
+    出现在物理字段目录中才能使用；否则写入 `unknown_terms`，并改用真实可查的病害数量、
+    面积、长度、密度、置信度等指标，不能把模型常识塞进 SQL。
+15. 用户明确限定时间、路线、病害类型或任务，并问“检出多少、查出多少、发现多少”时，
+    必须拆成两个视图：
+    - 一个 `count` 视图给出精确总数；
+    - 一个 `list` 视图列出完全相同的过滤范围，输出
+      `problem_number`、`problem_type_name`、`area`、`effective_disease_length`、
+      `pile_number`、`route_name`、`collection_time` 中可用的定位字段。
+    明细默认 `limit=500`；回答必须说明命中总数、实际展示条数和是否截断。
 
 允许的 view：
 count / sum / avg / distribution / list / detail / top / trend / bucket_compare / photo / data
