@@ -154,6 +154,41 @@ class ServiceTests(unittest.TestCase):
         )
         self.assertEqual(payload["columns"], ["problem_type_name", "count"])
 
+    def test_count_observation_maps_metric_to_display_column(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+        payload = _observation_payload(
+            ExecutionObservation(
+                node_id="q1",
+                ok=True,
+                engine="wren",
+                sql="SELECT COUNT(*)",
+                columns=("病害数量",),
+                preview_rows=({"病害数量": "10"},),
+                result_rows=({"病害数量": "10"},),
+                rows_fetched=1,
+            ),
+            spec=spec,
+            question="病害总数",
+            answer="共 10 处",
+        )
+
+        self.assertEqual(
+            payload["field_labels"],
+            {"count": "病害数量"},
+        )
+
     def test_terminal_sections_keep_only_final_calculation(self):
         plan = QueryPlan(
             question="对比",
@@ -817,8 +852,14 @@ class ServiceTests(unittest.TestCase):
                 },
             },
             {
-                "q1_low": {"rows": [{"count": "17623"}]},
-                "q2_total": {"rows": [{"count": "34889"}]},
+                "q1_low": {
+                    "field_labels": {"count": "病害数量"},
+                    "rows": [{"病害数量": "17623"}],
+                },
+                "q2_total": {
+                    "field_labels": {"count": "病害数量"},
+                    "rows": [{"病害数量": "34889"}],
+                },
             },
         )
         self.assertTrue(payload["accepted"])

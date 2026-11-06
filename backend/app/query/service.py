@@ -535,6 +535,7 @@ def _observation_payload(
     else:
         logical_fields = [
             *spec.output_projection,
+            *spec.metrics,
             *(
                 order.get("field")
                 for order in spec.order_by
@@ -763,6 +764,10 @@ def _execute_plan(
                             failure.get("failure_code") or "post_calc_empty"
                         ),
                         "failure": failure,
+                        "calculation": (
+                            (failure.get("evidence") or {}).get("calculation")
+                            or {}
+                        ),
                     }
                 )
                 continue
@@ -805,6 +810,7 @@ def _execute_plan(
                     "columns": list(observation.columns),
                     "preview_rows": list(observation.preview_rows),
                     "rows": list(observation.result_rows),
+                    "calculation": payload.get("calculation") or {},
                 }
             )
             continue

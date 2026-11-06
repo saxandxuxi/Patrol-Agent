@@ -28,8 +28,11 @@
 1. 需要外部事实才能判断时，优先用候选工具做一次最小验证。
 2. SQL 语法错或结果答非所问时，选择 retry_tool 和 query_data。
 3. 后置计算为空时，可选择 retry_tool 和 post_calc，或 ask_user。
-4. 同一工具和参数不能原样重复。
-5. 修复预算耗尽或没有候选工具能推进时选择 abort，并保留原始失败原因。
+4. 计算失败时只能从 `calculate_scalar`、`calculate_columns`、`calculate_series`
+   中选择，并修正 `operation`、命名操作数或 `source.node/source.field`。
+   不能把 LLM 心算结果当事实，不能改用户范围。
+5. 同一工具和参数不能原样重复。
+6. 修复预算耗尽或没有候选工具能推进时选择 abort，并保留原始失败原因。
 
 只输出 JSON：
 {

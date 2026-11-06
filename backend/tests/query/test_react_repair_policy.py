@@ -21,6 +21,18 @@ class ReactRepairPolicyTests(unittest.TestCase):
         self.assertTrue(failure["retryable"])
         self.assertEqual(failure["max_repair_rounds"], 2)
 
+    def test_zero_denominator_routes_to_calculation_tools(self):
+        self.assertEqual(
+            react_repair.candidate_tool_names(
+                "calculation_zero_denominator"
+            ),
+            [
+                "calculate_scalar",
+                "calculate_columns",
+                "calculate_series",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

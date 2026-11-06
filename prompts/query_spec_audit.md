@@ -37,7 +37,7 @@
 21. 用户要求观察最近 N 个事件或批次上的指标变化时，计划必须同时包含：
     按真实时间排序且 `limit=N` 的批次节点、按同一批次键统计指标的数据节点，以及
     `view=trend`、依赖这两个节点的 `post_calc`。只有通用 `data` 型计算或只有一个数据节点时，
-    返回 `invalid_view_shape`。
+    返回 `invalid_view_shape`。批次节点必须声明 `recent_window`，并有真实时间排序。
 22. 路线健康、病害严重程度、优先养护等评价题应使用真实代理指标
     `count`、`total_area`、`average_area`、`sum_effective_disease_length`、
     `route_length_km`，并用 `post_calc` 综合比较。`disease_density` 不是可执行指标；
@@ -53,6 +53,10 @@
 24. 算术必须通过 `calculation` 工具契约执行。检查工具、操作符、命名角色和
     `source.node/source.field` 是否都属于 `depends_on` 的真实产出；禁止表达式字符串、
     `eval` 和 LLM 直接给最终数值。缺失或错误时返回对应 `calculation_*` failure。
+25. 未由用户明确给出的业务阈值必须引用 `business_values` 的规则名；模型推断的数值
+    阈值不能进入过滤条件。
+26. AI 可靠性计划必须用总记录数和 `low_confidence` 记录数计算占比；不得使用未注册的
+    置信度分桶维度。
 
 如果计划完整，返回：
 {

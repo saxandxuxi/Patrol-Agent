@@ -10,7 +10,7 @@ calculators:
     operations:
       [add, subtract, multiply, divide, ratio, percentage_share, percentage_change]
     precision: 6
-    zero_denominator: row_error
+    zero_denominator: skip_rows
   calculate_series:
     input_shapes: [series]
     operations: [subtract, percentage_change]

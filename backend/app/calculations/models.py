@@ -56,7 +56,7 @@ class CalculationRequest:
             operands=operands,
             output=output,
             precision=int(value.get("precision") or 6),
-            zero_denominator=str(value.get("zero_denominator") or "error"),
+            zero_denominator=str(value.get("zero_denominator") or ""),
         )
 
     def to_dict(self) -> dict[str, Any]:

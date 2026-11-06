@@ -37,3 +37,11 @@ predicates:
       source: routes_with_data
       value_column: id
       label_column: short_name
+  business_values:
+    confidence:
+      low_confidence:
+        op: <
+        storage_value: 0.7
+        display_value: 低置信度（<0.7）
+        source: business_rule
+        resolver: business_value:confidence:low_confidence

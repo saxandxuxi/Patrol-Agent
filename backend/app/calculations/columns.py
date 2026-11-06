@@ -30,6 +30,7 @@ def calculate_columns(
     output_field: str,
     *,
     precision: int = 6,
+    zero_denominator: str = "error",
 ) -> CalculationResult:
     base = CalculationResult(
         accepted=False,
@@ -82,6 +83,7 @@ def calculate_columns(
         )
     output_rows: list[dict[str, Any]] = []
     row_ids: list[str] = []
+    excluded_row_ids: list[str] = []
     invalid_rows: list[str] = []
     formula = ""
     for index, row in enumerate(source_rows):
@@ -97,7 +99,10 @@ def calculate_columns(
         }
         operation_result = evaluate(operation, typed)
         if operation_result.failure_code == "calculation_zero_denominator":
-            row_ids.append(_row_id(row, index))
+            if zero_denominator in {"skip_rows", "skip"}:
+                excluded_row_ids.append(_row_id(row, index))
+            else:
+                row_ids.append(_row_id(row, index))
             continue
         if operation_result.failure_code or operation_result.value is None:
             return base.failure(
@@ -128,6 +133,12 @@ def calculate_columns(
             "部分行不是有效数字",
             row_ids=invalid_rows,
         )
+    if not output_rows:
+        return base.failure(
+            "calculation_output_invalid",
+            "列计算没有可输出的有效行",
+            excluded_row_ids=excluded_row_ids,
+        )
     return CalculationResult(
         accepted=True,
         tool="calculate_columns",
@@ -139,5 +150,6 @@ def calculate_columns(
             "operands": dict(operands),
             "output_field": output_field,
             "precision": precision or capability.precision,
+            "excluded_row_ids": excluded_row_ids,
         },
     )

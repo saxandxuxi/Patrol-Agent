@@ -241,6 +241,14 @@ class CapabilityRegistry:
             for tool, raw in self.snapshot.calculators.items()
             if isinstance(raw, Mapping)
         }
+        business_values = dict(
+            (
+                self.snapshot.predicates.get("business_values")
+                if isinstance(self.snapshot.predicates, Mapping)
+                else {}
+            )
+            or {}
+        )
         return PlannerCapabilityView(
             subject=subject,
             base_table=subject_cap.base_table,
@@ -252,6 +260,7 @@ class CapabilityRegistry:
             metric_details=metric_details,
             derived_metric_details=derived_metric_details,
             calculators=calculators,
+            business_values=business_values,
         )
 
     def metric(

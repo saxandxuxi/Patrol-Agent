@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from app.query.analysis import analyze_single_turn
-from app.query.contracts import ValueBinding
+from app.query.contracts import QuerySpecError, ValueBinding
 from app.query.fields import FieldReachSet, PhysicalSchemaView
 from app.services.plan_contract import build_step_contract
 
@@ -30,7 +30,10 @@ class QueryPlanningTests(unittest.TestCase):
                         {"field": "create_time", "direction": "desc"}
                     ],
                     "limit": 5,
-                    "required_assertions": ["preserve_user_scope"],
+                    "required_assertions": [
+                        "preserve_user_scope",
+                        "recent_window",
+                    ],
                     "depends_on": [],
                     "inputs": [],
                 },
@@ -217,6 +220,147 @@ class QueryPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(plan.nodes[-1].depends_on, ("batches", "counts"))
+
+    @patch("app.query.analysis.chat_json")
+    def test_trend_series_uses_batch_axis_for_labels(self, chat_json):
+        chat_json.return_value = {
+            "final_goal": "分析最近5次巡查的坑槽数量变化",
+            "intent_family": "trend",
+            "views": [
+                {
+                    "id": "batches",
+                    "action": "query_data",
+                    "subject": "patrol",
+                    "view": "list",
+                    "metrics": [],
+                    "dimensions": ["patrol_number"],
+                    "filters": [],
+                    "output_projection": ["patrol_number"],
+                    "order_by": [
+                        {"field": "create_time", "direction": "desc"}
+                    ],
+                    "limit": 5,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "counts",
+                    "action": "query_data",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["patrol_number"],
+                    "filters": [
+                        {
+                            "field": "problem_type_name",
+                            "op": "=",
+                            "raw_value": "坑槽",
+                        }
+                    ],
+                    "output_projection": ["patrol_number", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": ["batches"],
+                    "inputs": [
+                        {
+                            "from_node": "batches",
+                            "from_field": "patrol_number",
+                            "to_field": "patrol_number",
+                            "op": "in",
+                        }
+                    ],
+                },
+                {
+                    "id": "trend",
+                    "action": "post_calc",
+                    "subject": "disease",
+                    "view": "trend",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": ["batches", "counts"],
+                    "inputs": [],
+                    "calculation": {
+                        "tool": "calculate_series",
+                        "operation": "subtract",
+                        "operands": [
+                            {
+                                "name": "labels",
+                                "source": {
+                                    "node": "counts",
+                                    "field": "patrol_number",
+                                },
+                            },
+                            {
+                                "name": "values",
+                                "source": {
+                                    "node": "counts",
+                                    "field": "count",
+                                },
+                            },
+                        ],
+                        "precision": 6,
+                    },
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "坑槽在最近5次巡查的数量变化",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+        )
+
+        operands = {
+            item.name: item
+            for item in plan.nodes[-1].spec.calculation.operands
+        }
+        self.assertEqual(operands["labels"].source["node"], "batches")
+        self.assertEqual(operands["values"].source["node"], "counts")
+
+    @patch("app.query.analysis.chat_json")
+    def test_limited_list_requires_order_before_execution(self, chat_json):
+        chat_json.return_value = {
+            "final_goal": "最近5次巡查",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "batches",
+                    "action": "query_data",
+                    "subject": "patrol",
+                    "view": "list",
+                    "metrics": [],
+                    "dimensions": ["patrol_number"],
+                    "filters": [],
+                    "output_projection": ["patrol_number"],
+                    "order_by": [],
+                    "limit": 5,
+                    "required_assertions": [
+                        "preserve_user_scope",
+                        "recent_window",
+                    ],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(QuerySpecError, "必须声明 order_by"):
+            analyze_single_turn(
+                "最近5次巡查",
+                "mysql",
+                PhysicalSchemaView(columns=frozenset()),
+                FieldReachSet(),
+                subject="patrol",
+            )
 
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
     @patch("app.query.analysis.chat_json")

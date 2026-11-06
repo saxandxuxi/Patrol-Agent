@@ -44,6 +44,20 @@ repair_policy:
     repair_role: semantic
     max_repair_rounds: 2
     retryable: true
+  calculation_repair: &calculation_repair
+    candidates:
+    - calculate_scalar
+    - calculate_columns
+    - calculate_series
+    repair_role: calculation
+    max_repair_rounds: 2
+    retryable: true
+  calculation_tool_unknown: *calculation_repair
+  calculation_operation_unknown: *calculation_repair
+  calculation_operand_missing: *calculation_repair
+  calculation_type_mismatch: *calculation_repair
+  calculation_zero_denominator: *calculation_repair
+  calculation_output_invalid: *calculation_repair
   missing_dependency:
     candidates:
     - ask_user

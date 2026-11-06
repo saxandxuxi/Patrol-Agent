@@ -72,7 +72,8 @@
 18. 用户要求“最近 N 次巡查/最近 N 个巡检批次”等时间范围时，先生成一个巡检批次节点：
     按真实时间字段倒序、`limit=N`，输出可稳定关联的 `patrol_number`；后续病害节点的
     `inputs` 使用该节点的 `patrol_number`，`depends_on` 同时声明依赖。后续节点不能再自行
-    `limit=N`，也不要用 `patrol_id` 作为病害分组字段。
+    `limit=N`，也不要用 `patrol_id` 作为病害分组字段。批次节点必须声明
+    `required_assertions: ["recent_window", "preserve_user_scope"]`。
 19. `dimensions` 与 `output_projection` 只能使用当前 subject 模型中真实支持、且需要展示一次的
     物理字段。多个别名落到同一物理列时只输出一次，不能把同义字段并列输出成重复列。
 20. 用户要求“所有设备、有哪些对象、去重列出、唯一值”等集合时，把集合字段写入
@@ -102,6 +103,13 @@
     `divide/ratio` 使用 `numerator`、`denominator`；
     `percentage_share` 使用 `numerator`、`total`；
     `percentage_change` 使用 `old`、`new`。
+    `calculate_series` 使用 `labels`、`values` 两个序列来源。
+25. 能力视图 `business_values` 中登记了命名业务值。用户没有给出具体阈值时，
+    只能引用规则名作为 `raw_value`，例如置信度低规则使用 `low_confidence`，
+    不得自行猜造 `0.7` 等阈值。
+26. AI 识别可靠性问题使用两个计数节点：总病害数、置信度匹配 `low_confidence`
+    的低置信度数，再由 `calculate_scalar/percentage_share` 计算占比。
+    不得发明 `confidence_bucket` 等未注册分组字段。
 
 允许的 view：
 count / sum / avg / distribution / list / detail / top / trend / bucket_compare / photo / data

@@ -5,6 +5,7 @@ from app.query.analysis import analyze_single_turn
 from app.query.capability_registry import CapabilityRegistry
 from app.query.contracts import QuerySpecError
 from app.query.fields import FieldReachSet, PhysicalSchemaView
+from app.query.values import resolve_value
 
 
 def calculation_payload(
@@ -137,6 +138,34 @@ class CalculationContractTests(unittest.TestCase):
 
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
     @patch("app.query.analysis.chat_json")
+    def test_calculation_output_is_allowed_as_post_calc_metric(
+        self,
+        chat_json,
+        _audit,
+    ):
+        payload = calculation_payload()
+        post_calc = payload["views"][1]
+        post_calc["metrics"] = ["custom_ratio"]
+        post_calc["calculation"]["output"]["name"] = "custom_ratio"
+        chat_json.return_value = payload
+
+        plan = analyze_single_turn(
+            "计算每条道路的病害密度",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+            registry=self.registry,
+            subject="disease",
+        )
+
+        self.assertEqual(
+            plan.nodes[-1].spec.metrics,
+            ("custom_ratio",),
+        )
+
+    @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
+    @patch("app.query.analysis.chat_json")
     def test_calculation_source_must_be_produced_by_dependency(
         self,
         chat_json,
@@ -159,6 +188,23 @@ class CalculationContractTests(unittest.TestCase):
                 registry=self.registry,
                 subject="disease",
             )
+
+    def test_named_business_value_resolves_from_registry(self):
+        binding = resolve_value(
+            "confidence",
+            "<",
+            "low_confidence",
+            "AI识别的病害有多少认不出来",
+            registry=self.registry,
+            subject="disease",
+        )
+
+        self.assertEqual(binding.storage_value, 0.7)
+        self.assertEqual(binding.source, "business_rule")
+        self.assertEqual(
+            binding.resolver,
+            "business_value:confidence:low_confidence",
+        )
 
 
 if __name__ == "__main__":

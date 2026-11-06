@@ -12,6 +12,7 @@ from .numbers import numeric_value
 from .scalar import calculate_scalar
 from .serialization import json_value, result_payload
 from .series import calculate_series
+from .registry import default_calculation_registry
 from ..services import react_repair
 
 
@@ -91,7 +92,10 @@ def _execute_calculation(
                         name=operand.name,
                         value=numeric_value(
                             source,
-                            str(operand.source.get("field") or ""),
+                            _field_label(
+                                source,
+                                str(operand.source.get("field") or ""),
+                            ),
                         ),
                     )
                 )
@@ -163,6 +167,14 @@ def _execute_calculation(
             operands,
             output_label,
             precision=request.precision,
+            zero_denominator=(
+                request.zero_denominator
+                or (
+                    default_calculation_registry()
+                    .capability("calculate_columns")
+                    .zero_denominator
+                )
+            ),
         )
     elif request.tool == "calculate_series":
         by_name = {item.name: item for item in request.operands}
@@ -335,10 +347,20 @@ def _calculation_fallback(
             if request.operation == "subtract"
             else "percentage_change"
         )
+        change_unit = (
+            request.output.unit
+            if request.output and request.output.unit
+            else ""
+        )
         changes = "，".join(
             _format_change(row.get(change_name))
             for row in result.rows[1:]
         )
+        if change_unit:
+            changes = "，".join(
+                f"{_format_change(row.get(change_name))}{change_unit}"
+                for row in result.rows[1:]
+            )
         if not points:
             return "序列计算没有可用数据。"
         changes_values = [
@@ -390,10 +412,17 @@ def _calculation_fallback(
         if request.output and request.output.unit
         else ""
     )
+    excluded = list(result.evidence.get("excluded_row_ids") or [])
+    exclusion_note = (
+        f"；已排除 {len(excluded)} 个零长度行："
+        + "、".join(excluded[:5])
+        if excluded
+        else ""
+    )
     return (
         f"已计算 {len(values)} 行；"
         f"{label}{request.output.label if request.output else output_field}"
-        f"={selected.get(output_field)}{unit}。"
+        f"={selected.get(output_field)}{unit}{exclusion_note}。"
     )
 
 

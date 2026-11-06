@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
 from ..services import prompts
 from ..services.llm import LLMError, chat_json, role_model
-from ..calculations.models import CalculationRequest
-from ..calculations.operations import ROLE_NAMES
+from ..calculations.models import CalculationOperand, CalculationRequest
+from ..calculations.operations import roles_for_tool
 from .audit import audit_query_plan
 from .capability_registry import CapabilityIssue, CapabilityRegistry
 from .contracts import (
@@ -242,6 +243,41 @@ def _plan_intent_issue(plan: QueryPlan, intent_family: str) -> str:
     return "趋势问题必须增加一个消费数据结果的 post_calc 节点，并使用 view=trend"
 
 
+def _plan_shaping_issue(plan: QueryPlan, intent_family: str) -> str:
+    for node in plan.nodes:
+        if (
+            node.node_type == "query_data"
+            and node.spec.view == "list"
+            and node.spec.limit is not None
+            and not node.spec.order_by
+            and (
+                intent_family == "trend"
+                or "recent_window" in node.spec.required_assertions
+            )
+        ):
+            return (
+                f"节点 {node.id} 使用 limit={node.spec.limit} 时必须声明 order_by，"
+                "禁止无排序截取列表"
+            )
+    return ""
+
+
+def _spec_order_issue(spec: QuerySpec, registry: CapabilityRegistry | None) -> str:
+    if registry is None:
+        return ""
+    allowed = set(registry.snapshot.fields.get(spec.subject, {}))
+    for item in spec.order_by:
+        if not isinstance(item, dict):
+            continue
+        field = str(item.get("field") or "")
+        if field and field not in allowed:
+            return (
+                f"节点 {spec.id} 的排序字段 {field} 不属于主体 {spec.subject}；"
+                f"可用字段：{'、'.join(sorted(allowed))}"
+            )
+    return ""
+
+
 def _complete_trend_dependencies(plan: QueryPlan) -> QueryPlan:
     data_ids = tuple(node.id for node in plan.nodes if node.node_type == "query_data")
     if not data_ids:
@@ -256,6 +292,82 @@ def _complete_trend_dependencies(plan: QueryPlan) -> QueryPlan:
                     dict.fromkeys((*data_ids, *node.depends_on))
                 ),
                 node_type=node.node_type,
+            )
+        nodes.append(node)
+    return QueryPlan(
+        question=plan.question,
+        nodes=tuple(nodes),
+        response_mode=plan.response_mode,
+    )
+
+
+def _complete_trend_calculation(plan: QueryPlan) -> QueryPlan:
+    data_nodes = [
+        node for node in plan.nodes if node.node_type == "query_data"
+    ]
+    if len(data_nodes) < 2:
+        return plan
+    batch_node = next(
+        (
+            node
+            for node in data_nodes
+            if node.spec.view == "list"
+            and (node.spec.limit is not None or node.spec.order_by)
+        ),
+        None,
+    )
+    value_node = next(
+        (
+            node
+            for node in data_nodes
+            if node is not batch_node and node.spec.metrics
+        ),
+        None,
+    )
+    if batch_node is None or value_node is None:
+        return plan
+    label_field = next(
+        iter(
+            (
+                *batch_node.spec.dimensions,
+                *batch_node.spec.output_projection,
+            )
+        ),
+        "",
+    )
+    value_field = value_node.spec.metrics[0] if value_node.spec.metrics else ""
+    if not label_field or not value_field:
+        return plan
+    nodes = []
+    for node in plan.nodes:
+        calculation = node.spec.calculation
+        if (
+            node.node_type == "post_calc"
+            and calculation is not None
+            and calculation.tool == "calculate_series"
+        ):
+            calculation = replace(
+                calculation,
+                operands=(
+                    CalculationOperand(
+                        name="labels",
+                        source={
+                            "node": batch_node.id,
+                            "field": label_field,
+                        },
+                    ),
+                    CalculationOperand(
+                        name="values",
+                        source={
+                            "node": value_node.id,
+                            "field": value_field,
+                        },
+                    ),
+                ),
+            )
+            node = replace(
+                node,
+                spec=replace(node.spec, calculation=calculation),
             )
         nodes.append(node)
     return QueryPlan(
@@ -433,13 +545,21 @@ def _analyze_once(
             else "data"
         ),
     )
+    for spec in specs:
+        order_issue = _spec_order_issue(spec, registry)
+        if order_issue:
+            raise QuerySpecError(order_issue)
     plan = _complete_trend_dependencies(plan)
+    plan = _complete_trend_calculation(plan)
     subject_issue = _plan_subject_issue(plan, subject)
     if subject_issue:
         raise QuerySpecError(subject_issue)
     intent_issue = _plan_intent_issue(plan, contract.intent_family)
     if intent_issue:
         raise QuerySpecError(intent_issue)
+    shaping_issue = _plan_shaping_issue(plan, contract.intent_family)
+    if shaping_issue:
+        raise QuerySpecError(shaping_issue)
     return plan
 
 
@@ -607,10 +727,16 @@ def _query_plan_derived_metric_issue(
             registry.derived_metric(capability_subject, metric_id) is not None
             for metric_id in node.spec.metrics
         )
+        has_calculation_output = (
+            node.spec.calculation is not None
+            and node.spec.calculation.output is not None
+            and node.spec.calculation.output.name in node.spec.metrics
+        )
         if (
             "lower_is_better" in node.spec.required_assertions
             and allowed_derived
             and not declared_derived
+            and not has_calculation_output
         ):
             return CapabilityIssue(
                 code="missing_derived_metric",
@@ -646,6 +772,12 @@ def _query_plan_derived_metric_issue(
             if upstream is not None:
                 produced.update(_node_outputs(upstream.spec))
         for metric_id in node.spec.metrics:
+            if (
+                node.spec.calculation is not None
+                and node.spec.calculation.output is not None
+                and metric_id == node.spec.calculation.output.name
+            ):
+                continue
             if registry.metric(capability_subject, metric_id) is not None:
                 continue
             derived = registry.derived_metric(capability_subject, metric_id)
@@ -737,7 +869,10 @@ def _query_plan_calculation_issue(
                 suggested_repair="只能使用该工具登记的操作符。",
                 node_id=node.id,
             )
-        roles = ROLE_NAMES.get(calculation.operation)
+        roles = roles_for_tool(
+            calculation.tool,
+            calculation.operation,
+        )
         if roles is None:
             return CapabilityIssue(
                 code="calculation_operation_unknown",

@@ -128,6 +128,7 @@ class PlannerCapabilityView:
     metric_details: dict[str, dict[str, Any]] = field(default_factory=dict)
     derived_metric_details: dict[str, dict[str, Any]] = field(default_factory=dict)
     calculators: dict[str, dict[str, Any]] = field(default_factory=dict)
+    business_values: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_prompt_dict(self) -> dict[str, Any]:
         return {
@@ -136,6 +137,7 @@ class PlannerCapabilityView:
             "metrics": self.metric_details,
             "derived_metrics": self.derived_metric_details,
             "calculators": self.calculators,
+            "business_values": self.business_values,
             "allowed_views": list(self.allowed_views),
             "fields": {
                 field_id: {

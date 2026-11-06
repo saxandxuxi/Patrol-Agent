@@ -171,6 +171,28 @@ class ColumnCalculationTests(unittest.TestCase):
             "calculation_operand_missing",
         )
 
+    def test_column_skip_rows_reports_excluded_rows(self):
+        result = calculate_columns(
+            "divide",
+            [
+                {"id": "A", "count": 10, "length_km": 5},
+                {"id": "B", "count": 3, "length_km": 0},
+            ],
+            {
+                "numerator": "count",
+                "denominator": "length_km",
+            },
+            "density",
+            zero_denominator="skip_rows",
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(len(result.rows), 1)
+        self.assertEqual(
+            result.evidence["excluded_row_ids"],
+            ["B"],
+        )
+
 
 class SeriesCalculationTests(unittest.TestCase):
     def test_series_preserves_zero_batches_and_computes_differences(self):

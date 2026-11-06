@@ -32,6 +32,7 @@ def calculate_columns(
     operands: dict[str, str],
     output_field: str,
     precision: int = 6,
+    zero_denominator: str = "error",
 ) -> dict[str, Any]:
     result = run_calculation(
         operation,
@@ -39,6 +40,7 @@ def calculate_columns(
         operands,
         output_field,
         precision=precision,
+        zero_denominator=zero_denominator,
     )
     payload = result_payload(result)
     if not result.accepted:

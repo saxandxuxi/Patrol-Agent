@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
@@ -284,6 +285,36 @@ def resolve_value(
                 resolver="time_range",
                 raw_text=text,
             )
+    business_values = (
+        registry.snapshot.predicates.get("business_values")
+        if registry is not None
+        else {}
+    ) or {}
+    field_rules = (
+        business_values.get(field)
+        if isinstance(business_values, Mapping)
+        else None
+    ) or {}
+    business_rule = (
+        field_rules.get(text)
+        if isinstance(field_rules, Mapping)
+        else None
+    )
+    if isinstance(business_rule, Mapping):
+        return ValueBinding(
+            field=field,
+            op=str(business_rule.get("op") or op),
+            storage_value=business_rule.get("storage_value"),
+            display_value=str(
+                business_rule.get("display_value") or text
+            ),
+            source=str(business_rule.get("source") or "business_rule"),
+            resolver=str(
+                business_rule.get("resolver")
+                or f"business_value:{field}:{text}"
+            ),
+            raw_text=text,
+        )
     return ValueBinding(
         field=field,
         op=op,
