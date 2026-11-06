@@ -24,6 +24,7 @@ from app.query.service import (
     start_single_turn,
 )
 from app.query.spec_mdl import UnsupportedQuerySpec
+from app.services.llm import LLMError
 from app.query.templates import (
     CandidateSet,
     ConfirmationCard,
@@ -902,6 +903,24 @@ class ServiceTests(unittest.TestCase):
         self.assertIsNotNone(result.answer)
         self.assertIn("补充明确口径", result.answer.text)
         self.assertEqual(result.answer.sections[0]["status"], "ambiguous")
+
+    @patch(
+        "app.query.service.analyze_single_turn",
+        side_effect=LLMError("模型没有返回合法 JSON"),
+    )
+    def test_model_json_failure_returns_structured_error(self, _analyze):
+        result = start_single_turn(
+            "复杂问题",
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+        self.assertIsNotNone(result.answer)
+        self.assertIn("重试或切换模型", result.answer.text)
+        self.assertEqual(result.answer.sections[0]["status"], "error")
+        self.assertEqual(
+            result.answer.sections[0]["failure_code"],
+            "llm_output_invalid",
+        )
 
     @patch("app.query.service.verify_result", return_value=VerificationReport(status="accepted"))
     @patch("app.query.service.execute_compiled")

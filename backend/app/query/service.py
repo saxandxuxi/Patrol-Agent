@@ -14,6 +14,7 @@ from ..services import (
     templatizer,
     wren_engine,
 )
+from ..services.llm import LLMError
 from ..services.resource_loader import load_yaml
 from .analysis import analyze_single_turn
 from .compiler import CompiledQuery, compile_query
@@ -925,6 +926,20 @@ def start_single_turn(
     reach = reach or FieldReachSet()
     try:
         plan = analyze_single_turn(question, kind, schema, reach, audit=True)
+    except LLMError:
+        return TurnStart(
+            plan=QueryPlan(question=question, nodes=()),
+            answer=AnswerPackage(
+                "模型没有返回可解析的结构化查询计划，请重试或切换模型。",
+                (
+                    {
+                        "status": "error",
+                        "failure_code": "llm_output_invalid",
+                        "answer": "模型输出格式无效，当前查询未执行。",
+                    },
+                ),
+            ),
+        )
     except QuerySpecAmbiguity as exc:
         return TurnStart(
             plan=QueryPlan(question=question, nodes=()),
