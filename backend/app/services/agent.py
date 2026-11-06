@@ -4272,6 +4272,46 @@ def _single_turn_compiler_payload(turn: Any, ticket_token: str = "") -> dict[str
             review_gate = dict(turn.answer.review_gate)
             review_gate["result_id"] = payload["result_id"]
             payload["review_gate"] = review_gate
+        elif bool(chat_settings.load().get("reflect_check", False)):
+            from ..query.review import ReviewSuspicion, issue_review_gate
+
+            suspicions = []
+            for section in sections:
+                if (
+                    str(section.get("status") or "accepted") != "accepted"
+                    or not section.get("sql")
+                ):
+                    continue
+                verdict = nl2sql.verify_answer(
+                    turn.plan.question,
+                    str(section.get("sql") or ""),
+                    {
+                        "columns": section.get("columns") or [],
+                        "rows": section.get("rows")
+                        or section.get("preview_rows")
+                        or [],
+                        "reply": turn.answer.text,
+                    },
+                    reply=turn.answer.text,
+                )
+                if verdict.get("correct", True):
+                    continue
+                issue_type = str(verdict.get("issue_type") or "other")
+                reason = str(verdict.get("reason") or "结果可能没有回答问题")
+                suspicions.append(
+                    ReviewSuspicion(
+                        original_question=turn.plan.question,
+                        node_id=str(section.get("node_id") or ""),
+                        reason=f"{issue_type}: {reason}",
+                        failure_layer="semantic",
+                        failure_code=issue_type,
+                    )
+                )
+            gate = issue_review_gate(turn.answer, suspicions)
+            if gate:
+                review_gate = gate.to_dict()
+                review_gate["result_id"] = payload["result_id"]
+                payload["review_gate"] = review_gate
         if failures:
             payload["error"] = "；".join(failures)
         return payload

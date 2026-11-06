@@ -1,6 +1,7 @@
 import unittest
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from evals.promotion.case_factory import (
     generate_exam_cases,
@@ -14,6 +15,7 @@ from evals.promotion.runner import (
     code_fingerprint,
     run_exam,
 )
+from evals.promotion.product_runner import run_product_case
 
 
 def cases(source, count, prefix):
@@ -226,6 +228,35 @@ class PromotionEvalTests(unittest.TestCase):
 
         self.assertEqual(len(calls), 2)
         self.assertEqual(len(generated), 15)
+
+    def test_product_runner_auto_confirms_recommended_capability(self):
+        case = ExamCase(
+            id="one",
+            category="病害",
+            question="泛油有多少处",
+            source="fresh",
+        )
+        calls = []
+
+        def fake_handle(message, **kwargs):
+            calls.append((message, kwargs))
+            if len(calls) == 1:
+                return {
+                    "reply": "请确认",
+                    "await_confirm": True,
+                    "choose_token": "ticket",
+                    "recommended_id": "candidate-1",
+                }
+            return {
+                "reply": "共 10 处",
+                "sections": [{"status": "accepted"}],
+            }
+
+        with patch("evals.promotion.product_runner.agent.handle_message", fake_handle):
+            payload = run_product_case(case)
+
+        self.assertEqual(payload["answer"], "共 10 处")
+        self.assertEqual(calls[1][1]["capability_id"], "candidate-1")
 
 
 if __name__ == "__main__":

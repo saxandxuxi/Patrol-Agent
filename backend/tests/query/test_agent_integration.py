@@ -251,6 +251,79 @@ class AgentIntegrationTests(unittest.TestCase):
         self.assertIn("device_code", payload["process"]["steps"][0]["error"])
 
     @patch("app.services.agent._persist_conversation_turn")
+    @patch("app.services.agent.nl2sql.verify_answer")
+    @patch("app.services.agent.intent_service.classify_intent", return_value="data")
+    @patch(
+        "app.services.agent.chat_settings.load",
+        return_value={
+            "single_turn_compiler_enabled": True,
+            "reflect_check": True,
+        },
+    )
+    @patch("app.query.service.start_single_turn")
+    def test_semantic_suspicion_creates_user_review_gate(
+        self,
+        start,
+        _settings,
+        _intent,
+        verify_answer,
+        _persist,
+    ):
+        verify_answer.return_value = {
+            "correct": False,
+            "issue_type": "wrong_metric",
+            "reason": "问题要前5条明细，返回的却是一个聚合值",
+            "repair_target": "query",
+        }
+        start.return_value = TurnStart(
+            plan=count_plan(),
+            answer=AnswerPackage(
+                "有效病害总长度 151579.56",
+                (
+                    {
+                        "node_id": "q1",
+                        "question": "按长度取前5条明细",
+                        "view": "top_records",
+                        "status": "accepted",
+                        "scope_hash": "shape-scope",
+                        "immutable_scope_hash": "scope-1",
+                        "spec": {
+                            "id": "q1",
+                            "kind": "mysql",
+                            "subject": "disease",
+                            "view": "top_records",
+                            "metrics": [],
+                            "dimensions": [],
+                            "filters": [],
+                            "output_projection": ["area"],
+                            "order_by": [{"field": "area", "direction": "desc"}],
+                            "limit": 5,
+                            "required_assertions": [],
+                            "question": "按长度取前5条明细",
+                            "input_bindings": [],
+                            "calculation": None,
+                        },
+                        "sql": "SELECT SUM(area) FROM ai_problem",
+                        "columns": ["总面积"],
+                        "rows": [{"总面积": "151579.56"}],
+                    },
+                ),
+            ),
+        )
+
+        payload = agent.handle_message(
+            "把长度排名前五名的病害调出来",
+            session_id="s1",
+        )
+
+        self.assertIsNotNone(payload.get("review_gate"))
+        self.assertEqual(
+            payload["review_gate"]["nodes"][0]["node_id"],
+            "q1",
+        )
+        self.assertIn("聚合值", payload["review_gate"]["reason"])
+
+    @patch("app.services.agent._persist_conversation_turn")
     @patch(
         "app.services.agent.chat_settings.load",
         return_value={"single_turn_compiler_enabled": True},

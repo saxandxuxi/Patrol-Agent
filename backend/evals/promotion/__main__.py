@@ -3,13 +3,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 
-from evals.run_holdout_eval import _default_judge, _default_runner
+from evals.run_holdout_eval import _default_judge
 
 from .case_factory import (
     generate_exam_cases,
@@ -17,6 +18,7 @@ from .case_factory import (
     sample_old_cases,
 )
 from .models import ExamCase, ExamManifest
+from .product_runner import run_product_case
 from .runner import code_fingerprint, run_exam
 
 
@@ -111,6 +113,7 @@ def _generate(output: Path, seed: int) -> int:
 
 
 def _run(cases_path: Path, report_path: Path) -> int:
+    os.environ["CODEX_REGRESSION"] = "1"
     manifest = _load_manifest(cases_path)
     document = _document_text()
     if manifest.document_hash != _document_hash(document):
@@ -119,7 +122,7 @@ def _run(cases_path: Path, report_path: Path) -> int:
         )
     report = run_exam(
         manifest,
-        runner=lambda case: _default_runner(case.question),
+        runner=run_product_case,
         judge=lambda case, payload, text: _default_judge(
             asdict(case),
             payload,
