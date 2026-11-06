@@ -1,21 +1,9 @@
 from __future__ import annotations
 
-from decimal import Decimal
-
 from .models import CalculationRequest, CalculationResult
 from .numbers import as_decimal, quantize
+from .operations import ROLE_NAMES, evaluate
 from .registry import default_calculation_registry
-
-
-_ROLES = {
-    "add": ("left", "right"),
-    "subtract": ("left", "right"),
-    "multiply": ("left", "right"),
-    "divide": ("numerator", "denominator"),
-    "ratio": ("numerator", "denominator"),
-    "percentage_share": ("numerator", "total"),
-    "percentage_change": ("old", "new"),
-}
 
 
 def _base(request: CalculationRequest) -> CalculationResult:
@@ -42,7 +30,7 @@ def calculate_scalar(request: CalculationRequest) -> CalculationResult:
             operation=request.operation,
             allowed_operations=list(capability.operations),
         )
-    roles = _ROLES.get(request.operation)
+    roles = ROLE_NAMES.get(request.operation)
     if roles is None:
         return result.failure(
             "calculation_operation_unknown",
@@ -69,53 +57,24 @@ def calculate_scalar(request: CalculationRequest) -> CalculationResult:
             "计算操作数不是有效数字：" + "、".join(invalid),
             invalid=invalid,
         )
-    left = values[roles[0]]
-    right = values[roles[1]]
-    assert left is not None and right is not None
-    if request.operation == "add":
-        raw = left + right
-        formula = f"{left} + {right}"
-    elif request.operation == "subtract":
-        raw = left - right
-        formula = f"{left} - {right}"
-    elif request.operation == "multiply":
-        raw = left * right
-        formula = f"{left} * {right}"
-    elif request.operation in {"divide", "ratio"}:
-        if right == 0:
-            return result.failure(
-                "calculation_zero_denominator",
-                "除数不能为 0",
-                zero_operand=roles[1],
-            )
-        raw = left / right
-        formula = f"{left} / {right}"
-    elif request.operation == "percentage_share":
-        if right == 0:
-            return result.failure(
-                "calculation_zero_denominator",
-                "占比总量不能为 0",
-                zero_operand=roles[1],
-            )
-        raw = left / right * Decimal("100")
-        formula = f"{left} / {right} * 100"
-    else:
-        if left == 0:
-            return result.failure(
-                "calculation_zero_denominator",
-                "百分比变化的旧值不能为 0",
-                zero_operand=roles[0],
-            )
-        old = left
-        new = right
-        raw = (new - old) / old * Decimal("100")
-        formula = f"({new} - {old}) / {old} * 100"
+    typed_values = {
+        name: value for name, value in values.items() if value is not None
+    }
+    operation_result = evaluate(request.operation, typed_values)
+    if operation_result.failure_code:
+        return result.failure(
+            operation_result.failure_code,
+            operation_result.reason,
+            zero_operand=operation_result.zero_operand,
+        )
+    raw = operation_result.value
+    assert raw is not None
     return CalculationResult(
         accepted=True,
         tool=request.tool,
         operation=request.operation,
         value=quantize(raw, request.precision or capability.precision),
-        formula=formula,
+        formula=operation_result.formula,
         evidence={
             "operands": {
                 name: str(values[name]) for name in roles

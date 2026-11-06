@@ -1,9 +1,12 @@
 import unittest
 from decimal import Decimal
 
+from app.calculations.columns import calculate_columns
+from app.calculations.evidence import compact_table_evidence
 from app.calculations.models import CalculationOperand, CalculationRequest
 from app.calculations.registry import CalculationRegistry
 from app.calculations.scalar import calculate_scalar
+from app.calculations.series import calculate_series
 
 
 def operand(name: str, value: object) -> CalculationOperand:
@@ -106,6 +109,107 @@ class ScalarCalculationTests(unittest.TestCase):
             "divide",
             registry.snapshot.calculators["calculate_scalar"].operations,
         )
+
+
+class ColumnCalculationTests(unittest.TestCase):
+    def test_column_division_preserves_row_context(self):
+        result = calculate_columns(
+            "divide",
+            [
+                {
+                    "id": "A",
+                    "route_name": "路线A",
+                    "count": 10,
+                    "length_km": 5,
+                }
+            ],
+            {
+                "numerator": "count",
+                "denominator": "length_km",
+            },
+            "density",
+            precision=4,
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(result.rows[0]["id"], "A")
+        self.assertEqual(result.rows[0]["route_name"], "路线A")
+        self.assertEqual(result.rows[0]["density"], Decimal("2.0000"))
+
+    def test_column_zero_denominator_reports_row(self):
+        result = calculate_columns(
+            "divide",
+            [{"id": "A", "count": 1, "length_km": 0}],
+            {
+                "numerator": "count",
+                "denominator": "length_km",
+            },
+            "density",
+        )
+
+        self.assertFalse(result.accepted)
+        self.assertEqual(
+            result.failure_code,
+            "calculation_zero_denominator",
+        )
+        self.assertEqual(result.evidence["row_ids"], ["A"])
+
+    def test_column_missing_role_column_is_structured_failure(self):
+        result = calculate_columns(
+            "divide",
+            [{"id": "A", "count": 1}],
+            {
+                "numerator": "count",
+                "denominator": "length_km",
+            },
+            "density",
+        )
+
+        self.assertFalse(result.accepted)
+        self.assertEqual(
+            result.failure_code,
+            "calculation_operand_missing",
+        )
+
+
+class SeriesCalculationTests(unittest.TestCase):
+    def test_series_preserves_zero_batches_and_computes_differences(self):
+        result = calculate_series(
+            "subtract",
+            ["b1", "b2", "b3"],
+            [0, 3, 15],
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual([row["value"] for row in result.rows], [0, 3, 15])
+        self.assertEqual(
+            [row["difference"] for row in result.rows],
+            [None, 3, 12],
+        )
+
+    def test_series_percentage_change_uses_previous_value(self):
+        result = calculate_series(
+            "percentage_change",
+            ["b1", "b2", "b3"],
+            [10, 12, 9],
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(
+            [row["percentage_change"] for row in result.rows],
+            [None, Decimal("20"), Decimal("-25")],
+        )
+
+    def test_compact_evidence_extracts_metric_boundaries(self):
+        evidence = compact_table_evidence(
+            [
+                {"路线": "A", "数量": 10},
+                {"路线": "B", "数量": 3},
+            ]
+        )
+
+        self.assertEqual(evidence["metrics"]["数量"]["max"]["group"], "A")
+        self.assertEqual(evidence["metrics"]["数量"]["min"]["group"], "B")
 
 
 if __name__ == "__main__":
