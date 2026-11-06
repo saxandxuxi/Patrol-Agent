@@ -172,6 +172,7 @@ class CapabilityRegistry:
         )
         registry = cls(snapshot)
         registry._augment_physical_fields(kind)
+        registry._augment_enums(kind)
         registry._validate_physical_fields(kind)
         return registry
 
@@ -249,6 +250,31 @@ class CapabilityRegistry:
                     physical_column=field_id,
                 )
             self.snapshot.fields[subject_id] = subject_fields
+
+    def _augment_enums(self, kind: str) -> None:
+        catalog = schema_catalog.field_catalog(kind)
+        for table in catalog.get("tables") or []:
+            table_name = str(table.get("table") or "")
+            for column in table.get("columns") or []:
+                column_name = str(column.get("name") or "")
+                code_map = dict(column.get("code_map") or {})
+                key = (table_name, column_name)
+                if not code_map or key in self.snapshot.enums:
+                    continue
+                self.snapshot.enums[key] = EnumCapability(
+                    key=f"{table_name}.{column_name}",
+                    table=table_name,
+                    column=column_name,
+                    label=str(column.get("label") or column_name),
+                    values={
+                        str(code): EnumValueCapability(
+                            code=str(code),
+                            label=str(label),
+                            display=str(label),
+                        )
+                        for code, label in code_map.items()
+                    },
+                )
 
     def _validate_physical_fields(self, kind: str) -> None:
         catalog = schema_catalog.field_catalog(kind)

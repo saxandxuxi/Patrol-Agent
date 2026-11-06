@@ -253,6 +253,11 @@ def _analyze_once(
         if not isinstance(raw, dict):
             continue
         spec_id = str(raw.get("id") or f"q{index}").strip()
+        selected_subject = str(raw.get("subject") or subject or "disease").strip()
+        if subject and selected_subject != subject:
+            raise QuerySpecError(
+                f"规划主体 {selected_subject} 与已确定主体 {subject} 不一致"
+            )
         filters = []
         for item in raw.get("filters") or []:
             if not isinstance(item, dict):
@@ -264,6 +269,8 @@ def _analyze_once(
                     item.get("raw_value", item.get("value")),
                     original,
                     kind,
+                    subject=selected_subject,
+                    registry=registry,
                 )
             )
         try:
@@ -271,11 +278,6 @@ def _analyze_once(
         except (TypeError, ValueError) as exc:
             raise QuerySpecError("limit 必须是整数") from exc
         metrics = _metric_tuple(raw.get("metrics"))
-        selected_subject = str(raw.get("subject") or subject or "disease").strip()
-        if subject and selected_subject != subject:
-            raise QuerySpecError(
-                f"规划主体 {selected_subject} 与已确定主体 {subject} 不一致"
-            )
         dimensions = _canonical_dimensions(
             selected_subject,
             _string_tuple(raw.get("dimensions")),
@@ -303,7 +305,7 @@ def _analyze_once(
             QuerySpec(
                 id=spec_id,
                 kind=kind,
-                    subject=selected_subject,
+                subject=selected_subject,
                 view=view,
                 metrics=metrics,
                 dimensions=dimensions,

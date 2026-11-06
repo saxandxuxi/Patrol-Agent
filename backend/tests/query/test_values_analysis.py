@@ -28,26 +28,22 @@ class ValueAnalysisTests(unittest.TestCase):
         )
         self.assertEqual(value.op, "<")
 
-    @patch("app.query.values.dictionary.code_labels")
-    def test_patrol_status_uses_patrol_dictionary(self, code_labels):
-        code_labels.return_value = {"0": "未开始", "15": "已完成"}
-
+    def test_patrol_status_uses_patrol_dictionary(self):
         value = resolve_value(
             "patrol_status",
             "=",
             "已完成",
             "只看已完成的巡检任务",
             "mysql",
+            subject="patrol",
         )
 
-        code_labels.assert_called_once_with(
-            "mysql",
-            "ai_maintain_patrol",
-            "patrol_status",
-        )
         self.assertEqual(value.storage_value, "15")
         self.assertEqual(value.display_value, "已完成")
-        self.assertEqual(value.resolver, "enum:patrol_status")
+        self.assertEqual(
+            value.resolver,
+            "enum:ai_maintain_patrol.patrol_status",
+        )
 
     def test_exact_date_filter_uses_its_own_raw_value(self):
         question = "长沙－芷江高速公路11月2日与3日的病害对比情况"

@@ -4,21 +4,11 @@ import re
 from datetime import datetime
 from typing import Any
 
-from ..services import dictionary, parsers, route_resolver
+from ..services import parsers, route_resolver
 from ..services.nl2sql import known_problem_types
 from .contracts import QuerySpecAmbiguity, QuerySpecError, ValueBinding
 
 
-_CODE_FIELDS = {
-    "up_or_down": "up_or_down",
-    "problem_status": "problem_status",
-    "patrol_status": "patrol_status",
-    "problem_source": "problem_source",
-    "collect": "collect",
-    "track_problem": "track_problem",
-    "mission_flag": "mission_flag",
-    "has_image": "has_image",
-}
 _TIME_FIELDS = {
     "collection_time",
     "create_time",
@@ -99,28 +89,49 @@ def _resolve_damage_type(raw_value: Any, question: str, kind: str) -> ValueBindi
     )
 
 
-def _resolve_code(field: str, raw_value: Any, question: str, kind: str) -> ValueBinding:
-    text = str(raw_value or "").strip()
-    if not text:
-        raise QuerySpecAmbiguity(
-            "查询条件缺少可执行的枚举值，请补充具体取值。"
+def _resolve_code(
+    field: str,
+    raw_value: Any,
+    question: str,
+    kind: str,
+    *,
+    subject: str = "",
+    registry: Any = None,
+) -> ValueBinding:
+    from .capability_registry import CapabilityRegistry, resolve_enum
+
+    registry = registry or CapabilityRegistry.load(kind)
+    table = ""
+    if subject and subject in registry.snapshot.subjects:
+        table = registry.snapshot.subjects[subject].base_table
+    if not table:
+        table = next(
+            (
+                table_name
+                for table_name, column_name in registry.snapshot.enums
+                if column_name == field
+            ),
+            "",
         )
-    column = _CODE_FIELDS[field]
-    table = (
-        "ai_maintain_patrol"
-        if field == "patrol_status"
-        else "ai_problem"
-    )
-    labels = dictionary.code_labels(kind, table, column)
-    reverse = {str(label).strip(): str(code) for code, label in labels.items()}
-    storage = reverse.get(text, text)
+    result = resolve_enum(registry, table, field, raw_value)
+    if result.status == "ambiguous":
+        choices = "、".join(item.label for item in result.values)
+        raise QuerySpecAmbiguity(
+            f"字段 {table}.{field} 的值“{raw_value}”存在多个匹配：{choices}"
+        )
+    if result.status != "resolved" or not result.values:
+        raise QuerySpecError(
+            f"字段 {table}.{field} 的枚举值不在字典中：{raw_value}"
+        )
+    resolved = result.values[0]
+    text = str(raw_value or "").strip()
     return ValueBinding(
         field=field,
         op="=",
-        storage_value=storage,
-        display_value=str(labels.get(storage) or text),
+        storage_value=resolved.code,
+        display_value=resolved.display,
         source=_source(text, question),
-        resolver=f"enum:{field}",
+        resolver=f"enum:{table}.{field}",
         raw_text=text,
     )
 
@@ -131,12 +142,32 @@ def resolve_value(
     raw_value: Any,
     question: str,
     kind: str = "mysql",
+    *,
+    subject: str = "",
+    registry: Any = None,
 ) -> ValueBinding:
     if field == "problem_type_name":
         value = _resolve_damage_type(raw_value, question, kind)
         return ValueBinding(**{**value.__dict__, "op": op})
-    if field in _CODE_FIELDS:
-        value = _resolve_code(field, raw_value, question, kind)
+    enum_registry = registry
+    if enum_registry is None:
+        from .capability_registry import CapabilityRegistry
+
+        enum_registry = CapabilityRegistry.load(kind)
+    enum_table = (
+        enum_registry.snapshot.subjects[subject].base_table
+        if subject in enum_registry.snapshot.subjects
+        else ""
+    )
+    if (enum_table, field) in enum_registry.snapshot.enums:
+        value = _resolve_code(
+            field,
+            raw_value,
+            question,
+            kind,
+            subject=subject,
+            registry=enum_registry,
+        )
         return ValueBinding(**{**value.__dict__, "op": op})
     text = str(raw_value if raw_value is not None else "").strip()
     if not text:
