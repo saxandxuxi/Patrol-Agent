@@ -1,0 +1,11 @@
+version: 1
+fields:
+  disease.lane_index:
+    status: unavailable
+    reason: 业务能力文档声明车道分布尚未更新，不能把 lane_index 当作可靠统计依据
+  disease.unit_id:
+    status: lookup_required
+    reason: 当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联，不能完成单位排名
+  patrol.unit_id:
+    status: lookup_required
+    reason: 当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联

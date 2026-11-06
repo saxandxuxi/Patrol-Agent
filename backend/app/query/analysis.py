@@ -6,10 +6,13 @@ from typing import Any
 
 from ..services import prompts
 from ..services.llm import chat_json, role_model
+from .audit import audit_query_plan
 from .contracts import (
+    InputBinding,
     IntentContract,
     QueryPlan,
     QuerySpec,
+    QuerySpecAmbiguity,
     QuerySpecError,
     ValueBinding,
 )
@@ -127,6 +130,13 @@ def _apply_question_contract(
         node_types[specs[0].id] = "query_data"
     if "巡检设备" in question and "分别" in question:
         base = specs[0]
+        dimensions = list(base.dimensions)
+        if "equipment_id" not in dimensions:
+            dimensions.insert(0, "equipment_id")
+        output_projection = list(base.output_projection)
+        for field in (*dimensions, "count"):
+            if field not in output_projection:
+                output_projection.append(field)
         specs[:] = [
             QuerySpec(
                 **{
@@ -134,14 +144,12 @@ def _apply_question_contract(
                     "subject": "patrol",
                     "view": "distribution",
                     "metrics": ("count",),
-                    "dimensions": ("equipment_id",),
-                    "output_projection": ("equipment_id", "count"),
+                    "dimensions": tuple(dimensions),
+                    "output_projection": tuple(output_projection),
                     "limit": None,
                 }
             )
         ]
-        dependencies.clear()
-        node_types.clear()
         node_types[specs[0].id] = "query_data"
     if re.search(r"AI\s*识别", question) and re.search(r"靠谱|认不出", question):
         low = QuerySpec(
@@ -294,13 +302,32 @@ def _apply_question_contract(
             target.id,
             question,
         )
+    for index, spec in enumerate(specs):
+        if node_types.get(spec.id) != "post_calc":
+            continue
+        specs[index] = QuerySpec(
+            id=spec.id,
+            kind=spec.kind,
+            subject=spec.subject,
+            view="data",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=spec.required_assertions,
+            question=spec.question,
+            input_bindings=(),
+        )
 
 
-def analyze_single_turn(
+def _analyze_once(
     question: str,
     kind: str,
     schema: PhysicalSchemaView,
     reach: FieldReachSet,
+    planning_feedback: str = "",
 ) -> QueryPlan:
     original = str(question or "").strip()
     if not original:
@@ -311,6 +338,7 @@ def analyze_single_turn(
             question=original,
             kind=kind,
             schema=_text_context(sorted(schema.columns)),
+            planning_feedback=planning_feedback or "无",
             reach=_text_context(
                 [
                     {
@@ -383,6 +411,18 @@ def analyze_single_turn(
             subject,
             _string_tuple(raw.get("output_projection")),
         )
+        input_bindings = []
+        for item in raw.get("inputs") or []:
+            if not isinstance(item, dict):
+                raise QuerySpecError("inputs 必须是对象数组")
+            input_bindings.append(
+                InputBinding(
+                    from_node=str(item.get("from_node") or "").strip(),
+                    from_field=str(item.get("from_field") or "").strip(),
+                    to_field=str(item.get("to_field") or "").strip(),
+                    op=str(item.get("op") or "in").strip(),
+                )
+            )
         specs.append(
             QuerySpec(
                 id=spec_id,
@@ -397,10 +437,13 @@ def analyze_single_turn(
                 limit=limit,
                 required_assertions=_string_tuple(raw.get("required_assertions")),
                 question=str(raw.get("question") or original).strip(),
+                input_bindings=tuple(input_bindings),
             )
         )
         dependencies[spec_id] = _string_tuple(raw.get("depends_on"))
         action = str(raw.get("action") or "query_data").strip()
+        if action == "analysis":
+            action = "post_calc"
         if dependencies[spec_id] and action == "query_data" and re.search(
             r"基于\s*q\d+|基于.*(?:结果|统计)|前序查询结果",
             str(raw.get("question") or ""),
@@ -425,4 +468,149 @@ def analyze_single_turn(
         reach,
         dependencies,
         node_types,
+    )
+
+
+def _apply_audit_patches(plan: QueryPlan, verdict: dict[str, Any]) -> QueryPlan:
+    allowed = {
+        "limit",
+        "view",
+        "metrics",
+        "dimensions",
+        "order_by",
+        "output_projection",
+        "required_assertions",
+    }
+    patch_by_node: dict[str, dict[str, Any]] = {}
+    for issue in verdict.get("issues") or []:
+        if not isinstance(issue, dict):
+            continue
+        node_id = str(issue.get("node_id") or "")
+        changes = issue.get("set")
+        if node_id and isinstance(changes, dict):
+            patch_by_node.setdefault(node_id, {}).update(
+                {
+                    key: value
+                    for key, value in changes.items()
+                    if key in allowed
+                }
+            )
+    if not patch_by_node:
+        return plan
+    nodes = []
+    for node in plan.nodes:
+        changes = patch_by_node.get(node.id)
+        if not changes:
+            nodes.append(node)
+            continue
+        values = dict(node.spec.__dict__)
+        values.update(changes)
+        for key in ("metrics", "dimensions", "order_by", "output_projection", "required_assertions"):
+            if key in changes and isinstance(changes[key], list):
+                values[key] = tuple(changes[key])
+        nodes.append(
+            node.__class__(
+                id=node.id,
+                spec=QuerySpec(**values),
+                depends_on=node.depends_on,
+                node_type=node.node_type,
+            )
+        )
+    return QueryPlan(question=plan.question, nodes=tuple(nodes))
+
+
+def _ambiguity_message(issues: list[Any]) -> str:
+    reasons: list[str] = []
+    for issue in issues:
+        if (
+            not isinstance(issue, dict)
+            or str(issue.get("code") or "") != "ambiguous_scope"
+        ):
+            continue
+        reason = str(issue.get("reason") or "").strip()
+        if reason and reason not in reasons:
+            reasons.append(reason)
+    if reasons:
+        return "；".join(reasons[:2])
+    return "请补充具体时间范围、巡检批次、比较对象或所需字段。"
+
+
+def analyze_single_turn(
+    question: str,
+    kind: str,
+    schema: PhysicalSchemaView,
+    reach: FieldReachSet,
+    *,
+    audit: bool = False,
+) -> QueryPlan:
+    feedback = ""
+    for _attempt in range(2):
+        plan = _analyze_once(
+            question,
+            kind,
+            schema,
+            reach,
+            feedback,
+        )
+        if not audit:
+            return plan
+        verdict = audit_query_plan(str(question or "").strip(), plan)
+        if verdict.get("complete") is True:
+            return plan
+        post_calc_ids = {
+            node.id
+            for node in plan.nodes
+            if node.node_type == "post_calc"
+        }
+        consumed_by_post_calc = {
+            dependency
+            for node in plan.nodes
+            if node.node_type == "post_calc"
+            for dependency in node.depends_on
+        }
+        effective_issues = []
+        for issue in verdict.get("issues") or []:
+            if not isinstance(issue, dict):
+                continue
+            node_id = str(issue.get("node_id") or "")
+            code = str(issue.get("code") or "")
+            if node_id in post_calc_ids:
+                continue
+            if (
+                node_id in consumed_by_post_calc
+                and code
+                in {
+                    "missing_metric",
+                    "wrong_grouping",
+                    "missing_input_binding",
+                    "unused_dependency",
+                }
+            ):
+                continue
+            if (
+                not node_id
+                and post_calc_ids
+                and code in {"missing_metric", "wrong_grouping"}
+            ):
+                continue
+            effective_issues.append(issue)
+        if not effective_issues:
+            return plan
+        verdict = {**verdict, "issues": effective_issues}
+        patched = _apply_audit_patches(plan, verdict)
+        if patched != plan:
+            repaired = audit_query_plan(str(question or "").strip(), patched)
+            if repaired.get("complete") is True:
+                return patched
+            verdict = repaired
+        issues = verdict.get("issues") or []
+        feedback = json.dumps(issues, ensure_ascii=False, default=str)
+        if any(
+            isinstance(item, dict)
+            and str(item.get("code") or "") == "ambiguous_scope"
+            for item in issues
+        ):
+            raise QuerySpecAmbiguity(_ambiguity_message(issues))
+    raise QuerySpecAmbiguity(
+        _ambiguity_message(issues)
     )

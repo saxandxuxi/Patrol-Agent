@@ -24,7 +24,7 @@ class CompilerAuthorityTests(unittest.TestCase):
         _mdl_context,
         _retrieve,
         generate_sql,
-        _compile_sql,
+        compile_sql,
     ):
         build_plan.return_value = {
             "kind": "mysql",
@@ -69,9 +69,12 @@ class CompilerAuthorityTests(unittest.TestCase):
 
         _default_wren_executor(spec)
 
-        conditions = generate_sql.call_args.args[2]
-        self.assertFalse(any("route_name" in item and "NULL" in item for item in conditions))
-        self.assertTrue(any("collection_time" in item and "2026-07-01" in item for item in conditions))
+        mdl_sql = compile_sql.call_args.args[1]
+        self.assertNotIn("route_name IS NULL", mdl_sql)
+        self.assertIn("disease.collection_time BETWEEN", mdl_sql)
+        self.assertIn("2026-07-01", mdl_sql)
+        build_plan.assert_not_called()
+        generate_sql.assert_not_called()
 
     @patch("app.query.service.sql_engine.execute_sql", return_value={"columns": [], "rows": []})
     def test_execution_uses_source_aware_sql_boundary(self, execute_sql):

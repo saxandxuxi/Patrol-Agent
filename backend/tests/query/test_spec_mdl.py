@@ -1,0 +1,232 @@
+import unittest
+
+from app.query.contracts import QuerySpec, ValueBinding
+from app.query.spec_mdl import UnsupportedQuerySpec, compile_spec_mdl
+
+
+def binding(field, op, value):
+    return ValueBinding(
+        field=field,
+        op=op,
+        storage_value=value,
+        display_value=str(value),
+        source="user_explicit",
+        resolver="test",
+        raw_text=str(value),
+    )
+
+
+class SpecMdlTests(unittest.TestCase):
+    def test_route_level_uses_route_ledger_and_display_labels(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("road_level",),
+                filters=(),
+                output_projection=("road_level", "count"),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="按道路等级统计病害数量",
+            )
+        )
+
+        self.assertIn("route.level", sql)
+        self.assertIn("国道", sql)
+        self.assertIn("道路等级", sql)
+        self.assertIn("JOIN route ON disease.routes_id = route.id", sql)
+        self.assertIn("GROUP BY CASE route.level", sql)
+
+    def test_disease_distribution_uses_calculated_disease_fields(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("problem_type_name",),
+            filters=(
+                binding("route_name", "=", "route-1"),
+                binding("pile_number", ">=", "K10+000"),
+                binding("pile_number", "<=", "K20+000"),
+            ),
+            output_projection=("problem_type_name", "count"),
+            order_by=({"field": "count", "direction": "desc"},),
+            limit=None,
+            required_assertions=(),
+            question="结构化子问题",
+        )
+        sql = compile_spec_mdl(spec)
+        self.assertIn("disease.problem_type_name", sql)
+        self.assertNotIn("damage_dict.problem_type_name", sql)
+        self.assertIn("route.id = 'route-1'", sql)
+        self.assertIn("disease.pile_distance >= 10000", sql)
+        self.assertIn("disease.pile_distance <= 20000", sql)
+
+    def test_road_surface_distribution_labels_empty_value(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("road_surface_type",),
+            filters=(),
+            output_projection=("road_surface_type", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="结构化子问题",
+        )
+        sql = compile_spec_mdl(spec)
+        self.assertIn("NULLIF(disease.road_surface_type, '')", sql)
+        self.assertIn("未填写", sql)
+
+    def test_upstream_route_names_filter_by_display_column(self):
+        spec = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count", "sum_area"),
+            dimensions=("route_name",),
+            filters=(binding("route_name", "in", ["路线A", "路线B"]),),
+            output_projection=("route_name", "count", "sum_area"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="结构化子问题",
+        )
+        sql = compile_spec_mdl(spec)
+        self.assertIn(
+            "disease.route_name IN ('路线A', '路线B')",
+            sql,
+        )
+        self.assertNotIn("route.id IN", sql)
+
+    def test_dictionary_expansion_list_compiles_as_in_condition(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("up_or_down",),
+            filters=(
+                binding(
+                    "problem_type_name",
+                    "=",
+                    ["横向裂缝", "网状裂缝", "纵向裂缝"],
+                ),
+            ),
+            output_projection=("up_or_down", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="结构化子问题",
+        )
+        sql = compile_spec_mdl(spec)
+        self.assertIn(
+            "disease.problem_type_name IN ('横向裂缝', '网状裂缝', '纵向裂缝')",
+            sql,
+        )
+        self.assertNotIn("LIKE", sql)
+
+    def test_patrol_groups_by_equipment_and_route(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("equipment_id", "route_name"),
+            filters=(
+                binding("create_time", ">=", "2026-11-01 00:00:00"),
+                binding("create_time", "<", "2026-12-01 00:00:00"),
+            ),
+            output_projection=("equipment_id", "route_name", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="结构化子问题",
+        )
+        sql = compile_spec_mdl(spec)
+        self.assertIn("patrol.equipment_id", sql)
+        self.assertIn("JOIN patrol_route", sql)
+        self.assertIn("COUNT(*) AS 数量", sql)
+        self.assertIn("GROUP BY patrol.equipment_id, route.short_name", sql)
+
+    def test_dimension_list_without_metric_returns_distinct_dimensions(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=("route_name",),
+            filters=(),
+            output_projection=("route_name",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="结构化子问题",
+        )
+        sql = compile_spec_mdl(spec)
+        self.assertIn("SELECT route.short_name AS 路线名称", sql)
+        self.assertNotIn("COUNT(*)", sql)
+        self.assertIn("GROUP BY route.short_name", sql)
+
+    def test_patrol_top_preserves_all_order_keys(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="top",
+            metrics=("patrol_mileage",),
+            dimensions=(
+                "patrol_name",
+                "patrol_number",
+                "patrol_mileage",
+                "create_time",
+            ),
+            filters=(),
+            output_projection=(
+                "patrol_name",
+                "patrol_number",
+                "patrol_mileage",
+                "create_time",
+            ),
+            order_by=(
+                {"field": "create_time", "direction": "desc"},
+                {"field": "patrol_mileage", "direction": "desc"},
+            ),
+            limit=1,
+            required_assertions=(),
+            question="结构化子问题",
+        )
+        sql = compile_spec_mdl(spec)
+        self.assertIn("ORDER BY patrol.create_time DESC, patrol.patrol_mileage DESC", sql)
+        self.assertIn("LIMIT 1", sql)
+        self.assertNotIn("GROUP BY patrol.patrol_mileage", sql)
+
+    def test_business_unavailable_field_is_rejected_before_sql(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("problem_type_name",),
+            filters=(binding("lane_index", "=", "2"),),
+            output_projection=("problem_type_name", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="结构化子问题",
+        )
+        with self.assertRaisesRegex(UnsupportedQuerySpec, "车道"):
+            compile_spec_mdl(spec)

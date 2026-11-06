@@ -10,6 +10,10 @@ class QuerySpecError(ValueError):
     """Raised when model output cannot become a trustworthy QuerySpec."""
 
 
+class QuerySpecAmbiguity(QuerySpecError):
+    """Raised when the question itself needs a missing business definition."""
+
+
 @dataclass(frozen=True)
 class UserDecision:
     token: str
@@ -26,6 +30,14 @@ class ValueBinding:
     source: str
     resolver: str
     raw_text: str = ""
+
+
+@dataclass(frozen=True)
+class InputBinding:
+    from_node: str
+    from_field: str
+    to_field: str
+    op: str = "in"
 
 
 @dataclass(frozen=True)
@@ -51,6 +63,7 @@ class QuerySpec:
     limit: int | None
     required_assertions: tuple[str, ...]
     question: str = ""
+    input_bindings: tuple[InputBinding, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -141,6 +154,15 @@ def scope_hash(spec: QuerySpec) -> str:
         "order_by": list(spec.order_by),
         "limit": spec.limit,
         "required_assertions": list(spec.required_assertions),
+        "input_bindings": [
+            {
+                "from_node": item.from_node,
+                "from_field": item.from_field,
+                "to_field": item.to_field,
+                "op": item.op,
+            }
+            for item in spec.input_bindings
+        ],
     }
     payload = json.dumps(
         scope,

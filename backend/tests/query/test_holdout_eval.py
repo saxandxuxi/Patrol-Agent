@@ -52,3 +52,21 @@ class HoldoutEvaluationTests(unittest.TestCase):
             "业务文档",
         )
         self.assertTrue(result.ok)
+
+    def test_judge_cannot_accept_an_execution_failure_contradiction(self):
+        result = run_case(
+            {"id": "held-3", "category": "病害", "question": "问题"},
+            lambda _: {
+                "answer": "无法可靠规划",
+                "sections": [{"status": "unsupported"}],
+                "verification": {"status": "accepted"},
+            },
+            lambda _case, _payload, _doc: {
+                "accepted": True,
+                "verdict": "execution_failure",
+                "failure_layer": "compiler",
+                "reason": "计划失败",
+            },
+            "业务文档",
+        )
+        self.assertFalse(result.ok)

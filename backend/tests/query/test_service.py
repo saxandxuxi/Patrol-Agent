@@ -4,9 +4,12 @@ from unittest.mock import patch
 from app.query.compiler import CompiledQuery
 from app.query.contracts import (
     ExecutionObservation,
+    InputBinding,
     PlanNode,
     QueryPlan,
     QuerySpec,
+    QuerySpecAmbiguity,
+    QuerySpecError,
     ValueBinding,
     VerificationReport,
 )
@@ -20,6 +23,7 @@ from app.query.service import (
     _simple_spec_mdl,
     start_single_turn,
 )
+from app.query.spec_mdl import UnsupportedQuerySpec
 from app.query.templates import (
     CandidateSet,
     ConfirmationCard,
@@ -148,7 +152,7 @@ class ServiceTests(unittest.TestCase):
             "required_conditions": [],
         },
     )
-    def test_wren_compile_failure_retries_with_feedback(
+    def test_controlled_compile_failure_does_not_fall_back_to_llm(
         self,
         _build_plan,
         _route_group,
@@ -159,15 +163,15 @@ class ServiceTests(unittest.TestCase):
         generate_sql,
         compile_sql,
     ):
-        generate_sql.side_effect = ["BAD MDL", "GOOD MDL"]
-        compile_sql.side_effect = [("", "bad token"), ("SELECT 1", "")]
+        generate_sql.side_effect = ["GOOD MDL"]
+        compile_sql.side_effect = [("", "bad token")]
         spec = count_plan().nodes[0].spec.__class__(
             **{**count_plan().nodes[0].spec.__dict__, "question": "泛油有多少处？"}
         )
-        sql = _default_wren_executor(spec)
-        self.assertEqual(sql, "SELECT 1")
-        self.assertEqual(generate_sql.call_count, 2)
-        self.assertIn("bad token", generate_sql.call_args.kwargs["feedback"])
+        with self.assertRaisesRegex(UnsupportedQuerySpec, "bad token"):
+            _default_wren_executor(spec)
+        generate_sql.assert_not_called()
+        self.assertEqual(compile_sql.call_count, 1)
 
     def test_count_answer_uses_domain_unit(self):
         answer = _answer_text(
@@ -317,6 +321,114 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("共 60 行", answer)
         self.assertIn("当前展示前 10 行", answer)
 
+    def test_trend_reports_time_window_and_missing_months(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="trend",
+            metrics=("count",),
+            dimensions=("collection_time_month",),
+            filters=(
+                ValueBinding(
+                    field="collection_time",
+                    op="between",
+                    storage_value=(
+                        "2026-08-06 00:00:00",
+                        "2026-11-06 00:00:00",
+                    ),
+                    display_value="最近三个月",
+                    source="model_inference",
+                    resolver="time_range",
+                    raw_text="最近三个月",
+                ),
+            ),
+            output_projection=("collection_time_month", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+        )
+        answer = _answer_text(
+            spec,
+            ExecutionObservation(
+                node_id="q1",
+                ok=True,
+                engine="wren",
+                sql="SELECT month, COUNT(*)",
+                columns=("月份", "数量"),
+                row_count=2,
+                preview_rows=(
+                    {"月份": "2026-10", "数量": "11886"},
+                    {"月份": "2026-11", "数量": "1883"},
+                ),
+                result_rows=(
+                    {"月份": "2026-10", "数量": "11886"},
+                    {"月份": "2026-11", "数量": "1883"},
+                ),
+                rows_fetched=2,
+            ),
+        )
+        self.assertIn("查询窗口", answer)
+        self.assertIn("未出现的月份", answer)
+
+    def test_month_distribution_reports_months_without_rows(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("month",),
+            filters=(
+                ValueBinding(
+                    field="create_time",
+                    op=">=",
+                    storage_value="2026-01-01 00:00:00",
+                    display_value="2026-01-01 00:00:00",
+                    source="model_inference",
+                    resolver="time_range",
+                    raw_text="2026年",
+                ),
+                ValueBinding(
+                    field="create_time",
+                    op="<",
+                    storage_value="2027-01-01 00:00:00",
+                    display_value="2027-01-01 00:00:00",
+                    source="model_inference",
+                    resolver="time_range",
+                    raw_text="2026年",
+                ),
+            ),
+            output_projection=("month", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+        )
+        answer = _answer_text(
+            spec,
+            ExecutionObservation(
+                node_id="q1",
+                ok=True,
+                engine="wren",
+                sql="SELECT month, COUNT(*)",
+                columns=("月份", "数量"),
+                row_count=2,
+                preview_rows=(
+                    {"月份": "2026-10", "数量": "3"},
+                    {"月份": "2026-11", "数量": "4"},
+                ),
+                result_rows=(
+                    {"月份": "2026-10", "数量": "3"},
+                    {"月份": "2026-11", "数量": "4"},
+                ),
+                rows_fetched=2,
+            ),
+        )
+        self.assertIn("2026-01", answer)
+        self.assertIn("2026-09", answer)
+        self.assertIn("2026-12", answer)
+        self.assertIn("没有匹配记录", answer)
+
     def test_scope_key_accepts_list_valued_filters(self):
         spec = count_plan().nodes[0].spec.__class__(
             **{
@@ -335,6 +447,112 @@ class ServiceTests(unittest.TestCase):
             }
         )
         self.assertIsInstance(hash(_scope_key(spec)), int)
+
+    @patch("app.query.service.verify_result", return_value=VerificationReport(status="accepted"))
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    @patch("app.query.service.resolve_templates", return_value=empty_candidate_set())
+    @patch("app.query.service.analyze_single_turn")
+    def test_dependent_query_uses_materialized_upstream_values(
+        self,
+        analyze,
+        _resolve,
+        compile_query_mock,
+        execute,
+        _verify,
+    ):
+        source_spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=("id",),
+            filters=(),
+            output_projection=("id",),
+            order_by=(),
+            limit=2,
+            required_assertions=(),
+        )
+        target_spec = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="id",
+                    to_field="patrol_id",
+                    op="in",
+                ),
+            ),
+        )
+        analyze.return_value = QueryPlan(
+            question="依赖查询",
+            nodes=(
+                PlanNode(id="q1", spec=source_spec),
+                PlanNode(
+                    id="q2",
+                    spec=target_spec,
+                    depends_on=("q1",),
+                ),
+            ),
+        )
+        compile_query_mock.side_effect = [
+            CompiledQuery("SELECT id FROM patrol", "wren", "wren"),
+            CompiledQuery("SELECT COUNT(*) FROM disease", "wren", "wren"),
+        ]
+        execute.side_effect = [
+            ExecutionObservation(
+                node_id="q1",
+                ok=True,
+                engine="wren",
+                sql="SELECT id FROM patrol",
+                columns=("巡检任务ID",),
+                row_count=2,
+                preview_rows=(
+                    {"巡检任务ID": "p1"},
+                    {"巡检任务ID": "p2"},
+                ),
+                result_rows=(
+                    {"巡检任务ID": "p1"},
+                    {"巡检任务ID": "p2"},
+                ),
+                rows_fetched=2,
+            ),
+            ExecutionObservation(
+                node_id="q2",
+                ok=True,
+                engine="wren",
+                sql="SELECT COUNT(*) FROM disease",
+                columns=("count",),
+                row_count=1,
+                preview_rows=({"count": "7"},),
+                result_rows=({"count": "7"},),
+                rows_fetched=1,
+            ),
+        ]
+
+        start_single_turn(
+            "依赖查询",
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+
+        effective = compile_query_mock.call_args_list[1].args[0]
+        self.assertEqual(
+            effective.filters[0].storage_value,
+            ["p1", "p2"],
+        )
+        self.assertEqual(effective.filters[0].source, "previous_result")
 
     def test_severity_post_calc_compares_density_and_reports_inputs(self):
         payload = _default_post_calc_executor(
@@ -656,6 +874,133 @@ class ServiceTests(unittest.TestCase):
         )
         self.assertIsNotNone(result.candidate_set)
         self.assertIsNone(result.answer)
+
+    @patch(
+        "app.query.service.analyze_single_turn",
+        side_effect=QuerySpecError("规划不完整"),
+    )
+    def test_analysis_failure_returns_explicit_unsupported_answer(self, _analyze):
+        result = start_single_turn(
+            "复杂问题",
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+        self.assertIsNotNone(result.answer)
+        self.assertIn("规划不完整", result.answer.text)
+        self.assertEqual(result.answer.sections[0]["status"], "unsupported")
+
+    @patch(
+        "app.query.service.analyze_single_turn",
+        side_effect=QuerySpecAmbiguity("最近的时间范围未定义"),
+    )
+    def test_planning_ambiguity_returns_clear_request_for_scope(self, _analyze):
+        result = start_single_turn(
+            "最近的任务里哪次里程最高？",
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+        self.assertIsNotNone(result.answer)
+        self.assertIn("补充明确口径", result.answer.text)
+        self.assertEqual(result.answer.sections[0]["status"], "ambiguous")
+
+    @patch("app.query.service.verify_result", return_value=VerificationReport(status="accepted"))
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    @patch("app.query.service.resolve_templates", return_value=empty_candidate_set())
+    @patch("app.query.service.analyze_single_turn")
+    def test_incomplete_trend_stops_downstream_conclusion(
+        self,
+        analyze,
+        _resolve,
+        compile_query_mock,
+        execute,
+        _verify,
+    ):
+        trend_spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="trend",
+            metrics=("count",),
+            dimensions=("collection_time_month",),
+            filters=(
+                ValueBinding(
+                    field="collection_time",
+                    op="between",
+                    storage_value=(
+                        "2026-08-06 00:00:00",
+                        "2026-11-06 00:00:00",
+                    ),
+                    display_value="最近三个月",
+                    source="model_inference",
+                    resolver="time_range",
+                    raw_text="最近三个月",
+                ),
+            ),
+            output_projection=("collection_time_month", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+        calculation = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="data",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="判断趋势",
+        )
+        analyze.return_value = QueryPlan(
+            question="判断趋势",
+            nodes=(
+                PlanNode(id="q1", spec=trend_spec),
+                PlanNode(
+                    id="q2",
+                    spec=calculation,
+                    depends_on=("q1",),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+        compile_query_mock.return_value = CompiledQuery(
+            "SELECT month, COUNT(*)",
+            "wren",
+            "wren",
+        )
+        execute.return_value = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT month, COUNT(*)",
+            columns=("月份", "数量"),
+            row_count=2,
+            preview_rows=(
+                {"月份": "2026-10", "数量": "11886"},
+                {"月份": "2026-11", "数量": "1883"},
+            ),
+            result_rows=(
+                {"月份": "2026-10", "数量": "11886"},
+                {"月份": "2026-11", "数量": "1883"},
+            ),
+            rows_fetched=2,
+        )
+
+        result = start_single_turn(
+            "最近三个月趋势",
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+
+        self.assertEqual(compile_query_mock.call_count, 1)
+        self.assertEqual(len(result.answer.sections), 1)
+        self.assertEqual(result.answer.sections[0]["status"], "unsupported")
+        self.assertIn("时间序列不完整", result.answer.text)
 
     @patch("app.query.service.execute_compiled", return_value=count_observation())
     @patch("app.query.service.compile_query", return_value=compiled_count_query())

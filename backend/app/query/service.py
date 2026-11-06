@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 from typing import Any
 
 from ..services import (
@@ -21,7 +22,15 @@ from .confirmations import (
     consume_confirmation,
     issue_confirmation,
 )
-from .contracts import AnswerPackage, ExecutionObservation, QueryPlan, UserDecision
+from .contracts import (
+    AnswerPackage,
+    ExecutionObservation,
+    QueryPlan,
+    QuerySpecAmbiguity,
+    QuerySpecError,
+    UserDecision,
+    ValueBinding,
+)
 from .executor import execute_compiled
 from .fields import FieldReachSet, PhysicalSchemaView
 from .template_sources import (
@@ -30,8 +39,12 @@ from .template_sources import (
     PresetTemplateProvider,
     VerifiedExampleTemplateProvider,
 )
+from .spec_mdl import UnsupportedQuerySpec, compile_spec_mdl
 from .templates import CandidateSet, TemplateCandidate, resolve_templates
 from .verifier import verify_result
+
+
+_simple_spec_mdl = compile_spec_mdl
 
 
 @dataclass(frozen=True)
@@ -132,149 +145,22 @@ def _default_template_executor(
     )
 
 
-def _simple_spec_mdl(spec: Any) -> str | None:
-    filters = list(spec.filters)
-    if (
-        spec.subject == "disease"
-        and spec.view == "trend"
-        and any(
-            "time" in item or "month" in item or "date" in item
-            for item in spec.dimensions
-        )
-    ):
-        route_id = ""
-        for item in filters:
-            if item.field != "route_name":
-                return None
-            route_id = str(item.storage_value)
-        time_bucket = "DATE_FORMAT(disease.collection_time, '%Y-%m')"
-        from_sql = "FROM disease"
-        where = ["disease.del_flag = 0"]
-        if route_id:
-            from_sql += " JOIN route ON disease.routes_id = route.id"
-            where.append(
-                "route.id = '" + route_id.replace("'", "''") + "'"
-            )
-        return (
-            f"SELECT {time_bucket} AS 时间, COUNT(*) AS 病害数量 "
-            f"{from_sql} WHERE {' AND '.join(where)} "
-            f"GROUP BY {time_bucket} "
-            "ORDER BY 时间"
-        )
-    if (
-        spec.subject == "disease"
-        and spec.dimensions == ("route_name",)
-        and "count" in spec.metrics
-        and "route_length_km" in spec.metrics
-    ):
-        damage_values: list[str] = []
-        route_id = ""
-        for item in filters:
-            if item.field == "problem_type_name":
-                values = (
-                    item.storage_value
-                    if isinstance(item.storage_value, (list, tuple))
-                    else [item.storage_value]
-                )
-                damage_values.extend(str(value) for value in values)
-            elif item.field == "route_name":
-                route_id = str(item.storage_value)
-            else:
-                return None
-        selects = [
-            "disease.route_name AS 路线名称",
-            "COUNT(*) AS 数量",
-        ]
-        joins = [
-            "JOIN route ON disease.routes_id = route.id",
-        ]
-        where = [
-            "disease.del_flag = 0",
-            "disease.route_name IS NOT NULL",
-        ]
-        if damage_values:
-            literals = ", ".join(
-                "'" + value.replace("'", "''") + "'"
-                for value in damage_values
-            )
-            joins.append(
-                "JOIN damage_dict ON disease.problem_base_id = damage_dict.id"
-            )
-            where.append(f"damage_dict.problem_type IN ({literals})")
-        if route_id:
-            where.append(
-                "route.id = '" + route_id.replace("'", "''") + "'"
-            )
-        if "total_area" in spec.metrics:
-            selects.append("ROUND(SUM(disease.area), 2) AS 总面积")
-        if "average_area" in spec.metrics or "avg_area" in spec.metrics:
-            selects.append("ROUND(AVG(disease.area), 4) AS 平均面积")
-        if "sum_disease_length" in spec.metrics:
-            selects.append(
-                "ROUND(SUM(disease.effective_disease_length), 4) AS 总病害长度"
-            )
-        selects.append("route.route_length_km AS 路线长度_km")
-        limit = int(spec.limit or 500)
-        return (
-            f"SELECT {', '.join(selects)} "
-            "FROM disease "
-            f"{' '.join(joins)} "
-            f"WHERE {' AND '.join(where)} "
-            "GROUP BY disease.route_name, route.route_length_km "
-            "ORDER BY 数量 DESC "
-            f"LIMIT {limit}"
-        )
-    length_filters = [
-        item
-        for item in filters
-        if item.field in {"disease_length", "effective_disease_length"}
-    ]
-    if (
-        spec.subject != "disease"
-        or len(length_filters) != 1
-        or len(filters) != 1
-        or spec.view not in {"count", "sum", "list", "detail"}
-    ):
-        return None
-    binding = length_filters[0]
-    try:
-        threshold = float(binding.storage_value)
-    except (TypeError, ValueError):
-        return None
-    if binding.op not in {">", ">=", "<", "<=", "="}:
-        return None
-    where = (
-        "disease.del_flag = 0 "
-        f"AND disease.effective_disease_length {binding.op} {threshold:g}"
-    )
-    if spec.view == "count":
-        return f"SELECT COUNT(*) AS 病害数量 FROM disease WHERE {where}"
-    if spec.view == "sum":
-        return (
-            "SELECT ROUND(SUM(disease.effective_disease_length), 4) AS 总长度 "
-            f"FROM disease WHERE {where}"
-        )
-    limit = int(spec.limit or 500)
-    return (
-        "SELECT disease.problem_number AS 病害编号, "
-        "disease.effective_disease_length AS 长度, "
-        "disease.pile_number AS 桩号, "
-        "disease.route_name AS 路线名称, "
-        "disease.collection_time AS 采集时间 "
-        f"FROM disease WHERE {where} "
-        f"ORDER BY disease.collection_time DESC LIMIT {limit}"
-    )
-
-
 def _default_wren_executor(spec: Any) -> str:
     question = str(getattr(spec, "question", "") or "").strip()
     if not question:
         raise RuntimeError("QuerySpec is missing its frozen sub-question")
     kind = str(getattr(spec, "kind", "mysql") or "mysql")
+    mdl_sql = compile_spec_mdl(spec)
+    if mdl_sql:
+        physical, error = wren_engine.compile_mdl_sql_verbose(kind, mdl_sql)
+        if physical:
+            return physical
+        raise UnsupportedQuerySpec(
+            f"QuerySpec 受控编译失败：{error or 'empty physical SQL'}"
+        )
     plan = nl2sql.build_query_plan(question, kind)
     mdl_sql = (
-        _simple_spec_mdl(spec)
-        or nl2sql.simple_route_group_mdl(plan)
+        nl2sql.simple_route_group_mdl(plan)
         or nl2sql.simple_patrol_route_list_mdl(plan)
         or ""
     )
@@ -456,6 +342,76 @@ def _scope_key(spec: Any) -> tuple[Any, ...]:
     )
 
 
+def _materialize_inputs(
+    spec: Any,
+    accepted_observations: dict[str, Any],
+    accepted_specs: dict[str, Any],
+) -> Any:
+    if not spec.input_bindings:
+        return spec
+    filters = list(spec.filters)
+    for binding in spec.input_bindings:
+        observation = accepted_observations.get(binding.from_node)
+        if observation is None:
+            raise UnsupportedQuerySpec(
+                f"输入依赖 {binding.from_node} 没有可用的已接受结果"
+            )
+        source_spec = accepted_specs.get(binding.from_node)
+        from_field = str(binding.from_field).rsplit(".", 1)[-1]
+        values: list[Any] = []
+        for row in observation.result_rows or observation.preview_rows:
+            if not isinstance(row, dict):
+                continue
+            value = row.get(from_field)
+            if value is None:
+                value = next(
+                    (
+                        item
+                        for key, item in row.items()
+                        if str(key).rsplit(".", 1)[-1] == from_field
+                    ),
+                    None,
+                )
+            if value is None and source_spec is not None:
+                source_fields = [
+                    *source_spec.dimensions,
+                    *source_spec.metrics,
+                    *source_spec.output_projection,
+                ]
+                normalized_fields = [
+                    str(field).rsplit(".", 1)[-1]
+                    for field in source_fields
+                ]
+                if from_field in normalized_fields:
+                    index = normalized_fields.index(from_field)
+                    if index < len(observation.columns):
+                        value = row.get(observation.columns[index])
+            if value in (None, "") or value in values:
+                continue
+            values.append(value)
+        if not values:
+            raise UnsupportedQuerySpec(
+                f"输入依赖 {binding.from_node}.{binding.from_field} 没有可传递的值"
+            )
+        filters = [
+            item
+            for item in filters
+            if str(item.field).rsplit(".", 1)[-1] != binding.to_field
+        ]
+        filters.append(
+            ValueBinding(
+                field=binding.to_field,
+                op=binding.op,
+                storage_value=values if binding.op in {"in", "between"} else values[0],
+                display_value=str(values[0]),
+                source="previous_result",
+                resolver=f"node:{binding.from_node}:{binding.from_field}",
+                raw_text=binding.from_node,
+            )
+        )
+    return replace(spec, filters=tuple(filters), input_bindings=())
+
+
 def _numeric_value(observation: Any) -> int | None:
     rows = observation.result_rows or observation.preview_rows
     for row in rows:
@@ -549,6 +505,8 @@ def _execute_plan(
             candidate_by_node[candidate.node_id] = candidate
     sections: list[dict[str, Any]] = []
     accepted_observations: dict[str, Any] = {}
+    accepted_specs: dict[str, Any] = {}
+    unavailable_dependencies: dict[str, str] = {}
     answers_by_id: dict[str, str] = {}
     count_by_scope: dict[tuple[Any, ...], int] = {}
     for node in plan.nodes:
@@ -558,6 +516,11 @@ def _execute_plan(
             if dependency not in accepted_observations
         ]
         if missing_dependencies:
+            if all(
+                dependency in unavailable_dependencies
+                for dependency in missing_dependencies
+            ):
+                continue
             reason = (
                 f"依赖步骤 {', '.join(missing_dependencies)} 未通过，"
                 "已停止执行这一步。"
@@ -571,6 +534,37 @@ def _execute_plan(
                 }
             )
             continue
+        effective_spec = node.spec
+        if node.node_type == "query_data":
+            if node.depends_on and not node.spec.input_bindings:
+                sections.append(
+                    {
+                        "node_id": node.id,
+                        "answer": (
+                            "依赖步骤没有声明可执行输入绑定，"
+                            "无法保证使用真实的上一节点结果。"
+                        ),
+                        "status": "unsupported",
+                        "failure_code": "missing_input_binding",
+                    }
+                )
+                continue
+            try:
+                effective_spec = _materialize_inputs(
+                    node.spec,
+                    accepted_observations,
+                    accepted_specs,
+                )
+            except UnsupportedQuerySpec as exc:
+                sections.append(
+                    {
+                        "node_id": node.id,
+                        "answer": f"无法安全执行依赖查询：{exc}",
+                        "status": "unsupported",
+                        "failure_code": "missing_dependency_value",
+                    }
+                )
+                continue
         if node.node_type == "post_calc":
             upstream = {
                 dependency: _observation_payload(
@@ -641,6 +635,7 @@ def _execute_plan(
                 coverage={"answer": answer},
             )
             accepted_observations[node.id] = observation
+            accepted_specs[node.id] = effective_spec
             answers_by_id[node.id] = answer
             sections.append(
                 {
@@ -652,33 +647,75 @@ def _execute_plan(
             )
             continue
         candidate = candidate_by_node.get(node.id)
-        compiled = compile_query(
-            node.spec,
-            decision,
-            candidate,
-            _default_template_executor,
-            _default_wren_executor,
-        )
+        try:
+            compiled = compile_query(
+                effective_spec,
+                decision,
+                candidate,
+                _default_template_executor,
+                _default_wren_executor,
+            )
+        except UnsupportedQuerySpec as exc:
+            sections.append(
+                {
+                    "node_id": node.id,
+                    "answer": f"无法安全执行该查询：{exc}",
+                    "status": "unsupported",
+                    "failure_code": "unsupported_query_spec",
+                }
+            )
+            continue
         observation = execute_compiled(
             compiled,
             lambda current_kind, sql: _default_execute_sql(
                 current_kind,
                 sql,
-                question=node.spec.question or plan.question,
+                question=effective_spec.question or plan.question,
             ),
         )
+        incomplete_trend = (
+            effective_spec.view == "trend"
+            and bool(
+                _time_window_coverage(
+                    effective_spec,
+                    list(observation.result_rows or observation.preview_rows),
+                )
+            )
+        )
+        if incomplete_trend:
+            answer = (
+                _answer_text(effective_spec, observation)
+                + "；时间序列不完整，无法可靠判断完整时间窗口的趋势。"
+            )
+            unavailable_dependencies[node.id] = answer
+            sections.append(
+                {
+                    "node_id": node.id,
+                    "answer": answer,
+                    "status": "unsupported",
+                    "failure_code": "incomplete_time_coverage",
+                    "sql": compiled.sql,
+                    "engine": compiled.engine,
+                    "columns": list(observation.columns),
+                    "preview_rows": list(observation.preview_rows),
+                    "rows_fetched": observation.rows_fetched,
+                    "total_count": observation.total_count,
+                    "truncated": observation.truncated,
+                }
+            )
+            continue
         if (
-            node.spec.view in {"detail", "list"}
+            effective_spec.view in {"detail", "list"}
             and observation.total_count is None
         ):
-            inherited_total = count_by_scope.get(_scope_key(node.spec))
+            inherited_total = count_by_scope.get(_scope_key(effective_spec))
             if inherited_total is not None:
                 observation = replace(
                     observation,
                     total_count=inherited_total,
                     truncated=inherited_total > observation.rows_fetched,
                 )
-        report = verify_result(node.spec, compiled, observation)
+        report = verify_result(effective_spec, compiled, observation)
         _trace_node_result(node, compiled, observation, report)
         if report.status != "accepted":
             sections.append(
@@ -696,13 +733,14 @@ def _execute_plan(
                 }
             )
             continue
-        answer = _answer_text(node.spec, observation)
+        answer = _answer_text(effective_spec, observation)
         accepted_observations[node.id] = observation
+        accepted_specs[node.id] = effective_spec
         answers_by_id[node.id] = answer
-        if node.spec.view == "count":
+        if effective_spec.view == "count":
             count = _numeric_value(observation)
             if count is not None:
-                count_by_scope[_scope_key(node.spec)] = count
+                count_by_scope[_scope_key(effective_spec)] = count
         sections.append(
             {
                 "node_id": node.id,
@@ -786,8 +824,93 @@ def _answer_text(spec: Any, observation: Any) -> str:
             return (
                 f"共 {observation.rows_fetched} 行，当前展示前 10 行；{text}"
             )
+        coverage = _time_window_coverage(spec, result_rows)
+        if coverage:
+            text = f"{text}；{coverage}"
         return text
     return f"查询返回 {observation.rows_fetched} 行"
+
+
+def _year_month(value: Any) -> tuple[int, int] | None:
+    text = str(value or "").strip().replace("年", "-").replace("月", "")
+    parts = text.split("-")
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+
+
+def _time_window_coverage(spec: Any, rows: list[dict[str, Any]]) -> str:
+    month_dimension = any(
+        str(field).rsplit(".", 1)[-1]
+        in {"month", "collection_time_month", "create_time_month"}
+        for field in spec.dimensions
+    )
+    if spec.view != "trend" and not (spec.view == "distribution" and month_dimension):
+        return ""
+    start: datetime | None = None
+    end: datetime | None = None
+    window_value: tuple[Any, Any] | None = None
+    for item in spec.filters:
+        if item.field not in {"collection_time", "create_time"}:
+            continue
+        try:
+            if item.op == "between" and isinstance(
+                item.storage_value,
+                (list, tuple),
+            ) and len(item.storage_value) == 2:
+                start = datetime.fromisoformat(str(item.storage_value[0]))
+                end = datetime.fromisoformat(str(item.storage_value[1]))
+                window_value = (item.storage_value[0], item.storage_value[1])
+            elif item.op in {">", ">="}:
+                start = datetime.fromisoformat(str(item.storage_value))
+            elif item.op in {"<", "<="}:
+                end = datetime.fromisoformat(str(item.storage_value))
+                if item.op == "<":
+                    end -= timedelta(microseconds=1)
+        except ValueError:
+            continue
+    if start is None or end is None or start > end:
+        return ""
+    expected: list[str] = []
+    year, month = start.year, start.month
+    while (year, month) <= (end.year, end.month):
+        expected.append(f"{year:04d}-{month:02d}")
+        month += 1
+        if month == 13:
+            year += 1
+            month = 1
+    actual = {
+        f"{year:04d}-{month:02d}"
+        for row in rows
+        for value in row.values()
+        if (parsed := _year_month(value)) is not None
+        for year, month in (parsed,)
+    }
+    missing = [item for item in expected if item not in actual]
+    if spec.view == "distribution":
+        if not missing:
+            return ""
+        return "查询范围内以下月份没有匹配记录：" + "、".join(missing)
+    if actual and missing:
+        start_text = (
+            window_value[0]
+            if window_value is not None
+            else start.strftime("%Y-%m-%d %H:%M:%S")
+        )
+        end_text = (
+            window_value[1]
+            if window_value is not None
+            else end.strftime("%Y-%m-%d %H:%M:%S")
+        )
+        return (
+            f"查询窗口 {start_text} 至 {end_text}；"
+            f"结果返回月份为 {'、'.join(sorted(actual))}；"
+            "未出现的月份表示查询范围内没有匹配记录。"
+        )
+    return ""
 
 
 def start_single_turn(
@@ -800,7 +923,36 @@ def start_single_turn(
 ) -> TurnStart:
     schema = schema or _default_schema(kind)
     reach = reach or FieldReachSet()
-    plan = analyze_single_turn(question, kind, schema, reach)
+    try:
+        plan = analyze_single_turn(question, kind, schema, reach, audit=True)
+    except QuerySpecAmbiguity as exc:
+        return TurnStart(
+            plan=QueryPlan(question=question, nodes=()),
+            answer=AnswerPackage(
+                f"该查询需要补充明确口径：{exc}",
+                (
+                    {
+                        "status": "ambiguous",
+                        "failure_code": "query_scope_ambiguous",
+                        "answer": str(exc),
+                    },
+                ),
+            ),
+        )
+    except QuerySpecError as exc:
+        return TurnStart(
+            plan=QueryPlan(question=question, nodes=()),
+            answer=AnswerPackage(
+                f"无法可靠规划该查询：{exc}",
+                (
+                    {
+                        "status": "unsupported",
+                        "failure_code": "query_plan_not_executable",
+                        "answer": str(exc),
+                    },
+                ),
+            ),
+        )
     if providers is None:
         providers = (
             BuiltinTemplateProvider(),

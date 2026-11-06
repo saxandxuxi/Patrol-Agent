@@ -73,7 +73,34 @@ def run_case(
             reason=f"{type(exc).__name__}: {exc}",
             answer=str(payload.get("answer") or ""),
         )
-    accepted = verdict.get("accepted") is True
+    failure_verdicts = {
+        "partial",
+        "wrong_scope",
+        "wrong_metric",
+        "wrong_dimension",
+        "wrong_value",
+        "unverifiable",
+        "execution_failure",
+        "presentation_error",
+    }
+    section_statuses = {
+        str(section.get("status") or "accepted")
+        for section in payload.get("sections") or ()
+        if isinstance(section, dict)
+    }
+    verification_status = str(
+        (payload.get("verification") or {}).get("status") or ""
+    )
+    hard_failure = bool(
+        payload.get("error")
+        or section_statuses & {"blocked", "error", "failed", "repairable"}
+        or verification_status in {"blocked", "error", "failed", "repairable"}
+    )
+    accepted = (
+        verdict.get("accepted") is True
+        and str(verdict.get("verdict") or "") not in failure_verdicts
+        and not hard_failure
+    )
     return CaseResult(
         id=case_id,
         ok=accepted,
@@ -112,11 +139,27 @@ def _default_runner(question: str) -> dict[str, Any]:
                 "reason": "查询仍需确认但没有返回答案",
             },
         }
+    statuses = {
+        str(section.get("status") or "accepted")
+        for section in turn.answer.sections
+    }
+    status = "accepted"
+    for candidate_status in (
+        "blocked",
+        "error",
+        "repairable",
+        "failed",
+        "unsupported",
+        "ambiguous",
+    ):
+        if candidate_status in statuses:
+            status = candidate_status
+            break
     return {
         "answer": turn.answer.text,
         "plan": _jsonable(turn.plan),
         "sections": _jsonable(turn.answer.sections),
-        "verification": {"status": "accepted"},
+        "verification": {"status": status},
     }
 
 

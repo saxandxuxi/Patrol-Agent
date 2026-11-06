@@ -5,7 +5,7 @@ from typing import Any
 
 from ..services import dictionary, parsers, route_resolver
 from ..services.nl2sql import known_problem_types
-from .contracts import QuerySpecError, ValueBinding
+from .contracts import QuerySpecAmbiguity, QuerySpecError, ValueBinding
 
 
 _CODE_FIELDS = {
@@ -50,7 +50,9 @@ def _relative_time_range(question: str) -> tuple[datetime, datetime] | None:
 def _resolve_damage_type(raw_value: Any, question: str, kind: str) -> ValueBinding:
     text = str(raw_value or "").strip()
     if not text:
-        raise QuerySpecError("病害类型为空")
+        raise QuerySpecAmbiguity(
+            "查询条件缺少可执行的病害类型，请补充具体病害名称。"
+        )
     known = [str(item) for item in known_problem_types(kind) if str(item).strip()]
     matches = [
         value
@@ -79,7 +81,9 @@ def _resolve_damage_type(raw_value: Any, question: str, kind: str) -> ValueBindi
 def _resolve_code(field: str, raw_value: Any, question: str, kind: str) -> ValueBinding:
     text = str(raw_value or "").strip()
     if not text:
-        raise QuerySpecError(f"{field} 的值为空")
+        raise QuerySpecAmbiguity(
+            "查询条件缺少可执行的枚举值，请补充具体取值。"
+        )
     column = _CODE_FIELDS[field]
     labels = dictionary.code_labels(kind, "ai_problem", column)
     reverse = {str(label).strip(): str(code) for code, label in labels.items()}
@@ -110,7 +114,9 @@ def resolve_value(
         return ValueBinding(**{**value.__dict__, "op": op})
     text = str(raw_value if raw_value is not None else "").strip()
     if not text:
-        raise QuerySpecError(f"{field} 的值为空")
+        raise QuerySpecAmbiguity(
+            "查询条件缺少可执行值。请补充具体任务、时间范围或比较批次。"
+        )
     if field == "route_name":
         route = route_resolver._resolve_route(text)
         if not route or not route.get("id"):

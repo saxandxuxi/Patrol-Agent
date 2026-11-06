@@ -7,6 +7,53 @@ from app.services.plan_contract import build_step_contract
 
 
 class QueryPlanningTests(unittest.TestCase):
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_analysis_action_is_normalized_to_post_calc(self, chat_json, _resolve):
+        chat_json.return_value = {
+            "final_goal": "计算比较结果",
+            "intent_family": "analysis",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["route_name"],
+                    "filters": [],
+                    "output_projection": ["route_name", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "q2",
+                    "action": "analysis",
+                    "subject": "disease",
+                    "view": "data",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": ["q1"],
+                    "inputs": [],
+                },
+            ],
+        }
+        plan = analyze_single_turn(
+            "计算比较结果",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+        self.assertEqual(plan.nodes[1].node_type, "post_calc")
+
     def test_prior_result_top_question_must_be_post_calc(self):
         contract = build_step_contract(
             "统计各路线下病害类型数量，找出每条路线数量最多的类型",
@@ -69,6 +116,9 @@ class QueryPlanningTests(unittest.TestCase):
         )
         self.assertEqual(plan.nodes[1].node_type, "post_calc")
         self.assertEqual(plan.nodes[1].depends_on, ("q1",))
+        self.assertEqual(plan.nodes[1].spec.view, "data")
+        self.assertEqual(plan.nodes[1].spec.metrics, ())
+        self.assertEqual(plan.nodes[1].spec.dimensions, ())
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")

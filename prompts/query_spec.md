@@ -19,6 +19,7 @@
 7. `output_projection` 只能写用户要求展示或定位记录所必需的输出字段。
 8. 依赖前序节点时，用 `depends_on` 写节点 id；不要用自然语言代词。
 9. 无法判断时不要猜测；把问题词放入 `unknown_terms`，保留可确认部分。
+10. 下游节点消费前序结果时，必须在 `inputs` 中声明 `from_node`、`from_field`、`to_field`、`op`，不得把依赖写成 SQL 或过滤值字符串。
 
 允许的 view：
 count / sum / avg / distribution / list / detail / top / trend / bucket_compare / photo / data
@@ -44,7 +45,8 @@ count / sum / avg / distribution / list / detail / top / trend / bucket_compare 
       "order_by": [],
       "limit": null,
       "required_assertions": ["preserve_user_scope"],
-      "depends_on": []
+      "depends_on": [],
+      "inputs": []
     }
   ]
 }
@@ -59,5 +61,8 @@ count / sum / avg / distribution / list / detail / top / trend / bucket_compare 
 
 字段触达证据：
 <<reach>>
+
+上一轮规划审计反馈（如果没有则为“无”）：
+<<planning_feedback>>
 
 只输出 JSON。
