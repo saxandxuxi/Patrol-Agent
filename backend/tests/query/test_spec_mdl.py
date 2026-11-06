@@ -459,7 +459,10 @@ class SpecMdlTests(unittest.TestCase):
             question="结构化子问题",
         )
         sql = compile_spec_mdl(spec)
-        self.assertIn("ORDER BY patrol.create_time DESC, patrol.patrol_mileage DESC", sql)
+        self.assertIn(
+            "ORDER BY patrol.create_time DESC, SUM(patrol.patrol_mileage) DESC",
+            sql,
+        )
         self.assertIn("LIMIT 1", sql)
         self.assertNotIn("GROUP BY patrol.patrol_mileage", sql)
 

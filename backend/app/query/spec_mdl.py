@@ -347,38 +347,64 @@ def _patrol_dimension(field: str, joins: set[str]) -> tuple[str, str]:
 
 
 def _disease_metric(metric: str, joins: set[str]) -> tuple[str, str]:
-    normalized = _base_field(metric)
-    if normalized in {"count", "count_task", "task_count", "record_count"}:
-        return "COUNT(*)", "数量"
-    if normalized in {"sum_area", "total_area"}:
-        return "ROUND(SUM(disease.area), 2)", "总面积"
-    if normalized in {"avg_area", "average_area"}:
-        return "ROUND(AVG(disease.area), 4)", "平均面积"
-    if normalized in {
-        "sum_disease_length",
-        "sum_effective_disease_length",
-        "disease_length",
-    }:
-        return "ROUND(SUM(disease.effective_disease_length), 4)", "总长度"
-    if normalized == "route_length_km":
-        joins.add("route")
-        return "route.route_length_km", "路线长度_km"
-    supported = (
-        "count、total_area/sum_area、average_area/avg_area、"
-        "sum_effective_disease_length、route_length_km"
-    )
-    raise UnsupportedQuerySpec(
-        f"病害查询不支持指标：{metric}；可用指标：{supported}"
-    )
+    return _registered_metric("disease", metric, joins)
 
 
 def _patrol_metric(metric: str) -> tuple[str, str]:
+    return _registered_metric("patrol", metric, set())
+
+
+def _registered_metric(
+    subject: str,
+    metric: str,
+    joins: set[str],
+) -> tuple[str, str]:
+    from app.query.capability_registry import CapabilityRegistry
+    from app.query.metric_compiler import compile_registered_metric
+
     normalized = _base_field(metric)
-    if normalized in {"count", "count_task", "task_count", "record_count"}:
-        return "COUNT(*)", "数量"
-    if normalized == "patrol_mileage":
-        return "patrol.patrol_mileage", "巡检里程"
-    raise UnsupportedQuerySpec(f"巡检任务查询不支持指标：{metric}")
+    normalized = {
+        "count_task": "count",
+        "task_count": "count",
+        "record_count": "count",
+        "sum_area": "total_area",
+        "avg_area": "average_area",
+    }.get(normalized, normalized)
+    registry = CapabilityRegistry.load()
+    metric_cap = registry.snapshot.metrics.get(subject, {}).get(normalized)
+    if metric_cap is None:
+        available = registry.snapshot.metrics.get(subject, {})
+        preferred = [
+            item
+            for item in (
+                "count",
+                "total_area",
+                "average_area",
+                "sum_effective_disease_length",
+                "route_length_km",
+            )
+            if item in available
+        ]
+        supported = "、".join(
+            preferred
+            + [
+                item
+                for item in sorted(available)
+                if item not in preferred
+            ][: max(0, 24 - len(preferred))]
+        )
+        raise UnsupportedQuerySpec(
+            f"{subject} 查询不支持指标：{metric}；可用指标：{supported}"
+        )
+    joins.update(metric_cap.requires_join)
+    aliases = {
+        subject: "disease" if subject == "disease" else "patrol",
+        "route": "route",
+    }
+    return (
+        compile_registered_metric(subject, metric_cap, aliases),
+        metric_cap.label,
+    )
 
 
 def _disease_output(field: str) -> tuple[str, str] | None:

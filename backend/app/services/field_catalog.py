@@ -510,36 +510,14 @@ def metric_names(kind: str = "mysql") -> set[str]:
     推荐卡于是拿"几车道"这种模板硬套（docs/推荐卡硬推荐与指标空匹配方案.md §三）。
     命名与挖掘侧 `templatizer._metric_name` 保持一致（min/max/avg/total + 列名）。
     """
-    names = {
-        "count",
-        "total_area",
-        "avg_area",
-        "max_area",
-        "min_area",
-        "avg_length",
-        "confidence",
-        "ratio",
-        "density",
-        "interval",
-        "rate",
-        "distinct_pile",
-        "duration",
+    from app.query.capability_registry import CapabilityRegistry
+
+    registry = CapabilityRegistry.load(kind)
+    return {
+        metric_id
+        for subject_metrics in registry.snapshot.metrics.values()
+        for metric_id in subject_metrics
     }
-    for prefix in ("min_", "max_", "avg_", "sum_", "total_"):
-        names.add(f"{prefix}effective_disease_length")
-    # pic_position 的数值字段：min_/max_/avg_/sum_/total_ + 字段名（和列名同规则）
-    for name, (_key, numeric, _label, _cast) in PIC_JSON_FIELDS.items():
-        if numeric:
-            for prefix in ("min_", "max_", "avg_", "sum_", "total_"):
-                names.add(f"{prefix}{name}")
-    for table in _catalog(kind).get("tables") or []:
-        for column in table.get("columns") or []:
-            name = str(column.get("name") or "")
-            if not name or name in _FIELD_TABLE_SKIP or not _is_numeric_type(str(column.get("type") or "")):
-                continue
-            for prefix in ("min_", "max_", "avg_", "sum_", "total_"):
-                names.add(f"{prefix}{name}")
-    return names
 
 
 def output_field_names(kind: str = "mysql") -> set[str]:

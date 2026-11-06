@@ -80,7 +80,7 @@ class CapabilityRegistry:
                 if isinstance(raw, dict) and not str(metric_id).startswith("_")
             }
             for subject, raw_metrics in docs["metrics"].items()
-            if isinstance(raw_metrics, dict)
+            if isinstance(raw_metrics, dict) and not str(subject).startswith("_")
         }
         derived_metrics = {
             str(subject): {
@@ -172,6 +172,7 @@ class CapabilityRegistry:
         )
         registry = cls(snapshot)
         registry._augment_physical_fields(kind)
+        registry._augment_numeric_metrics()
         registry._augment_enums(kind)
         registry._validate_physical_fields(kind)
         return registry
@@ -275,6 +276,36 @@ class CapabilityRegistry:
                         for code, label in code_map.items()
                     },
                 )
+
+    def _augment_numeric_metrics(self) -> None:
+        for subject_id, fields in self.snapshot.fields.items():
+            metrics = dict(self.snapshot.metrics.get(subject_id) or {})
+            for field_id, field in fields.items():
+                numeric = (
+                    "numeric" in field.roles
+                    or any(
+                        token in field.data_type.lower()
+                        for token in ("int", "decimal", "double", "float", "numeric")
+                    )
+                )
+                if not numeric or not field.physical_column:
+                    continue
+                for prefix, aggregate in (
+                    ("sum_", "SUM"),
+                    ("avg_", "AVG"),
+                    ("min_", "MIN"),
+                    ("max_", "MAX"),
+                ):
+                    metric_id = f"{prefix}{field_id}"
+                    if metric_id in metrics:
+                        continue
+                    metrics[metric_id] = MetricCapability(
+                        metric_id=metric_id,
+                        expression=f"{aggregate}({{alias}}.{field.physical_column})",
+                        label=f"{field.label}{'合计' if prefix == 'sum_' else '平均' if prefix == 'avg_' else '最小' if prefix == 'min_' else '最大'}",
+                        allowed_views=("count", "distribution", "top", "trend"),
+                    )
+            self.snapshot.metrics[subject_id] = metrics
 
     def _validate_physical_fields(self, kind: str) -> None:
         catalog = schema_catalog.field_catalog(kind)
