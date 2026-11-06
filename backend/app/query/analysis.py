@@ -7,7 +7,7 @@ from typing import Any
 from ..services import prompts
 from ..services.llm import LLMError, chat_json, role_model
 from .audit import audit_query_plan
-from .capability_registry import CapabilityRegistry
+from .capability_registry import CapabilityIssue, CapabilityRegistry
 from .contracts import (
     InputBinding,
     IntentContract,
@@ -443,7 +443,7 @@ def _audit_issue_changes_plan(plan: QueryPlan, issue: dict[str, Any]) -> bool:
     return _apply_audit_patches(plan, {"issues": [issue]}) != plan
 
 
-def _query_plan_compile_error(plan: QueryPlan) -> str:
+def _query_plan_compile_error(plan: QueryPlan) -> CapabilityIssue | None:
     for node in plan.nodes:
         if node.node_type != "query_data":
             continue
@@ -452,14 +452,53 @@ def _query_plan_compile_error(plan: QueryPlan) -> str:
         try:
             sql = compile_spec_mdl(node.spec)
         except UnsupportedQuerySpec as exc:
-            return str(exc) or f"节点 {node.id} 无法编译"
+            message = str(exc) or f"节点 {node.id} 无法编译"
+            return _capability_issue_from_compile_error(
+                node.id,
+                message,
+            )
         if not sql:
-            return f"节点 {node.id} 编译结果为空"
-    return ""
+            return CapabilityIssue(
+                code="empty_compilation",
+                original_value=node.id,
+                reason=f"节点 {node.id} 编译结果为空",
+                node_id=node.id,
+            )
+    return None
+
+
+def _capability_issue_from_compile_error(
+    node_id: str,
+    message: str,
+) -> CapabilityIssue:
+    if "不支持指标：" in message:
+        original = message.split("不支持指标：", 1)[1].split("；", 1)[0]
+        allowed_text = message.split("可用指标：", 1)[1] if "可用指标：" in message else ""
+        allowed = tuple(
+            item.strip()
+            for item in allowed_text.split("、")
+            if item.strip()
+        )
+        return CapabilityIssue(
+            code="unknown_metric",
+            original_value=original,
+            reason=message,
+            allowed_values=allowed,
+            suggested_repair=(
+                "只使用 allowed_values 中的原子指标；派生指标改用 post_calc。"
+            ),
+            node_id=node_id,
+        )
+    return CapabilityIssue(
+        code="unsupported_capability",
+        original_value=node_id,
+        reason=message,
+        node_id=node_id,
+    )
 
 
 def _query_plan_compiles(plan: QueryPlan) -> bool:
-    return not _query_plan_compile_error(plan)
+    return _query_plan_compile_error(plan) is None
 
 
 def _ambiguity_message(issues: list[Any]) -> str:
@@ -489,7 +528,7 @@ def analyze_single_turn(
     subject: str = "",
 ) -> QueryPlan:
     feedback = ""
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             plan = _analyze_once(
                 question,
@@ -516,15 +555,18 @@ def analyze_single_turn(
             raise
         if not audit:
             return plan
-        compile_error = _query_plan_compile_error(plan)
-        if compile_error:
-            if attempt == 0:
-                feedback = (
-                    "上一轮 QuerySpec 无法通过执行前编译契约。"
-                    f"请使用字段目录中该主体真实支持的字段重新生成：{compile_error}"
-                )
+        compile_issue = _query_plan_compile_error(plan)
+        if compile_issue:
+            feedback = json.dumps(
+                compile_issue.to_feedback(),
+                ensure_ascii=False,
+                default=str,
+            )
+            if attempt < 2:
                 continue
-            raise QuerySpecError(compile_error)
+            raise QuerySpecError(
+                "当前数据能力不支持：" + compile_issue.reason
+            )
         verdict = audit_query_plan(str(question or "").strip(), plan)
         if verdict.get("complete") is True:
             return plan
