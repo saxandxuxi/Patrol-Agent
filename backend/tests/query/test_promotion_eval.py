@@ -208,6 +208,25 @@ class PromotionEvalTests(unittest.TestCase):
             {item.question for item in generated},
         )
 
+    def test_fresh_generation_retries_with_expanded_exclusions(self):
+        calls = []
+
+        def generator(document, exclude_ids, count):
+            calls.append(set(exclude_ids))
+            if len(calls) == 1:
+                return cases("fresh", 2, "retry1")
+            return cases("fresh", count, "retry2")
+
+        generated = generate_exam_cases(
+            "业务文档",
+            set(),
+            15,
+            generator=generator,
+        )
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(generated), 15)
+
 
 if __name__ == "__main__":
     unittest.main()

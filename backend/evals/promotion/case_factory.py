@@ -65,31 +65,38 @@ def generate_exam_cases(
         for item in (exclude_questions or set())
         if str(item).strip()
     }
-    generated = list(
-        _default_generator(
-            document,
-            set(exclude_ids),
-            count,
-            set(exclude_questions or set()),
+    current_ids = set(exclude_ids)
+    current_questions = set(exclude_questions or set())
+    collected: list[ExamCase] = []
+    for _attempt in range(4):
+        generated = list(
+            _default_generator(
+                document,
+                set(current_ids),
+                count,
+                set(current_questions),
+            )
+            if generator is None
+            else generator(document, set(current_ids), count)
         )
-        if generator is None
-        else generator(document, set(exclude_ids), count)
-    )
-    filtered = [
-        item
-        for item in generated
-        if item.id
-        and item.question
-        and item.id not in exclude_ids
-        and "".join(item.question.split()) not in excluded_questions
-    ]
-    unique: list[ExamCase] = []
-    seen: set[str] = set()
-    for item in filtered:
-        if item.id in seen:
-            continue
-        seen.add(item.id)
-        unique.append(item)
+        for item in generated:
+            normalized_question = "".join(item.question.split())
+            if (
+                not item.id
+                or not item.question
+                or item.id in current_ids
+                or normalized_question in excluded_questions
+            ):
+                continue
+            collected.append(item)
+            current_ids.add(item.id)
+            excluded_questions.add(normalized_question)
+            if len(collected) >= count:
+                break
+        if len(collected) >= count:
+            break
+        current_questions.update(excluded_questions)
+    unique = collected[:count]
     if len(unique) != count:
         raise ValueError(
             f"expected {count} fresh exam cases, got {len(unique)}"
