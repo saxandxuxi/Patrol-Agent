@@ -2,11 +2,39 @@ import io
 import sys
 import unittest
 from contextlib import redirect_stdout
+from unittest.mock import patch
 
-from app.services import agent, orchestrator, react_agent
+from app.services import agent, llm, orchestrator, react_agent
 
 
 class RuntimeBoundaryTests(unittest.TestCase):
+    @patch("app.services.llm._post")
+    def test_reasoning_model_gets_enough_tokens_for_final_content(self, post):
+        post.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "{}",
+                        "reasoning_content": "reasoning",
+                    }
+                }
+            ]
+        }
+
+        llm.chat(
+            [{"role": "user", "content": "只输出 JSON"}],
+            model={
+                "api_key": "test",
+                "base_url": "https://example.test",
+                "model": "deepseek-reasoner",
+                "provider": "deepseek",
+            },
+            max_tokens=1024,
+        )
+
+        payload = post.call_args.args[1]
+        self.assertGreaterEqual(payload["max_tokens"], 4096)
+
     def test_success_trace_is_safe_on_gbk_console(self):
         buffer = io.BytesIO()
         stream = io.TextIOWrapper(buffer, encoding="gbk")

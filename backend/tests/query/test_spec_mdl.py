@@ -18,6 +18,49 @@ def binding(field, op, value):
 
 
 class SpecMdlTests(unittest.TestCase):
+    def test_disease_distribution_can_group_by_patrol_number(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q2",
+                kind="mysql",
+                subject="disease",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("patrol_number",),
+                filters=(binding("problem_type_name", "=", "坑槽"),),
+                output_projection=("patrol_number", "count"),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="按巡查批次统计坑槽数量",
+            )
+        )
+
+        self.assertIn("disease.patrol_number AS 任务编号", sql)
+        self.assertIn("GROUP BY disease.patrol_number", sql)
+
+    def test_patrol_list_can_output_end_date(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="patrol",
+                view="list",
+                metrics=(),
+                dimensions=(),
+                filters=(),
+                output_projection=("patrol_number", "end_date"),
+                order_by=({"field": "end_date", "direction": "desc"},),
+                limit=5,
+                required_assertions=(),
+                question="列出最近5次巡查",
+            )
+        )
+
+        self.assertIn("patrol.end_date AS 结束时间", sql)
+        self.assertIn("ORDER BY patrol.end_date DESC", sql)
+        self.assertIn("LIMIT 5", sql)
+
     @patch("app.query.spec_mdl.dictionary.patrol_status_labels")
     def test_patrol_status_dimension_uses_display_labels(self, status_labels):
         status_labels.return_value = {"0": "未开始", "15": "已完成"}

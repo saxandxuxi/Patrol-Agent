@@ -72,6 +72,39 @@ class FieldValidatorTests(unittest.TestCase):
         )
         self.assertIn("unresolved_provenance", {item.code for item in issues})
 
+    def test_unsupported_filter_operator_is_rejected(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("patrol_status",),
+            filters=(
+                ValueBinding(
+                    field="create_time",
+                    op="month",
+                    storage_value="本月",
+                    display_value="本月",
+                    source="model_inference",
+                    resolver="time_range",
+                    raw_text="本月",
+                ),
+            ),
+            output_projection=("patrol_status", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+
+        issues = validate_query_spec(
+            spec,
+            PhysicalSchemaView(columns=frozenset()),
+            OutputProjection(fields=()),
+        )
+
+        self.assertIn("unsupported_operator", {item.code for item in issues})
+
     def test_model_inferred_identity_value_is_not_dictionary_resolution(self):
         spec = QuerySpec(
             id="q1",

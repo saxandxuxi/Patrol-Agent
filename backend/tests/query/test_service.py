@@ -19,6 +19,7 @@ from app.query.service import (
     _default_post_calc_executor,
     _default_template_executor,
     _default_wren_executor,
+    _materialize_inputs,
     _observation_payload,
     _scope_key,
     _section_identity,
@@ -632,6 +633,61 @@ class ServiceTests(unittest.TestCase):
             ["p1", "p2"],
         )
         self.assertEqual(effective.filters[0].source, "previous_result")
+
+    def test_single_upstream_value_uses_equality_binding(self):
+        source_spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=("patrol_number",),
+            filters=(),
+            output_projection=("patrol_number",),
+            order_by=(),
+            limit=1,
+            required_assertions=(),
+        )
+        target_spec = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("patrol_number",),
+            filters=(),
+            output_projection=("patrol_number", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="patrol_number",
+                    to_field="patrol_number",
+                    op="in",
+                ),
+            ),
+        )
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT 1",
+            columns=("任务编号",),
+            preview_rows=({"任务编号": "P1"},),
+            result_rows=({"任务编号": "P1"},),
+            rows_fetched=1,
+        )
+
+        effective = _materialize_inputs(
+            target_spec,
+            {"q1": observation},
+            {"q1": source_spec},
+        )
+
+        self.assertEqual(effective.filters[0].op, "=")
+        self.assertEqual(effective.filters[0].storage_value, "P1")
 
     def test_severity_post_calc_compares_density_and_reports_inputs(self):
         payload = _default_post_calc_executor(

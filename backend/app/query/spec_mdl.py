@@ -290,6 +290,8 @@ def _disease_dimension(
         return "DATE_FORMAT(disease.collection_time, '%Y-%m')", "月份"
     if normalized in {"collection_time_day", "day"}:
         return "DATE(disease.collection_time)", "日期"
+    if normalized == "patrol_number":
+        return "disease.patrol_number", "任务编号"
     if normalized == "collection_time":
         if view == "trend":
             return "DATE_FORMAT(disease.collection_time, '%Y-%m')", "月份"
@@ -404,6 +406,7 @@ def _patrol_output(field: str) -> tuple[str, str] | None:
         "patrol_number": ("patrol.patrol_number", "任务编号"),
         "equipment_id": ("patrol.equipment_id", "巡检设备"),
         "create_time": ("patrol.create_time", "创建时间"),
+        "end_date": ("patrol.end_date", "结束时间"),
         "patrol_mileage": ("patrol.patrol_mileage", "巡检里程"),
         "patrol_status": (
             dictionary.case_expression(
@@ -507,7 +510,15 @@ def compile_spec_mdl(spec: QuerySpec) -> str | None:
             if spec.subject == "disease"
             else _patrol_output
         )
-        for field in spec.output_projection:
+        output_fields = [
+            *spec.output_projection,
+            *(
+                order.get("field")
+                for order in spec.order_by
+                if isinstance(order, dict) and order.get("field")
+            ),
+        ]
+        for field in dict.fromkeys(output_fields):
             resolved = output_mapping(field)
             if resolved:
                 selects.append(f"{resolved[0]} AS {resolved[1]}")
@@ -554,6 +565,7 @@ def compile_spec_mdl(spec: QuerySpec) -> str | None:
         if not expression and spec.subject == "patrol":
             expression = {
                 "create_time": "patrol.create_time",
+                "end_date": "patrol.end_date",
                 "patrol_mileage": "patrol.patrol_mileage",
             }.get(field)
         if expression:

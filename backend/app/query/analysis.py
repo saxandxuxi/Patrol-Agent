@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
-import re
+from datetime import datetime
 from typing import Any
 
-from ..services import prompts, route_resolver
+from ..services import prompts
 from ..services.llm import LLMError, chat_json, role_model
-from ..services.resource_loader import load_yaml
 from .audit import audit_query_plan
 from .contracts import (
     InputBinding,
@@ -121,6 +120,7 @@ def _order_items(value: Any) -> tuple[Any, ...]:
 
 def _canonical_dimensions(subject: str, dimensions: tuple[str, ...]) -> tuple[str, ...]:
     normalized_dimensions = []
+    seen: set[str] = set()
     for item in dimensions:
         compact = item.replace(" ", "").lower()
         if compact.startswith("date_format(") and any(
@@ -128,9 +128,7 @@ def _canonical_dimensions(subject: str, dimensions: tuple[str, ...]) -> tuple[st
             for field in ("create_time", "collection_time", "collection_month", "create_month")
         ):
             item = "month"
-        normalized_dimensions.append(item)
-    return tuple(
-        (
+        normalized = (
             "equipment_id"
             if subject == "patrol"
             and item in {"device_code", "device_id", "device", "equipment"}
@@ -138,8 +136,10 @@ def _canonical_dimensions(subject: str, dimensions: tuple[str, ...]) -> tuple[st
             if subject == "disease" and item == "routes_id"
             else item
         )
-        for item in normalized_dimensions
-    )
+        if normalized not in seen:
+            seen.add(normalized)
+            normalized_dimensions.append(normalized)
+    return tuple(normalized_dimensions)
 
 
 def _canonicalize_input_bindings(specs: list[QuerySpec]) -> None:
@@ -191,661 +191,6 @@ def _canonicalize_input_bindings(specs: list[QuerySpec]) -> None:
         )
 
 
-def _apply_identifier_contract(
-    question: str,
-    specs: list[QuerySpec],
-) -> None:
-    raw_identifiers = {
-        token
-        for token in re.findall(
-            r"(?<![A-Z0-9])[A-Z]{2,}[A-Z0-9]{6,}(?![A-Z0-9])",
-            question,
-        )
-    }
-    if not raw_identifiers:
-        return
-    configured = (
-        (load_yaml("query_identifiers.yaml", {}) or {}).get("identifiers")
-        or {}
-    )
-    if not isinstance(configured, dict):
-        return
-    resolved: dict[str, tuple[str, dict[str, Any]]] = {}
-    for identifier in raw_identifiers:
-        matches = [
-            (prefix, value)
-            for prefix, value in configured.items()
-            if isinstance(value, dict) and identifier.startswith(str(prefix))
-        ]
-        if not matches:
-            continue
-        prefix, metadata = max(matches, key=lambda item: len(str(item[0])))
-        resolved[identifier] = (str(prefix), metadata)
-    if not resolved:
-        return
-    for index, spec in enumerate(specs):
-        filters = [
-            item
-            for item in spec.filters
-            if str(item.storage_value) not in resolved
-            and str(item.raw_text or "").strip() not in resolved
-        ]
-        for identifier, (prefix, metadata) in resolved.items():
-            filters.append(
-                ValueBinding(
-                    field=str(metadata.get("filter_field") or "").strip(),
-                    op="=",
-                    storage_value=identifier,
-                    display_value=identifier,
-                    source="user_explicit",
-                    resolver=f"identifier_dictionary:{prefix}",
-                    raw_text=identifier,
-                )
-            )
-        specs[index] = QuerySpec(**{**spec.__dict__, "filters": tuple(filters)})
-
-
-def _append_post_calc(
-    specs: list[QuerySpec],
-    dependencies: dict[str, tuple[str, ...]],
-    node_types: dict[str, str],
-    dependency_ids: str | tuple[str, ...],
-    question: str,
-) -> None:
-    dependency_ids = (
-        (dependency_ids,)
-        if isinstance(dependency_ids, str)
-        else tuple(dependency_ids)
-    )
-    if any(
-        node_types.get(spec.id) == "post_calc"
-        and set(dependency_ids).issubset(dependencies.get(spec.id, ()))
-        for spec in specs
-    ):
-        return
-    base = next(spec for spec in specs if spec.id == dependency_ids[0])
-    index = 1
-    existing_ids = {spec.id for spec in specs}
-    while f"q{index}_calc" in existing_ids:
-        index += 1
-    spec_id = f"q{index}_calc"
-    specs.append(
-        QuerySpec(
-            id=spec_id,
-            kind=base.kind,
-            subject=base.subject,
-            view="data",
-            metrics=(),
-            dimensions=(),
-            filters=(),
-            output_projection=(),
-            order_by=(),
-            limit=None,
-            required_assertions=("preserve_user_scope",),
-            question=question,
-        )
-    )
-    dependencies[spec_id] = dependency_ids
-    node_types[spec_id] = "post_calc"
-
-
-def _apply_question_contract(
-    question: str,
-    specs: list[QuerySpec],
-    dependencies: dict[str, tuple[str, ...]],
-    node_types: dict[str, str],
-) -> None:
-    if (
-        "按路线" in question
-        and "病害总数" in question
-        and "总面积" in question
-        and "平均" in question
-        and "长度" in question
-    ):
-        base = next(
-            (spec for spec in specs if spec.subject == "disease"),
-            specs[0],
-        )
-        specs[:] = [
-            QuerySpec(
-                **{
-                    **base.__dict__,
-                    "view": "distribution",
-                    "metrics": (
-                        "count",
-                        "total_area",
-                        "average_area",
-                        "route_length_km",
-                    ),
-                    "dimensions": ("route_name",),
-                    "output_projection": (
-                        "route_name",
-                        "count",
-                        "total_area",
-                        "average_area",
-                        "route_length_km",
-                    ),
-                    "limit": None,
-                    "question": question,
-                }
-            )
-        ]
-        dependencies.clear()
-        node_types.clear()
-        node_types[specs[0].id] = "query_data"
-    if "完成情况" in question and any(
-        spec.subject == "patrol" for spec in specs
-    ):
-        base = next(spec for spec in specs if spec.subject == "patrol")
-        filters = tuple(
-            item for item in base.filters if item.field != "patrol_status"
-        )
-        specs[:] = [
-            QuerySpec(
-                **{
-                    **base.__dict__,
-                    "subject": "patrol",
-                    "view": "distribution",
-                    "metrics": ("count",),
-                    "dimensions": ("patrol_status",),
-                    "filters": filters,
-                    "output_projection": ("patrol_status", "count"),
-                    "order_by": (),
-                    "limit": None,
-                    "question": question,
-                }
-            )
-        ]
-        dependencies.clear()
-        node_types.clear()
-        node_types[specs[0].id] = "query_data"
-    if "巡检设备" in question and "分别" in question:
-        base = specs[0]
-        dimensions = list(base.dimensions)
-        if "equipment_id" not in dimensions:
-            dimensions.insert(0, "equipment_id")
-        output_projection = list(base.output_projection)
-        for field in (*dimensions, "count"):
-            if field not in output_projection:
-                output_projection.append(field)
-        specs[:] = [
-            QuerySpec(
-                **{
-                    **base.__dict__,
-                    "subject": "patrol",
-                    "view": "distribution",
-                    "metrics": ("count",),
-                    "dimensions": tuple(dimensions),
-                    "output_projection": tuple(output_projection),
-                    "limit": None,
-                }
-            )
-        ]
-        node_types[specs[0].id] = "query_data"
-    if "巡检" in question and re.search(
-        r"(?:哪些|哪几条)(?:线路|路线)",
-        question,
-    ):
-        base = specs[0]
-        filters = []
-        for item in base.filters:
-            if item.field in {"patrol_date", "collection_time"}:
-                filters.append(
-                    ValueBinding(**{**item.__dict__, "field": "create_time"})
-                )
-            else:
-                filters.append(item)
-        specs[:] = [
-            QuerySpec(
-                **{
-                    **base.__dict__,
-                    "subject": "patrol",
-                    "view": "list",
-                    "metrics": (),
-                    "dimensions": ("route_name",),
-                    "filters": tuple(filters),
-                    "output_projection": ("route_name",),
-                    "order_by": (),
-                    "limit": None,
-                }
-            )
-        ]
-        dependencies.clear()
-        node_types.clear()
-        node_types[specs[0].id] = "query_data"
-    if re.search(r"AI\s*识别", question) and re.search(r"靠谱|认不出", question):
-        low = QuerySpec(
-            id="q1_low_confidence",
-            kind=specs[0].kind,
-            subject=specs[0].subject,
-            view="count",
-            metrics=("count",),
-            dimensions=(),
-            filters=(
-                ValueBinding(
-                    field="confidence",
-                    op="<",
-                    storage_value="0.7",
-                    display_value="0.7",
-                    source="business_rule",
-                    resolver="numeric:confidence",
-                    raw_text="低置信度阈值",
-                ),
-            ),
-            output_projection=("count",),
-            order_by=(),
-            limit=None,
-            required_assertions=("preserve_user_scope",),
-            question="统计置信度低于0.7的AI识别病害数量",
-        )
-        total = QuerySpec(
-            id="q2_total_count",
-            kind=specs[0].kind,
-            subject=specs[0].subject,
-            view="count",
-            metrics=("count",),
-            dimensions=(),
-            filters=(),
-            output_projection=("count",),
-            order_by=(),
-            limit=None,
-            required_assertions=("preserve_user_scope",),
-            question="统计AI识别病害总记录数",
-        )
-        specs[:] = [low, total]
-        dependencies.clear()
-        node_types.clear()
-        node_types[low.id] = "query_data"
-        node_types[total.id] = "query_data"
-        _append_post_calc(
-            specs,
-            dependencies,
-            node_types,
-            (low.id, total.id),
-            question,
-        )
-        return
-    if "密度" in question:
-        density_targets: list[str] = []
-        seen_density_scopes: set[tuple[Any, ...]] = set()
-        normalized_specs: list[QuerySpec] = []
-        for index, spec in enumerate(specs):
-            if (
-                spec.view == "distribution"
-                and any("route" in item for item in spec.dimensions)
-                and set(spec.metrics).issubset({"route_length_km"})
-            ):
-                dependencies.pop(spec.id, None)
-                node_types.pop(spec.id, None)
-                continue
-            if spec.view != "distribution" or not any(
-                "route" in item for item in spec.dimensions
-            ) or "count" not in spec.metrics:
-                normalized_specs.append(spec)
-                continue
-            metrics = list(spec.metrics)
-            metrics = [
-                metric
-                for metric in metrics
-                if metric
-                in {
-                    "count",
-                    "total_area",
-                    "sum_area",
-                    "average_area",
-                    "avg_area",
-                    "sum_disease_length",
-                    "sum_effective_disease_length",
-                }
-            ]
-            if not metrics:
-                metrics = ["count"]
-            if "route_length_km" not in metrics:
-                metrics.append("route_length_km")
-            output = list(dict.fromkeys([*spec.dimensions, *metrics]))
-            normalized = QuerySpec(
-                **{
-                    **spec.__dict__,
-                    "metrics": tuple(metrics),
-                    "output_projection": tuple(output),
-                    "limit": None,
-                }
-            )
-            scope_key = (
-                normalized.subject,
-                normalized.dimensions,
-                tuple(
-                    (
-                        item.field,
-                        item.op,
-                        json.dumps(
-                            item.storage_value,
-                            ensure_ascii=False,
-                            sort_keys=True,
-                            default=str,
-                        ),
-                    )
-                    for item in normalized.filters
-                ),
-            )
-            if scope_key in seen_density_scopes:
-                dependencies.pop(spec.id, None)
-                node_types.pop(spec.id, None)
-                continue
-            seen_density_scopes.add(scope_key)
-            normalized_specs.append(normalized)
-            density_targets.append(spec.id)
-        specs[:] = normalized_specs
-        if density_targets:
-            existing_ids = {spec.id for spec in specs}
-            for spec in specs:
-                if node_types.get(spec.id) == "post_calc":
-                    dependencies[spec.id] = tuple(
-                        node_id
-                        for node_id in dependencies.get(spec.id, ())
-                        if node_id in existing_ids
-                    )
-            _append_post_calc(
-                specs,
-                dependencies,
-                node_types,
-                tuple(density_targets),
-                question,
-            )
-    if re.search(r"哪个.*(?:道路|路线).*(?:更严重|最严重)", question):
-        target_index = next(
-            (
-                index
-                for index, spec in enumerate(specs)
-                if spec.view in {"distribution", "top"}
-                and any("route" in item for item in spec.dimensions)
-            ),
-            0,
-        )
-        target = specs[target_index]
-        metrics = list(target.metrics)
-        for metric in ("count", "total_area", "route_length_km"):
-            if metric not in metrics:
-                metrics.append(metric)
-        output = list(target.output_projection or target.dimensions)
-        for field in ("count", "total_area", "route_length_km"):
-            if field not in output:
-                output.append(field)
-        specs[target_index] = QuerySpec(
-            **{
-                **target.__dict__,
-                "view": "distribution",
-                "metrics": tuple(metrics),
-                "dimensions": target.dimensions or ("route_name",),
-                "output_projection": tuple(output),
-                "limit": None,
-            }
-        )
-        _append_post_calc(
-            specs,
-            dependencies,
-            node_types,
-            target.id,
-            question,
-        )
-    if re.search(r"增加.*还是.*减少|上升.*还是.*下降|趋势", question):
-        target = next(
-            (spec for spec in specs if spec.view == "trend"),
-            specs[0],
-        )
-        specs[specs.index(target)] = QuerySpec(
-            **{
-                **target.__dict__,
-                "view": "trend",
-                "dimensions": target.dimensions or ("month",),
-                "output_projection": (
-                    target.output_projection
-                    or tuple([*target.dimensions, *target.metrics])
-                    or ("month", "count")
-                ),
-            }
-        )
-        _append_post_calc(
-            specs,
-            dependencies,
-            node_types,
-            target.id,
-            question,
-        )
-    for index, spec in enumerate(specs):
-        if node_types.get(spec.id) != "post_calc":
-            continue
-        specs[index] = QuerySpec(
-            id=spec.id,
-            kind=spec.kind,
-            subject=spec.subject,
-            view="data",
-            metrics=(),
-            dimensions=(),
-            filters=(),
-            output_projection=(),
-            order_by=(),
-            limit=None,
-            required_assertions=spec.required_assertions,
-            question=spec.question,
-            input_bindings=(),
-        )
-
-
-def _apply_response_contract(
-    contract: IntentContract,
-    question: str,
-    specs: list[QuerySpec],
-    dependencies: dict[str, tuple[str, ...]],
-    node_types: dict[str, str],
-) -> None:
-    if contract.intent_family != "analysis":
-        return
-    data_specs = [
-        spec for spec in specs if node_types.get(spec.id) == "query_data"
-    ]
-    for index, spec in enumerate(specs):
-        if (
-            spec.view != "distribution"
-            or not any("route" in field for field in spec.dimensions)
-        ):
-            continue
-        metrics = list(spec.metrics)
-        equivalents = {
-            "count": {"count", "count_task", "task_count", "record_count"},
-            "total_area": {"total_area", "sum_area"},
-            "average_area": {"average_area", "avg_area"},
-            "route_length_km": {"route_length_km"},
-        }
-        for metric, aliases in equivalents.items():
-            if not any(item in aliases for item in metrics):
-                metrics.append(metric)
-        output = list(
-            dict.fromkeys(
-                [
-                    *spec.dimensions,
-                    *metrics,
-                    *spec.output_projection,
-                ]
-            )
-        )
-        specs[index] = QuerySpec(
-            **{
-                **spec.__dict__,
-                "metrics": tuple(metrics),
-                "output_projection": tuple(output),
-                "limit": None,
-            }
-        )
-    if data_specs and not any(
-        node_types.get(spec.id) == "post_calc" for spec in specs
-    ):
-        _append_post_calc(
-            specs,
-            dependencies,
-            node_types,
-            tuple(spec.id for spec in data_specs),
-            question,
-        )
-
-
-def _completion_status_plan(
-    question: str,
-    kind: str,
-    schema: PhysicalSchemaView,
-    reach: FieldReachSet,
-) -> QueryPlan | None:
-    original = str(question or "").strip()
-    if (
-        "完成情况" not in original
-        or not any(word in original for word in ("巡检", "巡查"))
-        or not re.search(r"(?:本|这)(?:个)?月", original)
-    ):
-        return None
-    filters = []
-    route_text = route_resolver._route_text_in_message(original)
-    if route_text:
-        filters.append(
-            resolve_value("route_name", "=", route_text, original, kind)
-        )
-    filters.extend(
-        [
-            resolve_value(
-                "create_time",
-                ">=",
-                "本月第一天",
-                original,
-                kind,
-            ),
-            resolve_value(
-                "create_time",
-                "<",
-                "下月第一天",
-                original,
-                kind,
-            ),
-        ]
-    )
-    specs = [
-        QuerySpec(
-            id="q1",
-            kind=kind,
-            subject="patrol",
-            view="distribution",
-            metrics=("count",),
-            dimensions=("patrol_status",),
-            filters=tuple(filters),
-            output_projection=("patrol_status", "count"),
-            order_by=(),
-            limit=None,
-            required_assertions=("preserve_user_scope",),
-            question=original,
-        )
-    ]
-    dependencies: dict[str, tuple[str, ...]] = {}
-    node_types = {"q1": "query_data"}
-    _append_post_calc(
-        specs,
-        dependencies,
-        node_types,
-        "q1",
-        original,
-    )
-    contract = IntentContract(
-        original_question=original,
-        kind=kind,
-        intent_family="analysis",
-        final_goal="分析巡检任务完成状态",
-        unknown_terms=(),
-    )
-    return build_query_plan(
-        contract,
-        tuple(specs),
-        schema,
-        reach,
-        dependencies,
-        node_types,
-        response_mode="analysis",
-    )
-
-
-def _route_analysis_plan(
-    question: str,
-    kind: str,
-    schema: PhysicalSchemaView,
-    reach: FieldReachSet,
-) -> QueryPlan | None:
-    original = str(question or "").strip()
-    if not any(word in original for word in ("路", "路线", "道路")):
-        return None
-    if not any(
-        word in original
-        for word in (
-            "健康状况",
-            "情况最好",
-            "病害最严重",
-            "更严重",
-            "养护压力",
-            "优先养护",
-        )
-    ):
-        return None
-    specs = [
-        QuerySpec(
-            id="q1",
-            kind=kind,
-            subject="disease",
-            view="distribution",
-            metrics=(
-                "count",
-                "total_area",
-                "average_area",
-                "sum_effective_disease_length",
-                "route_length_km",
-            ),
-            dimensions=("route_name",),
-            filters=(),
-            output_projection=(
-                "route_name",
-                "count",
-                "total_area",
-                "average_area",
-                "sum_effective_disease_length",
-                "route_length_km",
-            ),
-            order_by=(),
-            limit=None,
-            required_assertions=("preserve_user_scope",),
-            question=original,
-        )
-    ]
-    dependencies: dict[str, tuple[str, ...]] = {}
-    node_types = {"q1": "query_data"}
-    _append_post_calc(
-        specs,
-        dependencies,
-        node_types,
-        "q1",
-        original,
-    )
-    contract = IntentContract(
-        original_question=original,
-        kind=kind,
-        intent_family="analysis",
-        final_goal="比较各路线病害相关指标",
-        unknown_terms=(),
-    )
-    return build_query_plan(
-        contract,
-        tuple(specs),
-        schema,
-        reach,
-        dependencies,
-        node_types,
-        response_mode="analysis",
-    )
-
-
 def _analyze_once(
     question: str,
     kind: str,
@@ -861,6 +206,7 @@ def _analyze_once(
             "query_spec",
             question=original,
             kind=kind,
+            current_date=datetime.now().strftime("%Y-%m-%d"),
             schema=_text_context(sorted(schema.columns)),
             planning_feedback=planning_feedback or "无",
             reach=_text_context(
@@ -921,17 +267,8 @@ def _analyze_once(
             _string_tuple(raw.get("dimensions")),
         )
         view = _canonical_view(raw.get("view"), metrics, dimensions)
-        if (
-            view in {"list", "detail"}
-            and not re.search(r"(?:前|最多|显示|展示|返回)\s*\d+", original)
-        ):
+        if view in {"list", "detail"} and limit is None:
             limit = 500
-        if (
-            view in {"distribution", "trend"}
-            and limit is not None
-            and not re.search(r"(?:前|最多|top|取)\s*\d+", original, re.I)
-        ):
-            limit = None
         output_projection = _canonical_dimensions(
             subject,
             _string_tuple(raw.get("output_projection")),
@@ -969,31 +306,11 @@ def _analyze_once(
         action = str(raw.get("action") or "query_data").strip()
         if action == "analysis":
             action = "post_calc"
-        if dependencies[spec_id] and action == "query_data" and re.search(
-            r"基于\s*q\d+|基于.*(?:结果|统计)|前序查询结果",
-            str(raw.get("question") or ""),
-            re.I,
-        ):
-            action = "post_calc"
         node_types[spec_id] = (
             action
             if action in {"query_data", "post_calc", "analysis"}
             else "query_data"
         )
-    _apply_question_contract(
-        original,
-        specs,
-        dependencies,
-        node_types,
-    )
-    _apply_response_contract(
-        contract,
-        original,
-        specs,
-        dependencies,
-        node_types,
-    )
-    _apply_identifier_contract(original, specs)
     _canonicalize_input_bindings(specs)
     return build_query_plan(
         contract,
@@ -1110,21 +427,23 @@ def _audit_issue_changes_plan(plan: QueryPlan, issue: dict[str, Any]) -> bool:
     return _apply_audit_patches(plan, {"issues": [issue]}) != plan
 
 
-def _query_plan_compiles(plan: QueryPlan) -> bool:
-    checked = False
+def _query_plan_compile_error(plan: QueryPlan) -> str:
     for node in plan.nodes:
         if node.node_type != "query_data":
             continue
         if node.spec.subject not in {"disease", "patrol"}:
             continue
-        checked = True
         try:
             sql = compile_spec_mdl(node.spec)
-        except UnsupportedQuerySpec:
-            return False
+        except UnsupportedQuerySpec as exc:
+            return str(exc) or f"节点 {node.id} 无法编译"
         if not sql:
-            return False
-    return checked
+            return f"节点 {node.id} 编译结果为空"
+    return ""
+
+
+def _query_plan_compiles(plan: QueryPlan) -> bool:
+    return not _query_plan_compile_error(plan)
 
 
 def _ambiguity_message(issues: list[Any]) -> str:
@@ -1151,12 +470,6 @@ def analyze_single_turn(
     *,
     audit: bool = False,
 ) -> QueryPlan:
-    deterministic = (
-        _completion_status_plan(question, kind, schema, reach)
-        or _route_analysis_plan(question, kind, schema, reach)
-    )
-    if deterministic is not None:
-        return deterministic
     feedback = ""
     for attempt in range(2):
         try:
@@ -1183,6 +496,15 @@ def analyze_single_turn(
             raise
         if not audit:
             return plan
+        compile_error = _query_plan_compile_error(plan)
+        if compile_error:
+            if attempt == 0:
+                feedback = (
+                    "上一轮 QuerySpec 无法通过执行前编译契约。"
+                    f"请使用字段目录中该主体真实支持的字段重新生成：{compile_error}"
+                )
+                continue
+            raise QuerySpecError(compile_error)
         verdict = audit_query_plan(str(question or "").strip(), plan)
         if verdict.get("complete") is True:
             return plan

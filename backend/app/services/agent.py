@@ -2813,6 +2813,169 @@ def _ratio_and_average_conclusion(
     return "；".join(parts)
 
 
+def _sequence_change_conclusion(
+    task: dict[str, Any],
+    deps: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if str(task.get("view") or "") != "trend":
+        return None
+    sequence = next(
+        (
+            dep
+            for dep in deps
+            if isinstance(dep.get("spec"), dict)
+            and dep["spec"].get("order_by")
+            and isinstance(dep.get("field_labels"), dict)
+            and dep.get("rows")
+        ),
+        None,
+    )
+    values = next(
+        (
+            dep
+            for dep in deps
+            if dep is not sequence
+            and isinstance(dep.get("spec"), dict)
+            and dep["spec"].get("metrics")
+            and dep["spec"].get("dimensions")
+            and isinstance(dep.get("field_labels"), dict)
+        ),
+        None,
+    )
+    if sequence is None or values is None:
+        return None
+    sequence_fields = dict(sequence.get("field_labels") or {})
+    value_fields = dict(values.get("field_labels") or {})
+    key_field = next(
+        (
+            field
+            for field in sequence_fields
+            if field in value_fields
+        ),
+        "",
+    )
+    metric_field = str((values["spec"].get("metrics") or [""])[0])
+    if not key_field or not metric_field:
+        return None
+    key_label = str(sequence_fields[key_field])
+    value_key_label = str(value_fields[key_field])
+    metric_label = str(value_fields.get(metric_field) or "")
+    if not (key_label and value_key_label and metric_label):
+        return None
+    counts: dict[str, float] = {}
+    for row in values.get("rows") or []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            counts[str(row.get(value_key_label) or "")] = float(
+                row.get(metric_label)
+            )
+        except (TypeError, ValueError):
+            continue
+    sequence_rows = [
+        row
+        for row in sequence.get("rows") or []
+        if isinstance(row, dict)
+    ]
+    orders = [
+        item
+        for item in sequence["spec"].get("order_by") or []
+        if isinstance(item, dict) and item.get("field")
+    ]
+    sortable_orders = [
+        item
+        for item in orders
+        if str(item.get("field")) in sequence_fields
+    ]
+    for item in reversed(sortable_orders):
+        label = str(sequence_fields[str(item["field"])])
+        sequence_rows.sort(
+            key=lambda row, column=label: str(row.get(column) or ""),
+            reverse=str(item.get("direction") or "").lower() != "desc",
+        )
+    time_labels = [
+        str(sequence_fields[str(item["field"])])
+        for item in orders
+        if str(item.get("field")) in sequence_fields
+    ]
+    if not time_labels:
+        time_labels = [
+            str(label)
+            for field, label in sequence_fields.items()
+            if field != key_field
+        ][:1]
+    output_rows: list[dict[str, Any]] = []
+    previous: float | None = None
+    for row in sequence_rows:
+        key = str(row.get(key_label) or "")
+        if not key:
+            continue
+        current = counts.get(key, 0.0)
+        delta = None if previous is None else current - previous
+        rate = (
+            None
+            if previous in {None, 0}
+            else (current - previous) / previous
+        )
+        time_text = " ".join(
+            str(row.get(label) or "").strip()
+            for label in time_labels
+            if str(row.get(label) or "").strip()
+        )
+        output_rows.append(
+            {
+                key_label: key,
+                "时间": time_text,
+                "数量": int(current) if current.is_integer() else current,
+                "变化量": (
+                    None
+                    if delta is None
+                    else int(delta) if delta.is_integer() else delta
+                ),
+                "变化率": None if rate is None else round(rate, 4),
+            }
+        )
+        previous = current
+    if not output_rows:
+        return None
+    series = "、".join(
+        (
+            f"{row.get('时间') or row.get(key_label)}="
+            f"{row['数量']}"
+        )
+        for row in output_rows
+    )
+    changes = [
+        row["变化量"]
+        for row in output_rows
+        if row["变化量"] is not None
+    ]
+    if changes:
+        change_text = "，".join(
+            f"{value:+g}" for value in changes
+        )
+        reply = (
+            f"最近 {len(output_rows)} 次巡查数量依次为：{series}。"
+            f"相邻批次变化量为：{change_text}。"
+        )
+    else:
+        reply = f"最近 {len(output_rows)} 次巡查数量为：{series}。"
+    return {
+        "reply": reply,
+        "source": "calc",
+        "engine": "post_calc",
+        "accepted": True,
+        "columns": [
+            key_label,
+            "时间",
+            "数量",
+            "变化量",
+            "变化率",
+        ],
+        "rows": output_rows,
+    }
+
+
 def _compare_datasets(
     question: str,
     deps: list[dict[str, Any]],
@@ -3549,6 +3712,9 @@ def _post_calc_payload(
     ai_reliability = _ai_reliability_conclusion(question, deps)
     if ai_reliability:
         return ai_reliability
+    sequence_change = _sequence_change_conclusion(task, deps)
+    if sequence_change:
+        return sequence_change
     comparison = _compare_datasets(question, deps)
     if comparison:
         return comparison

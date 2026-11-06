@@ -9,6 +9,80 @@ from app.services import agent
 
 
 class AnswerExperienceTests(unittest.TestCase):
+    @patch("app.services.agent.chat", side_effect=AssertionError("LLM should not be called"))
+    def test_structured_trend_uses_sequence_and_metric_specs(self, _chat):
+        payload = agent._post_calc_payload(
+            {
+                "id": "q3",
+                "question": "计算最近巡查的病害数量变化",
+                "depends_on": [1, 2],
+                "view": "trend",
+            },
+            {
+                1: {
+                    "question": "最近3次巡查",
+                    "spec": {
+                        "view": "list",
+                        "metrics": [],
+                        "dimensions": [],
+                        "output_projection": [
+                            "patrol_number",
+                            "end_date",
+                        ],
+                        "order_by": [
+                            {"field": "end_date", "direction": "desc"}
+                        ],
+                    },
+                    "field_labels": {
+                        "patrol_number": "任务编号",
+                        "end_date": "结束时间",
+                    },
+                    "columns": ["任务编号", "结束时间"],
+                    "rows": [
+                        {
+                            "任务编号": "P3",
+                            "结束时间": "2026-11-03",
+                        },
+                        {
+                            "任务编号": "P2",
+                            "结束时间": "2026-11-02",
+                        },
+                        {
+                            "任务编号": "P1",
+                            "结束时间": "2026-11-01",
+                        },
+                    ],
+                },
+                2: {
+                    "question": "按巡查批次统计坑槽数量",
+                    "spec": {
+                        "view": "distribution",
+                        "metrics": ["count"],
+                        "dimensions": ["patrol_number"],
+                        "output_projection": ["patrol_number", "count"],
+                        "order_by": [],
+                    },
+                    "field_labels": {
+                        "patrol_number": "任务编号",
+                        "count": "数量",
+                    },
+                    "columns": ["任务编号", "数量"],
+                    "rows": [
+                        {"任务编号": "P1", "数量": "8"},
+                        {"任务编号": "P2", "数量": "3"},
+                        {"任务编号": "P3", "数量": "5"},
+                    ],
+                },
+            },
+        )
+
+        self.assertTrue(payload["accepted"])
+        self.assertIn("=8", payload["reply"])
+        self.assertIn("=3", payload["reply"])
+        self.assertIn("=5", payload["reply"])
+        self.assertIn("-5，+2", payload["reply"])
+        self.assertEqual([row["数量"] for row in payload["rows"]], [8, 3, 5])
+
     def test_scalar_answer_keeps_multiple_metrics(self):
         from app.query.contracts import ExecutionObservation
         from app.query.service import _answer_text
@@ -55,7 +129,13 @@ class AnswerExperienceTests(unittest.TestCase):
                     "question": "按路线统计病害数量、面积和长度",
                     "subject": "disease",
                     "view": "distribution",
-                    "metrics": ["count", "sum_area", "sum_length"],
+                    "metrics": [
+                        "count",
+                        "total_area",
+                        "average_area",
+                        "route_length_km",
+                        "sum_effective_disease_length",
+                    ],
                     "dimensions": ["route_name"],
                     "filters": [],
                     "output_projection": [
@@ -69,7 +149,23 @@ class AnswerExperienceTests(unittest.TestCase):
                     "required_assertions": ["preserve_user_scope"],
                     "depends_on": [],
                     "inputs": [],
-                }
+                },
+                {
+                    "id": "q2",
+                    "action": "post_calc",
+                    "question": "比较路线指标并判断健康状况",
+                    "subject": "disease",
+                    "view": "data",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": ["q1"],
+                    "inputs": [],
+                },
             ],
         }
 
@@ -84,12 +180,8 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertEqual(len(plan.nodes), 2)
         self.assertEqual(plan.nodes[-1].node_type, "post_calc")
         self.assertEqual(plan.nodes[-1].depends_on, ("q1",))
-        self.assertTrue(
-            {"total_area", "sum_area"}.intersection(plan.nodes[0].spec.metrics)
-        )
-        self.assertTrue(
-            {"average_area", "avg_area"}.intersection(plan.nodes[0].spec.metrics)
-        )
+        self.assertIn("total_area", plan.nodes[0].spec.metrics)
+        self.assertIn("average_area", plan.nodes[0].spec.metrics)
         self.assertIn("route_length_km", plan.nodes[0].spec.metrics)
         self.assertTrue(
             {

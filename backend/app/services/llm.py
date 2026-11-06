@@ -165,12 +165,18 @@ def chat_detail(
         temperature = 1
     if ("glm-4.6" in model_name or "kimi-k2" in model_name) and (max_tokens or 0) and max_tokens < 256:
         max_tokens = 256
+    max_tokens = max_tokens or settings.llm_max_tokens
+    # DeepSeek reasoner 的长 reasoning 和最终正文共用响应预算。复杂 QuerySpec
+    # 在 1024 tokens 下会只返回 reasoning_content、content 为空，表现为
+    # "模型没有返回合法 JSON"。给最终正文留出可完成 JSON 的固定下限。
+    if "reasoner" in model_name.lower():
+        max_tokens = max(max_tokens, 4096)
     payload = {
         "model": model_name,
         "messages": messages,
         "temperature": temperature,
         "stream": False,
-        "max_tokens": max_tokens or settings.llm_max_tokens,
+        "max_tokens": max_tokens,
     }
     # qwen3.x 这类模型默认会思考，SQL 生成/摘要等调用必须显式关掉，否则慢好几倍
     payload["enable_thinking"] = bool(enable_thinking)
@@ -208,6 +214,7 @@ def chat_detail(
             messages=len(messages),
             thinking=enable_thinking,
             search=enable_search,
+            content_chars=len(content),
             reasoning_chars=len(reasoning),
         )
         return content, reasoning

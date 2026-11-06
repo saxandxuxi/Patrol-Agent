@@ -17,6 +17,18 @@ _SUPPORTED_VIEWS = {
     "photo",
     "data",
 }
+_SUPPORTED_OPS = {
+    "=",
+    "!=",
+    ">",
+    ">=",
+    "<",
+    "<=",
+    "in",
+    "between",
+    "is_null",
+    "not_null",
+}
 
 
 def validate_query_spec(
@@ -54,6 +66,15 @@ def validate_query_spec(
                 )
             )
     for item in spec.filters:
+        if item.op not in _SUPPORTED_OPS:
+            issues.append(
+                VerificationIssue(
+                    code="unsupported_operator",
+                    message=f"过滤字段 {item.field} 使用了不支持的运算符：{item.op}",
+                    node_id=spec.id,
+                    stage="contract",
+                )
+            )
         resolver = item.resolver.strip()
         inferred_identity = (
             item.source == "model_inference"

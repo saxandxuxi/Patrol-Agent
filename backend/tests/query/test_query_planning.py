@@ -8,35 +8,63 @@ from app.services.plan_contract import build_step_contract
 
 
 class QueryPlanningTests(unittest.TestCase):
-    @patch("app.query.analysis.chat_json", side_effect=AssertionError("LLM should not be called"))
-    def test_route_health_analysis_uses_deterministic_plan(self, _chat_json):
+    @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
+    @patch("app.query.analysis.chat_json")
+    def test_uncompilable_plan_is_fed_back_before_audit(
+        self,
+        chat_json,
+        _audit,
+    ):
+        invalid = {
+            "final_goal": "列出巡查设备",
+            "intent_family": "detail",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "patrol",
+                    "view": "list",
+                    "metrics": [],
+                    "dimensions": ["vehicle_id"],
+                    "filters": [],
+                    "output_projection": ["vehicle_id"],
+                    "order_by": [],
+                    "limit": 500,
+                    "required_assertions": [],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+            ],
+        }
+        valid = {
+            **invalid,
+            "views": [
+                {
+                    **invalid["views"][0],
+                    "dimensions": ["equipment_id"],
+                    "output_projection": ["equipment_id"],
+                }
+            ],
+        }
+        chat_json.side_effect = [invalid, valid]
+
         plan = analyze_single_turn(
-            "哪条路的健康状况最好？从哪几个维度判断？",
+            "列出所有巡查设备",
             "mysql",
             PhysicalSchemaView(columns=frozenset()),
             FieldReachSet(),
+            audit=True,
         )
 
-        self.assertEqual(plan.response_mode, "analysis")
-        self.assertEqual(plan.nodes[0].spec.dimensions, ("route_name",))
-        self.assertTrue(
-            {
-                "count",
-                "total_area",
-                "average_area",
-                "route_length_km",
-            }.issubset(set(plan.nodes[0].spec.metrics))
-        )
-        self.assertEqual(plan.nodes[1].node_type, "post_calc")
+        self.assertEqual(chat_json.call_count, 2)
+        self.assertEqual(plan.nodes[0].spec.dimensions, ("equipment_id",))
 
-    @patch("app.query.analysis.route_resolver._route_text_in_message", return_value="华容－常宁高速公路")
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
-    def test_completion_question_groups_status_without_inventing_filter(
+    def test_completion_question_accepts_model_status_distribution(
         self,
         chat_json,
         resolve_value,
-        _route_text,
     ):
         chat_json.return_value = {
             "final_goal": "华容-常宁本月巡检完成情况",
@@ -47,19 +75,14 @@ class QueryPlanningTests(unittest.TestCase):
                     "action": "query_data",
                     "subject": "patrol",
                     "view": "distribution",
-                    "metrics": ["count", "sum_completed"],
+                    "metrics": ["count"],
                     "dimensions": ["patrol_status"],
                     "filters": [
                         {
                             "field": "route_name",
                             "op": "=",
                             "raw_value": "华容－常宁高速公路",
-                        },
-                        {
-                            "field": "patrol_status",
-                            "op": "=",
-                            "raw_value": "已完成",
-                        },
+                        }
                     ],
                     "output_projection": ["patrol_status", "count"],
                     "order_by": [],
@@ -67,31 +90,34 @@ class QueryPlanningTests(unittest.TestCase):
                     "required_assertions": ["preserve_user_scope"],
                     "depends_on": [],
                     "inputs": [],
-                }
+                },
+                {
+                    "id": "q2",
+                    "action": "post_calc",
+                    "subject": "patrol",
+                    "view": "data",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": ["q1"],
+                    "inputs": [],
+                    "question": "分析各巡检状态数量和完成情况",
+                },
             ],
         }
-        def resolve(field, op, raw_value, question, kind):
-            if field == "route_name":
-                return ValueBinding(
-                    field="route_name",
-                    op="=",
-                    storage_value="route-id",
-                    display_value="华容－常宁高速公路",
-                    source="user_explicit",
-                    resolver="route_dictionary",
-                    raw_text="华容－常宁高速公路",
-                )
-            return ValueBinding(
-                field=field,
-                op=op,
-                storage_value=raw_value,
-                display_value=str(raw_value),
-                source="model_inference",
-                resolver="time_range",
-                raw_text=str(raw_value),
-            )
-
-        resolve_value.side_effect = resolve
+        resolve_value.return_value = ValueBinding(
+            field="route_name",
+            op="=",
+            storage_value="route-id",
+            display_value="华容－常宁高速公路",
+            source="user_explicit",
+            resolver="route_dictionary",
+            raw_text="华容－常宁高速公路",
+        )
 
         plan = analyze_single_turn(
             "华容－常宁高速公路在本月的巡检任务完成情况如何",
@@ -103,7 +129,6 @@ class QueryPlanningTests(unittest.TestCase):
         spec = plan.nodes[0].spec
         self.assertEqual(spec.dimensions, ("patrol_status",))
         self.assertEqual(spec.metrics, ("count",))
-        self.assertNotIn("patrol_status", {item.field for item in spec.filters})
         self.assertEqual(plan.nodes[1].node_type, "post_calc")
 
     @patch("app.query.analysis.chat_json")
@@ -234,7 +259,7 @@ class QueryPlanningTests(unittest.TestCase):
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
-    def test_patrol_route_question_is_normalized_to_patrol_subject(
+    def test_patrol_route_question_uses_structured_patrol_plan(
         self,
         chat_json,
         resolve_value,
@@ -246,13 +271,13 @@ class QueryPlanningTests(unittest.TestCase):
                 {
                     "id": "q1",
                     "action": "query_data",
-                    "subject": "route",
+                    "subject": "patrol",
                     "view": "list",
                     "metrics": [],
                     "dimensions": ["route_name"],
                     "filters": [
                         {
-                            "field": "patrol_date",
+                            "field": "create_time",
                             "op": ">=",
                             "raw_value": "2026-11-02",
                         }
@@ -267,7 +292,7 @@ class QueryPlanningTests(unittest.TestCase):
             ],
         }
         resolve_value.return_value = ValueBinding(
-            field="patrol_date",
+            field="create_time",
             op=">=",
             storage_value="2026-11-02",
             display_value="2026-11-02",
@@ -323,7 +348,7 @@ class QueryPlanningTests(unittest.TestCase):
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
-    def test_identifier_dictionary_normalizes_patrol_task_number(
+    def test_identifier_resolution_keeps_model_task_number_filter(
         self,
         chat_json,
         resolve_value,
@@ -342,7 +367,7 @@ class QueryPlanningTests(unittest.TestCase):
                     "dimensions": ["problem_type_name"],
                     "filters": [
                         {
-                            "field": "work_order_id",
+                            "field": "task_number",
                             "op": "=",
                             "raw_value": "XJJL202611040003",
                         }
@@ -357,12 +382,12 @@ class QueryPlanningTests(unittest.TestCase):
             ],
         }
         resolve_value.return_value = ValueBinding(
-            field="work_order_id",
+            field="task_number",
             op="=",
             storage_value="XJJL202611040003",
             display_value="XJJL202611040003",
             source="user_explicit",
-            resolver="identity:work_order_id",
+            resolver="identifier_dictionary:XJJL",
             raw_text="XJJL202611040003",
         )
 
@@ -375,7 +400,6 @@ class QueryPlanningTests(unittest.TestCase):
 
         filters = plan.nodes[0].spec.filters
         self.assertIn("task_number", {item.field for item in filters})
-        self.assertNotIn("work_order_id", {item.field for item in filters})
         task = next(item for item in filters if item.field == "task_number")
         self.assertEqual(task.resolver, "identifier_dictionary:XJJL")
 
@@ -443,7 +467,7 @@ class QueryPlanningTests(unittest.TestCase):
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
-    def test_analysis_preserves_explicit_post_calc_action(self, chat_json, _resolve):
+    def test_analysis_preserves_explicit_post_calc_spec(self, chat_json, _resolve):
         chat_json.return_value = {
             "final_goal": "找出每条路线的主要病害",
             "intent_family": "distribution",
@@ -488,9 +512,12 @@ class QueryPlanningTests(unittest.TestCase):
         )
         self.assertEqual(plan.nodes[1].node_type, "post_calc")
         self.assertEqual(plan.nodes[1].depends_on, ("q1",))
-        self.assertEqual(plan.nodes[1].spec.view, "data")
-        self.assertEqual(plan.nodes[1].spec.metrics, ())
-        self.assertEqual(plan.nodes[1].spec.dimensions, ())
+        self.assertEqual(plan.nodes[1].spec.view, "top")
+        self.assertEqual(plan.nodes[1].spec.metrics, ("count",))
+        self.assertEqual(
+            plan.nodes[1].spec.dimensions,
+            ("route_name", "problem_type_name"),
+        )
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
@@ -520,7 +547,7 @@ class QueryPlanningTests(unittest.TestCase):
                 },
                 {
                     "id": "q2",
-                    "action": "query_data",
+                    "action": "post_calc",
                     "question": "基于分组统计结果，找出每条路线下数量最多的病害类型",
                     "subject": "disease",
                     "view": "top",
@@ -547,7 +574,7 @@ class QueryPlanningTests(unittest.TestCase):
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
-    def test_severity_question_requires_all_comparison_metrics(
+    def test_severity_question_does_not_rewrite_incomplete_model_plan(
         self,
         chat_json,
         _resolve,
@@ -581,18 +608,12 @@ class QueryPlanningTests(unittest.TestCase):
             FieldReachSet(),
         )
 
-        self.assertEqual(len(plan.nodes), 2)
-        self.assertTrue(
-            {"count", "total_area", "route_length_km"}.issubset(
-                set(plan.nodes[0].spec.metrics)
-            )
-        )
-        self.assertEqual(plan.nodes[1].node_type, "post_calc")
-        self.assertEqual(plan.nodes[1].depends_on, ("q1",))
+        self.assertEqual(len(plan.nodes), 1)
+        self.assertEqual(plan.nodes[0].spec.metrics, ("count",))
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
-    def test_trend_question_adds_a_bounded_post_calculation(
+    def test_trend_question_accepts_structured_post_calculation(
         self,
         chat_json,
         _resolve,
@@ -615,7 +636,22 @@ class QueryPlanningTests(unittest.TestCase):
                     "limit": None,
                     "required_assertions": ["preserve_user_scope"],
                     "depends_on": [],
-                }
+                },
+                {
+                    "id": "q2",
+                    "action": "post_calc",
+                    "question": "判断月度数量趋势",
+                    "subject": "disease",
+                    "view": "trend",
+                    "metrics": ["count"],
+                    "dimensions": ["month"],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": ["q1"],
+                },
             ],
         }
 

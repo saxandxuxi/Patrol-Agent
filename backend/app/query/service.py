@@ -465,11 +465,16 @@ def _materialize_inputs(
             for item in filters
             if str(item.field).rsplit(".", 1)[-1] != binding.to_field
         ]
+        bound_op = (
+            "="
+            if binding.op == "in" and len(values) == 1
+            else binding.op
+        )
         filters.append(
             ValueBinding(
                 field=binding.to_field,
-                op=binding.op,
-                storage_value=values if binding.op in {"in", "between"} else values[0],
+                op=bound_op,
+                storage_value=values if bound_op in {"in", "between"} else values[0],
                 display_value=str(values[0]),
                 source="previous_result",
                 resolver=f"node:{binding.from_node}:{binding.from_field}",
@@ -500,6 +505,22 @@ def _observation_payload(
     answer: str,
 ) -> dict[str, Any]:
     rows = observation.result_rows or observation.preview_rows
+    if spec.view in {"distribution", "trend", "top", "bucket_compare"}:
+        logical_fields = [*spec.dimensions, *spec.metrics]
+    else:
+        logical_fields = [
+            *spec.output_projection,
+            *(
+                order.get("field")
+                for order in spec.order_by
+                if isinstance(order, dict) and order.get("field")
+            ),
+        ]
+    logical_fields = list(dict.fromkeys(str(field) for field in logical_fields))
+    field_labels = {
+        str(field): str(label)
+        for field, label in zip(logical_fields, observation.columns)
+    }
     group_labels: dict[str, Any] = {}
     for item in spec.filters:
         if str(item.field).rsplit(".", 1)[-1] == "problem_type_name":
@@ -508,6 +529,15 @@ def _observation_payload(
             group_labels["上下行方向"] = item.display_value
     return {
         "question": question,
+        "spec": {
+            "subject": spec.subject,
+            "view": spec.view,
+            "metrics": list(spec.metrics),
+            "dimensions": list(spec.dimensions),
+            "output_projection": list(spec.output_projection),
+            "order_by": list(spec.order_by),
+        },
+        "field_labels": field_labels,
         "group_labels": group_labels,
         "columns": list(observation.columns)
         or list(
@@ -680,6 +710,9 @@ def _execute_plan(
                     "id": node.id,
                     "question": node.spec.question or plan.question,
                     "depends_on": list(node.depends_on),
+                    "view": node.spec.view,
+                    "metrics": list(node.spec.metrics),
+                    "dimensions": list(node.spec.dimensions),
                 },
                 upstream,
             )

@@ -233,23 +233,23 @@ class ValueAnalysisTests(unittest.TestCase):
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
-    def test_device_question_cannot_degrade_to_a_single_count(
+    def test_device_question_accepts_structured_distribution(
         self,
         chat_json,
         _resolve,
     ):
         chat_json.return_value = {
             "final_goal": "巡检设备次数",
-            "intent_family": "count",
+            "intent_family": "distribution",
             "views": [
                 {
                     "id": "q1",
                     "subject": "patrol",
-                    "view": "count",
+                    "view": "distribution",
                     "metrics": ["count"],
-                    "dimensions": [],
+                    "dimensions": ["equipment_id"],
                     "filters": [],
-                    "output_projection": ["count"],
+                    "output_projection": ["equipment_id", "count"],
                     "order_by": [],
                     "limit": None,
                     "required_assertions": ["preserve_user_scope"],
@@ -268,7 +268,7 @@ class ValueAnalysisTests(unittest.TestCase):
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
-    def test_detail_limit_defaults_to_display_cap_when_user_did_not_request_a_count(
+    def test_detail_limit_defaults_when_model_omits_limit(
         self,
         chat_json,
         _resolve,
@@ -286,7 +286,7 @@ class ValueAnalysisTests(unittest.TestCase):
                     "filters": [],
                     "output_projection": ["id"],
                     "order_by": [],
-                    "limit": 50,
+                    "limit": None,
                     "required_assertions": ["preserve_user_scope"],
                 }
             ],
@@ -301,7 +301,7 @@ class ValueAnalysisTests(unittest.TestCase):
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
-    def test_distribution_limit_is_ignored_without_an_explicit_top_request(
+    def test_distribution_limit_without_value_stays_unbounded(
         self,
         chat_json,
         _resolve,
@@ -319,7 +319,7 @@ class ValueAnalysisTests(unittest.TestCase):
                     "filters": [],
                     "output_projection": ["route_name", "count"],
                     "order_by": [],
-                    "limit": 10,
+                    "limit": None,
                     "required_assertions": ["preserve_user_scope"],
                 }
             ],
@@ -332,26 +332,76 @@ class ValueAnalysisTests(unittest.TestCase):
         )
         self.assertIsNone(plan.nodes[0].spec.limit)
 
+    @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
-    def test_ai_reliability_contract_uses_threshold_total_and_post_calc(self, chat_json):
+    def test_ai_reliability_contract_uses_threshold_total_and_post_calc(
+        self,
+        chat_json,
+        resolve_value,
+    ):
         chat_json.return_value = {
             "final_goal": "评估AI识别可靠性",
             "intent_family": "analysis",
             "views": [
                 {
-                    "id": "q1",
+                    "id": "q1_low_confidence",
+                    "action": "query_data",
                     "subject": "disease",
-                    "view": "distribution",
+                    "view": "count",
                     "metrics": ["count"],
-                    "dimensions": ["confidence"],
-                    "filters": [],
-                    "output_projection": ["confidence", "count"],
+                    "dimensions": [],
+                    "filters": [
+                        {
+                            "field": "confidence",
+                            "op": "<",
+                            "raw_value": 0.7,
+                        }
+                    ],
+                    "output_projection": ["count"],
                     "order_by": [],
                     "limit": None,
                     "required_assertions": ["preserve_user_scope"],
-                }
+                    "depends_on": [],
+                },
+                {
+                    "id": "q2_total_count",
+                    "action": "query_data",
+                    "subject": "disease",
+                    "view": "count",
+                    "metrics": ["count"],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": ["count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                },
+                {
+                    "id": "q3",
+                    "action": "post_calc",
+                    "subject": "disease",
+                    "view": "data",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": ["q1_low_confidence", "q2_total_count"],
+                },
             ],
         }
+        resolve_value.return_value = ValueBinding(
+            field="confidence",
+            op="<",
+            storage_value="0.7",
+            display_value="0.7",
+            source="business_rule",
+            resolver="numeric:confidence",
+            raw_text="0.7",
+        )
         plan = analyze_single_turn(
             "AI识别的病害类型，靠谱吗？有多少是认不出来的？",
             "mysql",
@@ -382,15 +432,38 @@ class ValueAnalysisTests(unittest.TestCase):
                     "id": "q3",
                     "subject": "disease",
                     "view": "distribution",
-                    "metrics": ["count", "sum_disease_length"],
+                    "metrics": [
+                        "count",
+                        "sum_disease_length",
+                        "route_length_km",
+                    ],
                     "dimensions": ["route_name"],
                     "filters": [{"field": "problem_type_name", "op": "=", "raw_value": "裂缝"}],
-                    "output_projection": ["route_name", "count"],
+                    "output_projection": [
+                        "route_name",
+                        "count",
+                        "route_length_km",
+                    ],
                     "order_by": [],
                     "limit": None,
                     "required_assertions": ["preserve_user_scope"],
                     "question": "这些路的病害密度怎么样？",
-                }
+                },
+                {
+                    "id": "q4",
+                    "action": "post_calc",
+                    "subject": "disease",
+                    "view": "data",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": ["q3"],
+                    "question": "计算病害密度",
+                },
             ],
         }
         resolve.return_value = ValueBinding(
@@ -414,7 +487,7 @@ class ValueAnalysisTests(unittest.TestCase):
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
-    def test_density_contract_keeps_all_disease_datasets_and_drops_route_support(
+    def test_density_plan_uses_each_structured_disease_dataset(
         self,
         chat_json,
         resolve,
@@ -448,16 +521,18 @@ class ValueAnalysisTests(unittest.TestCase):
                     "required_assertions": ["preserve_user_scope"],
                 },
                 {
-                    "id": "route_support",
+                    "id": "q3",
+                    "action": "post_calc",
                     "subject": "disease",
-                    "view": "distribution",
-                    "metrics": ["route_length_km"],
-                    "dimensions": ["route_name"],
+                    "view": "data",
+                    "metrics": [],
+                    "dimensions": [],
                     "filters": [],
-                    "output_projection": ["route_name", "route_length_km"],
+                    "output_projection": [],
                     "order_by": [],
                     "limit": None,
                     "required_assertions": ["preserve_user_scope"],
+                    "depends_on": ["crack", "pothole"],
                 },
             ],
         }
@@ -489,13 +564,12 @@ class ValueAnalysisTests(unittest.TestCase):
             FieldReachSet(),
         )
 
-        self.assertNotIn("route_support", {node.id for node in plan.nodes})
         calculation = next(node for node in plan.nodes if node.node_type == "post_calc")
         self.assertEqual(calculation.depends_on, ("crack", "pothole"))
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
-    def test_route_metrics_contract_replaces_asset_split(
+    def test_route_metrics_come_from_structured_model_output(
         self,
         chat_json,
         _resolve,
@@ -508,24 +582,23 @@ class ValueAnalysisTests(unittest.TestCase):
                     "id": "q1",
                     "subject": "disease",
                     "view": "distribution",
-                    "metrics": ["count", "sum_area", "avg_area"],
-                    "dimensions": ["routes_id"],
+                    "metrics": [
+                        "count",
+                        "total_area",
+                        "average_area",
+                        "route_length_km",
+                    ],
+                    "dimensions": ["route_name"],
                     "filters": [],
-                    "output_projection": ["routes_id", "route_name"],
+                    "output_projection": [
+                        "route_name",
+                        "count",
+                        "total_area",
+                        "average_area",
+                        "route_length_km",
+                    ],
                     "order_by": [],
                     "limit": None,
-                    "required_assertions": ["preserve_user_scope"],
-                },
-                {
-                    "id": "q2",
-                    "subject": "asset",
-                    "view": "list",
-                    "metrics": [],
-                    "dimensions": [],
-                    "filters": [],
-                    "output_projection": ["asset_code", "length_unit", "memo"],
-                    "order_by": [],
-                    "limit": 500,
                     "required_assertions": ["preserve_user_scope"],
                 },
             ],
