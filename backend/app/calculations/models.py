@@ -59,6 +59,33 @@ class CalculationRequest:
             zero_denominator=str(value.get("zero_denominator") or "error"),
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tool": self.tool,
+            "operation": self.operation,
+            "operands": [
+                {
+                    "name": item.name,
+                    **({"value": item.value} if item.value is not None else {}),
+                    **({"source": dict(item.source)} if item.source else {}),
+                }
+                for item in self.operands
+            ],
+            **(
+                {
+                    "output": {
+                        "name": self.output.name,
+                        "label": self.output.label,
+                        "unit": self.output.unit,
+                    }
+                }
+                if self.output
+                else {}
+            ),
+            "precision": self.precision,
+            "zero_denominator": self.zero_denominator,
+        }
+
 
 @dataclass(frozen=True)
 class CalculationResult:

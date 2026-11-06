@@ -127,6 +127,7 @@ class PlannerCapabilityView:
     reach_evidence: tuple[dict[str, Any], ...] = ()
     metric_details: dict[str, dict[str, Any]] = field(default_factory=dict)
     derived_metric_details: dict[str, dict[str, Any]] = field(default_factory=dict)
+    calculators: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_prompt_dict(self) -> dict[str, Any]:
         return {
@@ -134,6 +135,7 @@ class PlannerCapabilityView:
             "base_table": self.base_table,
             "metrics": self.metric_details,
             "derived_metrics": self.derived_metric_details,
+            "calculators": self.calculators,
             "allowed_views": list(self.allowed_views),
             "fields": {
                 field_id: {

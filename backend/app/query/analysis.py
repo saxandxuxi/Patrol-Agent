@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
 from ..services import prompts
 from ..services.llm import LLMError, chat_json, role_model
+from ..calculations.models import CalculationRequest
+from ..calculations.operations import ROLE_NAMES
 from .audit import audit_query_plan
 from .capability_registry import CapabilityIssue, CapabilityRegistry
 from .contracts import (
@@ -390,6 +393,12 @@ def _analyze_once(
                     op=str(item.get("op") or "in").strip(),
                 )
             )
+        raw_calculation = raw.get("calculation")
+        calculation = (
+            CalculationRequest.from_dict(raw_calculation)
+            if isinstance(raw_calculation, dict)
+            else None
+        )
         specs.append(
             QuerySpec(
                 id=spec_id,
@@ -405,6 +414,7 @@ def _analyze_once(
                 required_assertions=_string_tuple(raw.get("required_assertions")),
                 question=str(raw.get("question") or original).strip(),
                 input_bindings=tuple(input_bindings),
+                calculation=calculation,
             )
         )
         dependencies[spec_id] = _string_tuple(raw.get("depends_on"))
@@ -684,6 +694,142 @@ def _query_plan_derived_metric_issue(
     return None
 
 
+def _query_plan_calculation_issue(
+    plan: QueryPlan,
+    registry: CapabilityRegistry | None,
+) -> CapabilityIssue | None:
+    if registry is None:
+        return None
+    nodes_by_id = {node.id: node for node in plan.nodes}
+    for node in plan.nodes:
+        calculation = node.spec.calculation
+        if calculation is None:
+            continue
+        if node.node_type != "post_calc":
+            return CapabilityIssue(
+                code="calculation_output_invalid",
+                original_value=node.id,
+                reason="calculation 只能用于 post_calc 节点",
+                node_id=node.id,
+            )
+        capability = registry.snapshot.calculators.get(calculation.tool)
+        if not isinstance(capability, Mapping):
+            return CapabilityIssue(
+                code="calculation_tool_unknown",
+                original_value=calculation.tool,
+                reason=f"未注册计算工具：{calculation.tool}",
+                allowed_values=tuple(registry.snapshot.calculators),
+                suggested_repair="只能使用能力视图 calculators 中登记的工具。",
+                node_id=node.id,
+            )
+        operations = tuple(
+            str(item) for item in capability.get("operations") or ()
+        )
+        if calculation.operation not in operations:
+            return CapabilityIssue(
+                code="calculation_operation_unknown",
+                original_value=calculation.operation,
+                reason=(
+                    f"计算工具 {calculation.tool} 不支持操作符 "
+                    f"{calculation.operation}"
+                ),
+                allowed_values=operations,
+                suggested_repair="只能使用该工具登记的操作符。",
+                node_id=node.id,
+            )
+        roles = ROLE_NAMES.get(calculation.operation)
+        if roles is None:
+            return CapabilityIssue(
+                code="calculation_operation_unknown",
+                original_value=calculation.operation,
+                reason=f"未实现计算操作符：{calculation.operation}",
+                node_id=node.id,
+            )
+        operand_names = tuple(item.name for item in calculation.operands)
+        missing_roles = [role for role in roles if role not in operand_names]
+        extra_roles = [role for role in operand_names if role not in roles]
+        if missing_roles or extra_roles:
+            return CapabilityIssue(
+                code="calculation_operand_missing",
+                original_value=calculation.operation,
+                reason=(
+                    "计算操作数角色不完整；缺少："
+                    + ("、".join(missing_roles) or "无")
+                    + "；多余："
+                    + ("、".join(extra_roles) or "无")
+                ),
+                allowed_values=roles,
+                suggested_repair="按操作符要求的命名角色传操作数。",
+                node_id=node.id,
+                evidence={
+                    "required_roles": list(roles),
+                    "actual_roles": list(operand_names),
+                },
+            )
+        produced: dict[str, set[str]] = {}
+        for dependency in node.depends_on:
+            upstream = nodes_by_id.get(dependency)
+            if upstream is not None:
+                produced[dependency] = _node_outputs(upstream.spec)
+        for operand in calculation.operands:
+            if operand.source:
+                source_node = str(operand.source.get("node") or "")
+                source_field = str(operand.source.get("field") or "")
+                if (
+                    source_node not in produced
+                    or source_field not in produced[source_node]
+                ):
+                    return CapabilityIssue(
+                        code="calculation_operand_missing",
+                        original_value=operand.name,
+                        reason=(
+                            f"操作数 {operand.name} 的来源 "
+                            f"{source_node}.{source_field} 未被依赖节点产出"
+                        ),
+                        allowed_values=tuple(
+                            sorted(
+                                {
+                                    field
+                                    for fields in produced.values()
+                                    for field in fields
+                                }
+                            )
+                        ),
+                        suggested_repair=(
+                            "把来源改为依赖节点实际产出的 field，"
+                            "或在对应数据节点增加该指标/维度。"
+                        ),
+                        node_id=node.id,
+                        evidence={
+                            "operand": operand.name,
+                            "source_node": source_node,
+                            "source_field": source_field,
+                            "dependency_node_ids": list(node.depends_on),
+                        },
+                    )
+            elif operand.value is None:
+                return CapabilityIssue(
+                    code="calculation_operand_missing",
+                    original_value=operand.name,
+                    reason=f"操作数 {operand.name} 缺少 value 或 source",
+                    node_id=node.id,
+                )
+        if (
+            calculation.tool == "calculate_columns"
+            and (
+                calculation.output is None
+                or not calculation.output.name
+            )
+        ):
+            return CapabilityIssue(
+                code="calculation_output_invalid",
+                original_value=node.id,
+                reason="calculate_columns 必须声明 output.name",
+                node_id=node.id,
+            )
+    return None
+
+
 def _capability_issue_from_compile_error(
     node_id: str,
     message: str,
@@ -780,6 +926,8 @@ def analyze_single_turn(
         compile_issue = _query_plan_compile_error(plan)
         if compile_issue is None:
             compile_issue = _query_plan_derived_metric_issue(plan, registry)
+        if compile_issue is None:
+            compile_issue = _query_plan_calculation_issue(plan, registry)
         if compile_issue:
             feedback = json.dumps(
                 compile_issue.to_feedback(),
@@ -788,6 +936,10 @@ def analyze_single_turn(
             )
             if attempt < 2:
                 continue
+            if compile_issue.code.startswith("calculation_"):
+                raise QuerySpecError(
+                    f"{compile_issue.code}: {compile_issue.reason}"
+                )
             if compile_issue.code == "missing_derived_operand":
                 raise QuerySpecError(
                     "缺少派生指标操作数：" + compile_issue.reason

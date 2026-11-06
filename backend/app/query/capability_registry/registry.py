@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -228,6 +229,18 @@ class CapabilityRegistry:
                 {},
             ).items()
         }
+        calculators = {
+            tool: {
+                "input_shapes": list(raw.get("input_shapes") or ()),
+                "operations": list(raw.get("operations") or ()),
+                "precision": int(raw.get("precision") or 6),
+                "zero_denominator": str(
+                    raw.get("zero_denominator") or "error"
+                ),
+            }
+            for tool, raw in self.snapshot.calculators.items()
+            if isinstance(raw, Mapping)
+        }
         return PlannerCapabilityView(
             subject=subject,
             base_table=subject_cap.base_table,
@@ -238,6 +251,7 @@ class CapabilityRegistry:
             reach_evidence=evidence,
             metric_details=metric_details,
             derived_metric_details=derived_metric_details,
+            calculators=calculators,
         )
 
     def metric(

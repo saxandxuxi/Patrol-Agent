@@ -50,6 +50,9 @@
     派生指标自身的 `lower_is_better` 属性不等于用户要求选最低值；单纯分布、对比或列出
     结果的题不得自动添加这两个评价断言，已有该断言且用户未要求评价时，通过
     `set.required_assertions` 删除它并保留全部分组。
+24. 算术必须通过 `calculation` 工具契约执行。检查工具、操作符、命名角色和
+    `source.node/source.field` 是否都属于 `depends_on` 的真实产出；禁止表达式字符串、
+    `eval` 和 LLM 直接给最终数值。缺失或错误时返回对应 `calculation_*` failure。
 
 如果计划完整，返回：
 {

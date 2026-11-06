@@ -5,6 +5,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..calculations.models import CalculationRequest
+
 
 class QuerySpecError(ValueError):
     """Raised when model output cannot become a trustworthy QuerySpec."""
@@ -64,6 +66,7 @@ class QuerySpec:
     required_assertions: tuple[str, ...]
     question: str = ""
     input_bindings: tuple[InputBinding, ...] = ()
+    calculation: CalculationRequest | None = None
 
 
 @dataclass(frozen=True)

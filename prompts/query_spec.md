@@ -93,6 +93,15 @@
     要求选最低值。只有用户明确要求评价最好/最健康等结论时才写
     `required_assertions: ["lower_is_better", "multi_metric_comparison"]`；单纯要求
     分布、对比或列出结果时不得添加，并应保留全部分组。
+24. `post_calc` 需要算术时必须输出 `calculation`，只能从能力视图 `calculators`
+    选择工具和操作符。禁止输出表达式字符串或直接输出最终算术结果。
+    - `calculate_scalar`：标量计算，操作数使用命名角色。
+    - `calculate_columns`：逐行两列计算，保留原行上下文。
+    - `calculate_series`：批次序列的差值或百分比变化。
+    操作数来源写成 `{"node": "上游节点 id", "field": "上游实际产出字段"}`。
+    `divide/ratio` 使用 `numerator`、`denominator`；
+    `percentage_share` 使用 `numerator`、`total`；
+    `percentage_change` 使用 `old`、`new`。
 
 允许的 view：
 count / sum / avg / distribution / list / detail / top / trend / bucket_compare / photo / data
@@ -118,10 +127,24 @@ count / sum / avg / distribution / list / detail / top / trend / bucket_compare 
       "order_by": [],
       "limit": null,
       "required_assertions": ["preserve_user_scope"],
+      "calculation": null,
       "depends_on": [],
       "inputs": []
     }
   ]
+}
+
+`post_calc.calculation` 示例：
+
+{
+  "tool": "calculate_columns",
+  "operation": "divide",
+  "operands": [
+    {"name": "numerator", "source": {"node": "q1", "field": "count"}},
+    {"name": "denominator", "source": {"node": "q1", "field": "route_length_km"}}
+  ],
+  "output": {"name": "disease_density", "label": "病害密度", "unit": "处/km"},
+  "precision": 4
 }
 
 [user]

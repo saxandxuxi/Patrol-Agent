@@ -120,6 +120,7 @@ class CapabilityEndToEndTests(unittest.TestCase):
         self.assertIn('"enum_values"', capabilities)
         self.assertIn('"metrics"', capabilities)
         self.assertIn('"derived_metrics"', capabilities)
+        self.assertIn('"calculators"', capabilities)
 
 
 if __name__ == "__main__":

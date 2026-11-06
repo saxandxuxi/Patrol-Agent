@@ -739,6 +739,11 @@ def _execute_plan(
                     "metrics": list(node.spec.metrics),
                     "dimensions": list(node.spec.dimensions),
                     "required_assertions": list(node.spec.required_assertions),
+                    "calculation": (
+                        node.spec.calculation.to_dict()
+                        if node.spec.calculation is not None
+                        else None
+                    ),
                 },
                 upstream,
             )
