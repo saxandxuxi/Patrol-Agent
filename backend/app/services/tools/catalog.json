@@ -318,6 +318,102 @@
       "wraps": "parsers.time_range_from_spec:180"
     },
     {
+      "name": "calculate_columns",
+      "layer": "big",
+      "domain": "calculation",
+      "description": "对前序结果的两列逐行计算，并保留原行 ID 和展示字段。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "operands": {
+            "type": "object"
+          },
+          "output_field": {
+            "type": "string"
+          },
+          "precision": {
+            "type": "integer",
+            "default": 6
+          }
+        },
+        "required": [
+          "operation",
+          "rows",
+          "operands",
+          "output_field"
+        ]
+      },
+      "wraps": "app.calculations.columns.calculate_columns"
+    },
+    {
+      "name": "calculate_scalar",
+      "layer": "big",
+      "domain": "calculation",
+      "description": "用注册的标量操作符计算两个数字；操作数使用命名角色。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "operands": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "precision": {
+            "type": "integer",
+            "default": 6
+          }
+        },
+        "required": [
+          "operation",
+          "operands"
+        ]
+      },
+      "wraps": "app.calculations.scalar.calculate_scalar"
+    },
+    {
+      "name": "calculate_series",
+      "layer": "big",
+      "domain": "calculation",
+      "description": "计算有序批次数列的相邻差值或百分比变化，并保留完整批次轴。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array"
+          },
+          "values": {
+            "type": "array"
+          },
+          "precision": {
+            "type": "integer",
+            "default": 6
+          }
+        },
+        "required": [
+          "operation",
+          "labels",
+          "values"
+        ]
+      },
+      "wraps": "app.calculations.series.calculate_series"
+    },
+    {
       "name": "ask_user",
       "layer": "big",
       "domain": "clarify",

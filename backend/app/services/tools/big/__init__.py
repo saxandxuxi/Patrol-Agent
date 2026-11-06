@@ -3,6 +3,9 @@
 from . import (  # noqa: F401
     analyze,
     ask_user,
+    calculate_columns,
+    calculate_scalar,
+    calculate_series,
     check_coverage,
     fetch_images,
     post_calc,
