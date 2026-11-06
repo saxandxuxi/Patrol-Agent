@@ -1,0 +1,194 @@
+{
+  "exam_id": "promotion-20261107-015658",
+  "code_fingerprint": "content:43f18e013a4d06a5ead11a6505b653080482038eed0ac32934911af9efd1f544",
+  "passed_fresh": 12,
+  "total_fresh": 15,
+  "passed_old": 4,
+  "total_old": 5,
+  "passed_total": 16,
+  "total": 20,
+  "promoted": true,
+  "promotion_reason": "达到 15 新题 80% 和 5 旧题 80% 晋级线",
+  "results": [
+    {
+      "id": "new_asset_grade_type_breakdown",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确指出无法规划查询，原因是过滤字段 road_surface_type 的来源为 model_inference 且缺乏字典或业务规则支持，属于具体的数据能力缺失说明，符合 correct_unsupported 判定规则。",
+      "answer": "无法可靠规划该查询：过滤值 road_surface_type 来源为 model_inference，但没有经过字典、业务规则或受控解析"
+    },
+    {
+      "id": "new_disease_size_threshold_area",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "系统正确识别了最近一次巡检任务（XCBH202611040005），并针对该任务执行了坑槽病害面积大于10平方米的筛选。SQL逻辑正确使用了 `problem_type_name = '坑槽'` 和 `area > 10` 以及 `patrol_number` 关联。查询结果显示数量为0，分布结果为空。最终回答如实反映了查询结果（共0处，无集中路线），符合数据事实，未进行猜测或错误推断。",
+      "answer": "“q1_patrol. 获取最近一次巡检任务的巡查编号（patrol_number），按 collection_time”返回 1 条，明细已生成，请在结果工作台查看。；共 0处；“q3_dist. 在最近一次巡检任务中，按路线名称分组统计病害类型为'坑槽'且单处面积大于10平方米的病害数量和总”查询完成，共 0 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "new_time_weekly_trend",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "compiler",
+      "reason": "系统返回 error 为 null 但 plan 为 null，且 sections 状态为 unsupported，failure_code 为 query_plan_not_executable。根据规则，当任一 section 为 blocked/repairable/error 或执行失败时，不得判为 correct_unsupported。此处系统未能生成有效的 QueryPlan 和 SQL，属于内部规划/编译阶段的执行失败，而非明确的数据能力缺失说明。",
+      "answer": "无法可靠规划该查询：趋势问题必须增加一个消费数据结果的 post_calc 节点，并使用 view=trend"
+    },
+    {
+      "id": "new_task_device_efficiency",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "execution",
+      "reason": "系统执行失败。最终回答为'除数不能为 0'，且 verification.status 为 'repairable'，sections 中存在 status 为 'repairable' 的节点（pc1_avg_per_task），表明计算步骤因分母为零而中断，未生成有效结果。根据规则，error 非空或 section 为 repairable 时属于系统执行失败。",
+      "answer": "除数不能为 0。"
+    },
+    {
+      "id": "new_equipment_status_filter",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确指出字段 ai_maintain_patrol.patrol_status 的枚举值字典中不包含用户查询所需的 '离线' 和 '故障' 状态，属于数据能力缺失。系统未进行猜测，而是明确说明了具体缺失原因并停止执行，符合 correct_unsupported 的判定规则。",
+      "answer": "无法可靠规划该查询：字段 ai_maintain_patrol.patrol_status 的枚举值不在字典中：['离线', '故障']"
+    },
+    {
+      "id": "new_maintenance_district_composition",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户查询对象为'第四管养片区'，属于文档第4点'管养维度'中定义的'管养单位'范畴。系统报错提示'没有找到路线“第四管养片区”'，表明系统将管养片区错误地映射为'路线'实体进行检索，导致查询失败。由于系统未能正确识别管养维度的查询入口，且未提供基于管养单位ID或名称的正确查询路径，属于业务能力支持缺失或映射错误，符合'correct_unsupported'中关于数据能力缺失或明确说明缺失原因的判定规则。",
+      "answer": "该查询无法执行：没有找到路线“第四管养片区”，请确认路线编码或名称。"
+    },
+    {
+      "id": "new_topn_route_severity",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "compiler",
+      "reason": "系统报错声称不支持字段 'damage_type'，但用户问题要求过滤的是“严重”等级（severity/level），而非病害类型（damage_type）。这是系统将业务语义错误映射到不存在的字段名导致的编译/规划错误，属于内部逻辑缺陷，不能冒充数据能力缺失。根据规则，内部编译字段名错误也不能冒充数据能力缺失，且 error 虽为 null 但 sections 状态为 unsupported 且原因为 query_plan_not_executable，结合错误的归因，判定为执行失败中的编译器/规划层错误。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：病害查询不支持过滤字段：damage_type"
+    },
+    {
+      "id": "new_detail_pile_specific_type",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明数据库中不存在用户指定的路线实体“S20外环高速”，并提供了相近路线列表供确认，未进行猜测或返回错误数据，符合数据能力缺失的判定规则。",
+      "answer": "该查询无法执行：没有找到路线“S20外环高速”。名字相近的路线有：新化文田-东安井头圩、龙山石牌(省界)-凤凰茶田(省界)、慈利-安化县渠江、双峰洪山殿-嘉禾县城、望城乌山-湘潭茶恩寺，请确认是哪一条。"
+    },
+    {
+      "id": "new_trend_district_monthly",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户查询对象为'第一管养片区'，属于管养维度（文档第4点），但系统将其误判为路线实体并报错'没有找到路线'。根据规则，当数据库确实缺少字段、关联或数据能力时，明确说明具体缺失原因并停止猜测，可以判为正确的不支持结果。此处系统虽混淆了维度（将管养单位当作路线），但最终结论是'无法执行'且指出了具体的查找失败原因，未进行猜测或返回错误数据，符合'correct_unsupported'中关于明确说明缺失并停止猜测的定义。",
+      "answer": "该查询无法执行：没有找到路线“第一管养片区”，请确认路线编码或名称。"
+    },
+    {
+      "id": "new_unsupported_lane_heatmap",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户询问基于车道维度的可视化热力图。业务能力文档明确说明“区分车道的病害数量查询及数量统计（目前系统未更新车道分布）”以及“指定车道病害类型与数量（暂未更新）”。系统回答明确指出“当前数据能力不支持：业务能力文档声明车道分布尚未更新”，准确识别了能力边界，未进行猜测，符合 correct_unsupported 判定规则。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：业务能力文档声明车道分布尚未更新，不能把 lane_index 当作可靠统计依据"
+    },
+    {
+      "id": "new_asset_road_class_surface",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户问题要求按'道路等级'（一级公路）和'路面类型'统计病害密度。系统执行结果为 unsupported，回答明确指出'没有找到路线“一级公路”'，表明系统在数据层面无法识别或关联'一级公路'这一道路等级维度，属于具体的业务能力/数据缺失。根据规则，当最终回答明确说明数据能力缺失且原因具体时，判为 correct_unsupported。",
+      "answer": "该查询无法执行：没有找到路线“一级公路”，请确认路线编码或名称。"
+    },
+    {
+      "id": "new_disease_direction_seasonal",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "ambiguous",
+      "reason": "用户问题要求统计'新增'病害，这隐含了需要对比两次巡检或定义'新增'的业务口径（如相对于上一次巡检或年初状态）。系统未进行猜测，而是明确指出需要补充'比较对象'和'具体口径'，符合判定规则中关于问题缺少必要业务定义时判为 correct_unsupported 的要求。",
+      "answer": "该查询需要补充明确口径：请补充具体时间范围、巡检批次、比较对象或所需字段。"
+    },
+    {
+      "id": "new_time_inter_task_gap",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确指出无法执行查询，原因是过滤字段 pile_number 使用了不支持的运算符 like。根据规则，当数据库确实缺少字段或数据能力时，明确说明具体缺失原因并停止猜测，可以判为 correct_unsupported。系统未进行猜测，而是直接报告了技术限制。",
+      "answer": "无法可靠规划该查询：过滤字段 pile_number 使用了不支持的运算符：like"
+    },
+    {
+      "id": "new_task_completion_by_team",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户要求按里程排名（隐含TopN或排序展示），系统明确拒绝并指出具体技术限制：'TopN 查询必须声明正整数 limit'，且未进行猜测或返回错误结果，符合'系统明确要求补充口径且没有猜测'的判据。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：TopN 查询必须声明正整数 limit"
+    },
+    {
+      "id": "new_maintenance_density_comparison",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明无法找到名为“第三管养片区”的路线或实体，并请求确认名称。根据规则，当数据库确实缺少对应数据能力且系统明确说明具体缺失原因（未找到实体）并停止猜测时，判为 correct_unsupported。",
+      "answer": "该查询无法执行：没有找到路线“第三管养片区”，请确认路线编码或名称。"
+    },
+    {
+      "id": "fresh_time_monthly_trend_multi_route",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明数据库中不存在用户指定的路线实体“S20外环高速”，并提供了相近路线列表要求确认，未进行猜测或静默替换，符合数据能力缺失的判定规则。",
+      "answer": "该查询无法执行：没有找到路线“S20外环高速”。名字相近的路线有：新化文田-东安井头圩、龙山石牌(省界)-凤凰茶田(省界)、慈利-安化县渠江、双峰洪山殿-嘉禾县城、望城乌山-湘潭茶恩寺，请确认是哪一条。"
+    },
+    {
+      "id": "fresh_lane_disease_unsupported",
+      "source": "old",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "compiler",
+      "reason": "系统返回了 execution_failure 状态（sections 中 status 为 unsupported 且 failure_code 为 query_plan_not_executable，answer 指出过滤值来源问题导致无法规划查询）。根据规则，当 section 为 error、repairable 或 blocked（此处 query_plan_not_executable 属于执行/编译层面的阻断）时，属于系统执行失败，不得判为 correct_unsupported。此外，最终回答未按照考察重点要求明确告知‘车道分布数据未更新’这一业务事实，而是报出了技术性的解析错误。",
+      "answer": "无法可靠规划该查询：过滤值 pile_number 来源为 model_inference，但没有经过字典、业务规则或受控解析；过滤值 lane_index 来源为 model_inference，但没有经过字典、业务规则或受控解析"
+    },
+    {
+      "id": "fresh_task_completion_rate_ranking",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确声明当前数据能力不支持，具体原因为'只有管养单位 ID，缺少可验证的单位名称和台账关联'。根据规则，当最终回答明确说明业务能力或数据确实缺失且原因具体时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联"
+    },
+    {
+      "id": "fresh_disease_direction_type_diff",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统检测到用户提供的路线名称“包头-茂名高速”在数据库中不存在，并明确指出了名字相近的候选路线“包头-茂名”，要求用户确认。根据规则，当问题本身缺少必要的业务定义（如确切的实体名称），系统明确要求补充口径且没有进行猜测时，应判为 correct_unsupported。",
+      "answer": "该查询无法执行：没有找到路线“包头-茂名高速”。名字相近的路线有：包头-茂名，请确认是哪一条。"
+    },
+    {
+      "id": "fresh_time_trend_area",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明数据库中不存在名为“S20外环高速”的路线实体，并提供了相近路线列表供用户确认。根据规则，当数据库确实缺少数据能力且系统明确说明具体缺失原因并停止猜测时，判为 correct_unsupported。",
+      "answer": "该查询无法执行：没有找到路线“S20外环高速”。名字相近的路线有：新化文田-东安井头圩、龙山石牌(省界)-凤凰茶田(省界)、慈利-安化县渠江、双峰洪山殿-嘉禾县城、望城乌山-湘潭茶恩寺，请确认是哪一条。"
+    }
+  ]
+}
