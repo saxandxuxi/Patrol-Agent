@@ -8,6 +8,83 @@ from app.services.plan_contract import build_step_contract
 
 
 class QueryPlanningTests(unittest.TestCase):
+    @patch("app.query.analysis.route_resolver._route_text_in_message", return_value="华容－常宁高速公路")
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_completion_question_groups_status_without_inventing_filter(
+        self,
+        chat_json,
+        resolve_value,
+        _route_text,
+    ):
+        chat_json.return_value = {
+            "final_goal": "华容-常宁本月巡检完成情况",
+            "intent_family": "analysis",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "patrol",
+                    "view": "distribution",
+                    "metrics": ["count", "sum_completed"],
+                    "dimensions": ["patrol_status"],
+                    "filters": [
+                        {
+                            "field": "route_name",
+                            "op": "=",
+                            "raw_value": "华容－常宁高速公路",
+                        },
+                        {
+                            "field": "patrol_status",
+                            "op": "=",
+                            "raw_value": "已完成",
+                        },
+                    ],
+                    "output_projection": ["patrol_status", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        def resolve(field, op, raw_value, question, kind):
+            if field == "route_name":
+                return ValueBinding(
+                    field="route_name",
+                    op="=",
+                    storage_value="route-id",
+                    display_value="华容－常宁高速公路",
+                    source="user_explicit",
+                    resolver="route_dictionary",
+                    raw_text="华容－常宁高速公路",
+                )
+            return ValueBinding(
+                field=field,
+                op=op,
+                storage_value=raw_value,
+                display_value=str(raw_value),
+                source="model_inference",
+                resolver="time_range",
+                raw_text=str(raw_value),
+            )
+
+        resolve_value.side_effect = resolve
+
+        plan = analyze_single_turn(
+            "华容－常宁高速公路在本月的巡检任务完成情况如何",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+
+        spec = plan.nodes[0].spec
+        self.assertEqual(spec.dimensions, ("patrol_status",))
+        self.assertEqual(spec.metrics, ("count",))
+        self.assertNotIn("patrol_status", {item.field for item in spec.filters})
+        self.assertEqual(plan.nodes[1].node_type, "post_calc")
+
     @patch("app.query.analysis.chat_json")
     def test_metric_objects_are_normalized_to_logical_metrics(self, chat_json):
         chat_json.return_value = {

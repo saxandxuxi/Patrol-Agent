@@ -4,9 +4,30 @@ from unittest.mock import patch
 from app.query.analysis import analyze_single_turn
 from app.query.contracts import QuerySpecAmbiguity
 from app.query.fields import FieldReachSet, PhysicalSchemaView
+from app.services.llm import LLMError
 
 
 class QueryAuditTests(unittest.TestCase):
+    @patch("app.query.analysis._analyze_once")
+    def test_invalid_llm_json_gets_one_feedback_retry(self, analyze_once):
+        from tests.query.factories import count_plan
+
+        analyze_once.side_effect = [
+            LLMError("模型没有返回合法 JSON"),
+            count_plan(),
+        ]
+
+        plan = analyze_single_turn(
+            "统计病害数量",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+
+        self.assertEqual(len(plan.nodes), 1)
+        self.assertEqual(analyze_once.call_count, 2)
+        self.assertIn("合法 JSON", analyze_once.call_args_list[1].args[-1])
+
     @patch("app.query.analysis.audit_query_plan")
     @patch("app.query.analysis.chat_json")
     def test_audit_patch_that_breaks_compiler_is_rejected(

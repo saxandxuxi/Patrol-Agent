@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from app.query.contracts import QuerySpec, ValueBinding
 from app.query.spec_mdl import UnsupportedQuerySpec, compile_spec_mdl
@@ -17,6 +18,31 @@ def binding(field, op, value):
 
 
 class SpecMdlTests(unittest.TestCase):
+    @patch("app.query.spec_mdl.dictionary.patrol_status_labels")
+    def test_patrol_status_dimension_uses_display_labels(self, status_labels):
+        status_labels.return_value = {"0": "未开始", "15": "已完成"}
+
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="patrol",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("patrol_status",),
+                filters=(),
+                output_projection=("patrol_status", "count"),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="按巡检状态统计任务数量",
+            )
+        )
+
+        self.assertIn("CASE patrol.patrol_status", sql)
+        self.assertIn("'未开始'", sql)
+        self.assertIn("'已完成'", sql)
+
     def test_count_view_keeps_all_requested_metrics(self):
         sql = compile_spec_mdl(
             QuerySpec(

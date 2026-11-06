@@ -12,6 +12,7 @@ from .contracts import QuerySpecAmbiguity, QuerySpecError, ValueBinding
 _CODE_FIELDS = {
     "up_or_down": "up_or_down",
     "problem_status": "problem_status",
+    "patrol_status": "patrol_status",
     "problem_source": "problem_source",
     "collect": "collect",
     "track_problem": "track_problem",
@@ -105,7 +106,12 @@ def _resolve_code(field: str, raw_value: Any, question: str, kind: str) -> Value
             "查询条件缺少可执行的枚举值，请补充具体取值。"
         )
     column = _CODE_FIELDS[field]
-    labels = dictionary.code_labels(kind, "ai_problem", column)
+    table = (
+        "ai_maintain_patrol"
+        if field == "patrol_status"
+        else "ai_problem"
+    )
+    labels = dictionary.code_labels(kind, table, column)
     reverse = {str(label).strip(): str(code) for code, label in labels.items()}
     storage = reverse.get(text, text)
     return ValueBinding(
@@ -194,8 +200,9 @@ def resolve_value(
                 display_value = end_text
                 op = ">="
             elif op == "<":
-                storage_value = start_text
-                display_value = start_text
+                boundary_text = start_text if raw_parsed is not None else end_text
+                storage_value = boundary_text
+                display_value = boundary_text
             elif op == "<=":
                 storage_value = end_text
                 display_value = end_text

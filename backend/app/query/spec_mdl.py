@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ..services import dictionary
 from .contracts import QuerySpec
 
 
@@ -214,6 +215,7 @@ def _patrol_filter(
         "up_or_down": "patrol.up_or_down",
         "task_number": "patrol.task_number",
         "patrol_number": "patrol.patrol_number",
+        "patrol_status": "patrol.patrol_status",
     }
     expression = expressions.get(normalized)
     if not expression:
@@ -327,6 +329,14 @@ def _patrol_dimension(field: str, joins: set[str]) -> tuple[str, str]:
         return "patrol.patrol_name", "巡检任务名称"
     if normalized == "patrol_number":
         return "patrol.patrol_number", "任务编号"
+    if normalized == "patrol_status":
+        return (
+            dictionary.case_expression(
+                "patrol.patrol_status",
+                dictionary.patrol_status_labels(),
+            ),
+            "巡检状态",
+        )
     if normalized in {"id", "patrol_id"}:
         return "patrol.id", "巡检任务ID"
     if normalized == "unit_id":
@@ -395,6 +405,13 @@ def _patrol_output(field: str) -> tuple[str, str] | None:
         "equipment_id": ("patrol.equipment_id", "巡检设备"),
         "create_time": ("patrol.create_time", "创建时间"),
         "patrol_mileage": ("patrol.patrol_mileage", "巡检里程"),
+        "patrol_status": (
+            dictionary.case_expression(
+                "patrol.patrol_status",
+                dictionary.patrol_status_labels(),
+            ),
+            "巡检状态",
+        ),
         "unit_id": ("patrol.unit_id", "管养单位ID"),
     }
     return mapping.get(normalized)

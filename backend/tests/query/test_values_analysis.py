@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 from app.query.analysis import analyze_single_turn
@@ -8,6 +9,46 @@ from app.query.values import resolve_value
 
 
 class ValueAnalysisTests(unittest.TestCase):
+    def test_next_month_exclusive_boundary_uses_range_end(self):
+        value = resolve_value(
+            "create_time",
+            "<",
+            "下月第一天",
+            "华容－常宁高速公路在本月的巡检任务完成情况如何",
+            "mysql",
+        )
+
+        now = datetime.now()
+        self.assertEqual(
+            value.storage_value,
+            (
+                f"{now.year + (1 if now.month == 12 else 0):04d}-"
+                f"{1 if now.month == 12 else now.month + 1:02d}-01 00:00:00"
+            ),
+        )
+        self.assertEqual(value.op, "<")
+
+    @patch("app.query.values.dictionary.code_labels")
+    def test_patrol_status_uses_patrol_dictionary(self, code_labels):
+        code_labels.return_value = {"0": "未开始", "15": "已完成"}
+
+        value = resolve_value(
+            "patrol_status",
+            "=",
+            "已完成",
+            "只看已完成的巡检任务",
+            "mysql",
+        )
+
+        code_labels.assert_called_once_with(
+            "mysql",
+            "ai_maintain_patrol",
+            "patrol_status",
+        )
+        self.assertEqual(value.storage_value, "15")
+        self.assertEqual(value.display_value, "已完成")
+        self.assertEqual(value.resolver, "enum:patrol_status")
+
     def test_exact_date_filter_uses_its_own_raw_value(self):
         question = "长沙－芷江高速公路11月2日与3日的病害对比情况"
 

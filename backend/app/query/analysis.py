@@ -4,8 +4,8 @@ import json
 import re
 from typing import Any
 
-from ..services import prompts
-from ..services.llm import chat_json, role_model
+from ..services import prompts, route_resolver
+from ..services.llm import LLMError, chat_json, role_model
 from ..services.resource_loader import load_yaml
 from .audit import audit_query_plan
 from .contracts import (
@@ -325,6 +325,32 @@ def _apply_question_contract(
                         "average_area",
                         "route_length_km",
                     ),
+                    "limit": None,
+                    "question": question,
+                }
+            )
+        ]
+        dependencies.clear()
+        node_types.clear()
+        node_types[specs[0].id] = "query_data"
+    if "完成情况" in question and any(
+        spec.subject == "patrol" for spec in specs
+    ):
+        base = next(spec for spec in specs if spec.subject == "patrol")
+        filters = tuple(
+            item for item in base.filters if item.field != "patrol_status"
+        )
+        specs[:] = [
+            QuerySpec(
+                **{
+                    **base.__dict__,
+                    "subject": "patrol",
+                    "view": "distribution",
+                    "metrics": ("count",),
+                    "dimensions": ("patrol_status",),
+                    "filters": filters,
+                    "output_projection": ("patrol_status", "count"),
+                    "order_by": (),
                     "limit": None,
                     "question": question,
                 }
@@ -663,6 +689,86 @@ def _apply_response_contract(
         )
 
 
+def _completion_status_plan(
+    question: str,
+    kind: str,
+    schema: PhysicalSchemaView,
+    reach: FieldReachSet,
+) -> QueryPlan | None:
+    original = str(question or "").strip()
+    if (
+        "完成情况" not in original
+        or not any(word in original for word in ("巡检", "巡查"))
+        or not re.search(r"(?:本|这)(?:个)?月", original)
+    ):
+        return None
+    filters = []
+    route_text = route_resolver._route_text_in_message(original)
+    if route_text:
+        filters.append(
+            resolve_value("route_name", "=", route_text, original, kind)
+        )
+    filters.extend(
+        [
+            resolve_value(
+                "create_time",
+                ">=",
+                "本月第一天",
+                original,
+                kind,
+            ),
+            resolve_value(
+                "create_time",
+                "<",
+                "下月第一天",
+                original,
+                kind,
+            ),
+        ]
+    )
+    specs = [
+        QuerySpec(
+            id="q1",
+            kind=kind,
+            subject="patrol",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("patrol_status",),
+            filters=tuple(filters),
+            output_projection=("patrol_status", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+            question=original,
+        )
+    ]
+    dependencies: dict[str, tuple[str, ...]] = {}
+    node_types = {"q1": "query_data"}
+    _append_post_calc(
+        specs,
+        dependencies,
+        node_types,
+        "q1",
+        original,
+    )
+    contract = IntentContract(
+        original_question=original,
+        kind=kind,
+        intent_family="analysis",
+        final_goal="分析巡检任务完成状态",
+        unknown_terms=(),
+    )
+    return build_query_plan(
+        contract,
+        tuple(specs),
+        schema,
+        reach,
+        dependencies,
+        node_types,
+        response_mode="analysis",
+    )
+
+
 def _analyze_once(
     question: str,
     kind: str,
@@ -968,6 +1074,9 @@ def analyze_single_turn(
     *,
     audit: bool = False,
 ) -> QueryPlan:
+    deterministic = _completion_status_plan(question, kind, schema, reach)
+    if deterministic is not None:
+        return deterministic
     feedback = ""
     for attempt in range(2):
         try:
@@ -978,6 +1087,15 @@ def analyze_single_turn(
                 reach,
                 feedback,
             )
+        except LLMError as exc:
+            if attempt == 0:
+                feedback = (
+                    "上一轮模型没有返回合法 JSON。"
+                    "请只输出符合 query_spec 格式的 JSON，不要附加解释。"
+                    f"错误信息：{exc}"
+                )
+                continue
+            raise
         except QuerySpecError as exc:
             if attempt == 0:
                 feedback = f"上一轮 QuerySpec 解析失败：{exc}"
