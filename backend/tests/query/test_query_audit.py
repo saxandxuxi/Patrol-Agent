@@ -482,6 +482,87 @@ class QueryAuditTests(unittest.TestCase):
 
     @patch("app.query.analysis.audit_query_plan")
     @patch("app.query.analysis.chat_json")
+    def test_post_calc_upstream_missing_metric_patch_is_not_ignored(
+        self,
+        chat_json,
+        audit,
+    ):
+        chat_json.return_value = {
+            "final_goal": "路线健康比较",
+            "intent_family": "analysis",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count", "total_area"],
+                    "dimensions": ["route_name"],
+                    "filters": [],
+                    "output_projection": ["route_name", "count", "total_area"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "q2",
+                    "action": "post_calc",
+                    "subject": "disease",
+                    "view": "data",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": ["q1"],
+                    "inputs": [],
+                },
+            ],
+        }
+        audit.side_effect = [
+            {
+                "complete": False,
+                "issues": [
+                    {
+                        "code": "missing_metric",
+                        "node_id": "q1",
+                        "reason": "密度计算需要路线长度",
+                        "set": {
+                            "metrics": [
+                                "count",
+                                "total_area",
+                                "route_length_km",
+                            ],
+                            "output_projection": [
+                                "route_name",
+                                "count",
+                                "total_area",
+                                "route_length_km",
+                            ],
+                        },
+                    }
+                ],
+            },
+            {"complete": True, "issues": []},
+        ]
+
+        plan = analyze_single_turn(
+            "比较路线病害密度",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+        )
+
+        self.assertIn("route_length_km", plan.nodes[0].spec.metrics)
+        self.assertEqual(audit.call_count, 2)
+
+    @patch("app.query.analysis.audit_query_plan")
+    @patch("app.query.analysis.chat_json")
     def test_structured_audit_patch_is_applied_without_changing_scope(
         self,
         chat_json,

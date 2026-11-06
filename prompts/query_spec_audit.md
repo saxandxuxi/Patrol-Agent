@@ -38,6 +38,12 @@
     按真实时间排序且 `limit=N` 的批次节点、按同一批次键统计指标的数据节点，以及
     `view=trend`、依赖这两个节点的 `post_calc`。只有通用 `data` 型计算或只有一个数据节点时，
     返回 `invalid_view_shape`。
+22. 路线健康、病害严重程度、优先养护等评价题应使用真实代理指标
+    `count`、`total_area`、`average_area`、`sum_effective_disease_length`、
+    `route_length_km`，并用 `post_calc` 综合比较。`disease_density` 不是可执行指标；
+    密度必须声明为 `post_calc` 派生计算。用户未要求病害类型时，不应额外增加路线 × 类型分布。
+    表示“越少/越低越好”的健康评价，`post_calc.required_assertions` 必须包含
+    `lower_is_better`；缺失时通过 `set.required_assertions` 补齐。
 
 如果计划完整，返回：
 {

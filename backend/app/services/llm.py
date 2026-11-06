@@ -42,6 +42,11 @@ def _role_choice(
     chosen = str(settings_payload.get(f"{role}_model") or "").strip()
     if chosen:
         return chosen
+    defaults = settings_payload.get("_defaults")
+    if isinstance(defaults, dict):
+        role_default = str(defaults.get(f"{role}_model") or "").strip()
+        if role_default:
+            return role_default
     for fallback in _ROLE_FALLBACKS.get(role, ()):
         inherited = _role_choice(settings_payload, fallback, seen)
         if inherited:

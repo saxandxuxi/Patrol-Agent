@@ -363,7 +363,13 @@ def _disease_metric(metric: str, joins: set[str]) -> tuple[str, str]:
     if normalized == "route_length_km":
         joins.add("route")
         return "route.route_length_km", "路线长度_km"
-    raise UnsupportedQuerySpec(f"病害查询不支持指标：{metric}")
+    supported = (
+        "count、total_area/sum_area、average_area/avg_area、"
+        "sum_effective_disease_length、route_length_km"
+    )
+    raise UnsupportedQuerySpec(
+        f"病害查询不支持指标：{metric}；可用指标：{supported}"
+    )
 
 
 def _patrol_metric(metric: str) -> tuple[str, str]:

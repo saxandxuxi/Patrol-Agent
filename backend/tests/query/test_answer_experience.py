@@ -9,6 +9,81 @@ from app.services import agent
 
 
 class AnswerExperienceTests(unittest.TestCase):
+    def test_density_uses_structured_route_length_not_disease_length(self):
+        payload = agent._density_rows(
+            "比较路线病害密度",
+            [
+                {
+                    "columns": ["路线名称", "数量", "总面积", "总长度", "路线长度_km"],
+                    "rows": [
+                        {
+                            "路线名称": "A",
+                            "数量": "5",
+                            "总面积": "20",
+                            "总长度": "100",
+                            "路线长度_km": "10",
+                        }
+                    ],
+                    "spec": {
+                        "metrics": [
+                            "count",
+                            "sum_area",
+                            "route_length_km",
+                        ],
+                        "dimensions": ["route_name"],
+                    },
+                    "field_labels": {
+                        "count": "数量",
+                        "sum_area": "总面积",
+                        "route_length_km": "路线长度_km",
+                        "route_name": "路线名称",
+                    },
+                }
+            ],
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["rows"][0]["密度_处_per_km"], 0.5)
+
+    def test_density_lower_is_better_selects_lowest_value(self):
+        payload = agent._density_rows(
+            "比较路线健康状况",
+            [
+                {
+                    "columns": ["路线名称", "数量", "总面积", "路线长度_km"],
+                    "rows": [
+                        {
+                            "路线名称": "A",
+                            "数量": "5",
+                            "总面积": "20",
+                            "路线长度_km": "10",
+                        },
+                        {
+                            "路线名称": "B",
+                            "数量": "8",
+                            "总面积": "40",
+                            "路线长度_km": "40",
+                        },
+                    ],
+                    "spec": {
+                        "metrics": ["count", "sum_area", "route_length_km"],
+                        "dimensions": ["route_name"],
+                    },
+                    "field_labels": {
+                        "count": "数量",
+                        "sum_area": "总面积",
+                        "route_length_km": "路线长度_km",
+                        "route_name": "路线名称",
+                    },
+                }
+            ],
+            lower_is_better=True,
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertIn("密度最低的是B", payload["reply"])
+        self.assertEqual(payload["rows"][0]["路线名称"], "B")
+
     @patch("app.services.agent.chat", side_effect=AssertionError("LLM should not be called"))
     def test_structured_trend_uses_sequence_and_metric_specs(self, _chat):
         payload = agent._post_calc_payload(
@@ -256,6 +331,9 @@ class AnswerExperienceTests(unittest.TestCase):
         )
 
         self.assertEqual(answer.text, conclusion)
+        self.assertEqual(len(answer.sections), 2)
+        self.assertEqual(answer.sections[0]["node_id"], "q1")
+        self.assertEqual(answer.sections[1]["node_id"], "q2_calc")
 
     def test_large_table_is_compressed_to_metric_boundaries(self):
         rows = [

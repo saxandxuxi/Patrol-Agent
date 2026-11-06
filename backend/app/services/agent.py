@@ -3245,113 +3245,133 @@ def _per_group_max_rows(
 def _density_rows(
     question: str,
     deps: list[dict[str, Any]],
+    *,
+    lower_is_better: bool = False,
 ) -> dict[str, Any] | None:
     """按分组行确定性地计算“数量 / 长度”密度。"""
-    if "密度" not in question:
-        return None
-    rows = [
-        _row_with_group_labels(dep, row)
-        for dep in deps
-        for row in (dep.get("rows") or [])
-        if isinstance(row, dict) and row
-    ]
-    if not rows:
-        return None
-    columns = list(rows[0])
-    count_column = next(
-        (
-            column
-            for column in columns
-            if re.search(r"(?:病害|泛油)?(?:总数|数量|处数)|count", column, re.I)
-        ),
-        "",
-    )
-    area_column = next(
-        (
-            column
-            for column in columns
-            if re.search(r"总面积|面积总和|^面积$", column)
-        ),
-        "",
-    )
-    length_column = next(
-        (
-            column
-            for column in columns
-            if re.search(r"长度|(?:^|_)km$|公里", column, re.I)
-        ),
-        "",
-    )
-    label_columns = [
-        column
-        for column in columns
-        if column
-        not in {count_column, length_column, area_column}
-        and any(
-            not re.fullmatch(
-                r"-?\d+(?:\.\d+)?",
-                str(row.get(column) or "").strip(),
-            )
-            for row in rows
-        )
-    ]
-    if not (count_column and length_column and label_columns):
-        return None
-    area_density = bool(re.search(r"面积\s*[/÷]\s*长度|面积密度", question))
     out: list[dict[str, Any]] = []
-    for row in rows:
-        try:
-            count = float(str(row.get(count_column)))
-            length = float(str(row.get(length_column)))
-        except (TypeError, ValueError):
+    route_columns: list[str] = []
+    subgroup_columns: list[str] = []
+    for dep in deps:
+        field_labels = dep.get("field_labels")
+        if not isinstance(field_labels, dict):
             continue
-        if length <= 0:
-            continue
-        item = {column: row.get(column) for column in label_columns}
-        item.update(
-            {
-                count_column: row.get(count_column),
-                length_column: row.get(length_column),
-                "密度_处_per_km": round(count / length, 4),
-            }
+        labels = {
+            str(field): str(label)
+            for field, label in field_labels.items()
+            if str(label)
+        }
+        count_column = next(
+            (
+                labels[field]
+                for field in ("count", "count_task", "task_count", "record_count")
+                if field in labels
+            ),
+            "",
         )
-        if area_column:
-            try:
-                area = float(str(row.get(area_column)))
-            except (TypeError, ValueError):
-                area = None
-            item[area_column] = row.get(area_column)
-            item["面积密度_㎡_per_km"] = (
-                round(area / length, 4) if area is not None else None
+        length_column = labels.get("route_length_km", "")
+        area_column = next(
+            (
+                labels[field]
+                for field in ("total_area", "sum_area")
+                if field in labels
+            ),
+            "",
+        )
+        if not (count_column and length_column):
+            continue
+        metric_labels = {
+            labels[field]
+            for field in (
+                "count",
+                "total_area",
+                "sum_area",
+                "average_area",
+                "avg_area",
+                "sum_disease_length",
+                "sum_effective_disease_length",
+                "route_length_km",
             )
-        out.append(item)
+            if field in labels
+        }
+        label_columns = [
+            label
+            for field, label in labels.items()
+            if label not in metric_labels
+        ]
+        for label in (dep.get("group_labels") or {}):
+            if label not in label_columns:
+                label_columns.append(str(label))
+        route_label = labels.get("route_name", "")
+        if route_label and route_label not in route_columns:
+            route_columns.append(route_label)
+        for label in label_columns:
+            if label != route_label and label not in subgroup_columns:
+                subgroup_columns.append(label)
+        for row in dep.get("rows") or []:
+            if not isinstance(row, dict) or not row:
+                continue
+            row = _row_with_group_labels(dep, row)
+            try:
+                count = float(str(row.get(count_column)))
+                length = float(str(row.get(length_column)))
+            except (TypeError, ValueError):
+                continue
+            if length <= 0:
+                continue
+            item = {column: row.get(column) for column in label_columns}
+            for label in metric_labels:
+                item[label] = row.get(label)
+            item.update(
+                {
+                    count_column: row.get(count_column),
+                    length_column: row.get(length_column),
+                    "密度_处_per_km": round(count / length, 4),
+                }
+            )
+            if area_column:
+                try:
+                    area = float(str(row.get(area_column)))
+                except (TypeError, ValueError):
+                    area = None
+                item[area_column] = row.get(area_column)
+                item["面积密度_㎡_per_km"] = (
+                    round(area / length, 4) if area is not None else None
+                )
+            out.append(item)
     if not out:
         return None
-    metric = "面积密度_㎡_per_km" if area_density and area_column else "密度_处_per_km"
+    metric = (
+        "面积密度_㎡_per_km"
+        if area_column and any(
+            item.get("面积密度_㎡_per_km") is not None
+            for item in out
+        )
+        else "密度_处_per_km"
+    )
     out.sort(
         key=lambda item: float(item.get(metric) or 0),
-        reverse=True,
+        reverse=not lower_is_better,
     )
 
     def density_text(item: dict[str, Any]) -> str:
         text = (
             f"{item['密度_处_per_km']} 处/公里"
-            f"（{item[count_column]} 处 ÷ {item[length_column]} 公里）"
+            f"（{item.get(count_column)} 处 ÷ {item.get(length_column)} 公里）"
         )
-        if area_column:
+        if area_column and item.get("面积密度_㎡_per_km") is not None:
             text += f"；面积密度 {item['面积密度_㎡_per_km']} ㎡/公里"
+        details = []
+        for label in metric_labels:
+            if label in {count_column, length_column, area_column}:
+                continue
+            value = item.get(label)
+            if value not in (None, ""):
+                details.append(f"{label} {value}")
+        if details:
+            text += "；" + "，".join(details)
         return text
 
-    route_columns = [
-        column
-        for column in label_columns
-        if re.search(r"路线|道路|route", column, re.I)
-    ]
-    subgroup_columns = [
-        column
-        for column in label_columns
-        if column not in route_columns
-    ]
     if subgroup_columns:
         grouped_tops: dict[tuple[str, ...], dict[str, Any]] = {}
         for item in out:
@@ -3370,20 +3390,32 @@ def _density_rows(
             subject = subgroup_text or "全部记录"
             if route_text:
                 subject += f"：{route_text}"
-            summaries.append(f"{subject} 密度最高，{density_text(top)}")
+            summaries.append(
+                f"{subject} 密度{'最低' if lower_is_better else '最高'}，"
+                f"{density_text(top)}"
+            )
         reply = "；".join(summaries) + "。"
     else:
         top = out[0]
         top_label = " / ".join(
             str(top.get(column) or "")
-            for column in label_columns
+            for column in route_columns
+        ) or "全部记录"
+        reply = (
+            f"密度{'最低' if lower_is_better else '最高'}的是"
+            f"{top_label}，{density_text(top)}。"
         )
-        reply = f"密度最高的是{top_label}，{density_text(top)}。"
-    selected = [*label_columns, count_column]
+    selected = list(dict.fromkeys(
+        [
+            *route_columns,
+            *subgroup_columns,
+            count_column,
+            length_column,
+            "密度_处_per_km",
+        ]
+    ))
     if area_column:
         selected.append(area_column)
-    selected.extend([length_column, "密度_处_per_km"])
-    if area_column:
         selected.append("面积密度_㎡_per_km")
     return {
         "reply": reply,
@@ -3718,9 +3750,21 @@ def _post_calc_payload(
     comparison = _compare_datasets(question, deps)
     if comparison:
         return comparison
-    density = _density_rows(question, deps)
+    lower_is_better = "lower_is_better" in {
+        str(item)
+        for item in task.get("required_assertions") or ()
+    }
+    density = _density_rows(
+        question,
+        deps,
+        lower_is_better=lower_is_better,
+    )
     if not density and "严重" in question:
-        density = _density_rows("病害密度", deps)
+        density = _density_rows(
+            "病害密度",
+            deps,
+            lower_is_better=False,
+        )
     if density:
         if "严重" in question:
             density["reply"] = "按病害密度判断，" + str(density.get("reply") or "")

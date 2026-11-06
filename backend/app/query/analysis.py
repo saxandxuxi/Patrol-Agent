@@ -537,7 +537,12 @@ def analyze_single_turn(
                     "unused_dependency",
                 }
             ):
-                continue
+                if not (
+                    code == "missing_metric"
+                    and isinstance(issue.get("set"), dict)
+                    and issue["set"]
+                ):
+                    continue
             if (
                 not node_id
                 and post_calc_ids

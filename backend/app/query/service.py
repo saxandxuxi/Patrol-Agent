@@ -341,6 +341,7 @@ def assemble_answer(
     sections: list[dict[str, Any]],
     response_mode: str = "data",
 ) -> AnswerPackage:
+    text_sections = sections
     if response_mode == "analysis":
         conclusions = [
             section
@@ -348,9 +349,9 @@ def assemble_answer(
             if str(section.get("type") or "") in {"analysis", "post_calc"}
         ]
         if conclusions:
-            sections = conclusions
+            text_sections = conclusions
     texts: list[str] = []
-    for section in sections:
+    for section in text_sections:
         text = (
             _data_answer_text(section)
             if response_mode == "data"
@@ -713,6 +714,7 @@ def _execute_plan(
                     "view": node.spec.view,
                     "metrics": list(node.spec.metrics),
                     "dimensions": list(node.spec.dimensions),
+                    "required_assertions": list(node.spec.required_assertions),
                 },
                 upstream,
             )
@@ -896,10 +898,7 @@ def _execute_plan(
                 "truncated": observation.truncated,
             }
         )
-    return assemble_answer(
-        _terminal_sections(plan, sections),
-        response_mode=plan.response_mode,
-    )
+    return assemble_answer(sections, response_mode=plan.response_mode)
 
 
 def _answer_text(spec: Any, observation: Any) -> str:

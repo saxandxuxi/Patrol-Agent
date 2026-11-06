@@ -8,6 +8,21 @@ from app.services import agent, llm, orchestrator, react_agent
 
 
 class RuntimeBoundaryTests(unittest.TestCase):
+    def test_empty_role_setting_uses_role_default_not_global_default(self):
+        chosen = llm._role_choice(
+            {
+                "semantic_model": "",
+                "planner_model": "",
+                "_defaults": {
+                    "semantic_model": "qwen3.7-plus",
+                    "planner_model": "qwen3.7-plus",
+                },
+            },
+            "semantic",
+        )
+
+        self.assertEqual(chosen, "qwen3.7-plus")
+
     @patch("app.services.llm._post")
     def test_reasoning_model_gets_enough_tokens_for_final_content(self, post):
         post.return_value = {
@@ -96,6 +111,12 @@ class RuntimeBoundaryTests(unittest.TestCase):
             [
                 {
                     "group_labels": {"病害类型": "坑槽"},
+                    "field_labels": {
+                        "count": "数量",
+                        "sum_area": "面积",
+                        "route_length_km": "长度",
+                        "route_name": "路线",
+                    },
                     "rows": [
                         {
                             "路线": "A",
@@ -107,6 +128,12 @@ class RuntimeBoundaryTests(unittest.TestCase):
                 },
                 {
                     "group_labels": {"病害类型": "横向裂缝"},
+                    "field_labels": {
+                        "count": "数量",
+                        "sum_area": "面积",
+                        "route_length_km": "长度",
+                        "route_name": "路线",
+                    },
                     "rows": [
                         {
                             "路线": "A",

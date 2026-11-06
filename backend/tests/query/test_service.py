@@ -698,6 +698,12 @@ class ServiceTests(unittest.TestCase):
             {
                 "q1": {
                     "columns": ["路线名称", "病害数量", "病害总面积", "路线长度"],
+                    "field_labels": {
+                        "route_name": "路线名称",
+                        "count": "病害数量",
+                        "total_area": "病害总面积",
+                        "route_length_km": "路线长度",
+                    },
                     "rows": [
                         {
                             "路线名称": "A",

@@ -80,6 +80,13 @@
 21. 相对时间必须在 QuerySpec 中转换成明确时间边界：使用 `<<current_date>>` 计算起止日期，
     时间过滤只使用 `>=`、`<` 或 `between`。严禁输出 `month` 这类非 SQL 比较运算符，
     也不要让下游再次解释“本月、最近三个月”等自然语言。
+22. 路线健康、病害严重程度、优先养护等评价题只生成一个路线级分布节点，指标使用
+    `count`、`total_area`/`sum_area`、`average_area`/`avg_area`、
+    `sum_effective_disease_length`、`route_length_km`，再生成一个消费这些指标的
+    `post_calc`。不要输出不存在的 `disease_density` 指标；密度由 `post_calc` 用
+    数量或面积除以 `route_length_km` 计算。用户没有要求病害类型时，不要额外生成
+    路线 × 病害类型的分布节点。表示“越少/越低越好”的评价题，`post_calc` 的
+    `required_assertions` 必须包含 `lower_is_better`。
 
 允许的 view：
 count / sum / avg / distribution / list / detail / top / trend / bucket_compare / photo / data

@@ -18,6 +18,28 @@ def binding(field, op, value):
 
 
 class SpecMdlTests(unittest.TestCase):
+    def test_unsupported_metric_error_lists_supported_metrics(self):
+        with self.assertRaises(UnsupportedQuerySpec) as caught:
+            compile_spec_mdl(
+                QuerySpec(
+                    id="q1",
+                    kind="mysql",
+                    subject="disease",
+                    view="distribution",
+                    metrics=("disease_density",),
+                    dimensions=("route_name",),
+                    filters=(),
+                    output_projection=("route_name", "disease_density"),
+                    order_by=(),
+                    limit=None,
+                    required_assertions=(),
+                    question="比较路线病害密度",
+                )
+            )
+
+        self.assertIn("count", str(caught.exception))
+        self.assertIn("route_length_km", str(caught.exception))
+
     def test_disease_distribution_can_group_by_patrol_number(self):
         sql = compile_spec_mdl(
             QuerySpec(
