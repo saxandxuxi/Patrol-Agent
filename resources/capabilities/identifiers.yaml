@@ -1,1 +1,19 @@
-identifiers: {}
+identifiers:
+  version: 1
+  identifiers:
+    XJJL:
+      filter_field: task_number
+      owner: patrol
+      label: 巡检任务号
+    XCBH:
+      filter_field: patrol_number
+      owner: patrol
+      label: 巡查编号
+    BPLHZD:
+      filter_field: problem_number
+      owner: disease
+      label: 病害编号
+    KZXB:
+      filter_field: problem_number
+      owner: disease
+      label: 病害编号

@@ -355,18 +355,10 @@ def _overrides() -> dict[str, Any]:
     事实源是库里的 COLUMN_COMMENT，这里只写例外；文件放在项目根 `resources/field_meta/`。
     老的 `backend/app/data/` 位置仍兼容（迁移期）。
     """
-    legacy = Path(__file__).resolve().parents[1] / "data" / "code_map_overrides.json"
-    from .resource_loader import load_json
+    from .resource_loader import load_capability_file
 
-    data = load_json("field_meta/code_map_overrides.json")
-    if isinstance(data, dict) and data:
-        return data
-    if legacy.exists():
-        try:
-            return json.loads(legacy.read_text(encoding="utf-8")) or {}
-        except Exception:  # noqa: BLE001
-            return {}
-    return {}
+    data = load_capability_file("field_overrides.yaml", {})
+    return data if isinstance(data, dict) else {}
 
 
 def _decorate(kind: str, live: dict[str, Any]) -> dict[str, Any]:

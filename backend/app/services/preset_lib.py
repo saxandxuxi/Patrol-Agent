@@ -608,13 +608,13 @@ def _plan_flags(plan: dict[str, Any]) -> dict[str, bool]:
 
 
 def match_builtin_templates(plan: dict[str, Any], limit: int = 3) -> list[dict[str, Any]]:
-    """按**语义 plan** 匹配代码里的内置模板（resources/sql_templates/_index.yaml）。
+    """按**语义 plan** 匹配代码里的内置模板（resources/capabilities/templates.yaml）。
 
     这是"快速通道"的选模板方式：只看 shape / 主体 / 分组维度 / 指标 / 派生指标与几个布尔特征，
     **不再用关键词去穷举触发**（docs/代码结构重构与模板外置方案.md §5.2 第 3 条）。
     声明里表达不了的（比如"尺寸"这种模糊指标）就不命中，交 Wren。
     """
-    from .resource_loader import load_yaml
+    from .resource_loader import load_capability_file
 
     kind = str(plan.get("kind") or "mysql")
     shape = str(plan.get("shape") or "")
@@ -628,7 +628,7 @@ def match_builtin_templates(plan: dict[str, Any], limit: int = 3) -> list[dict[s
     route = slots.get("route_match") or {}
 
     matches: list[dict[str, Any]] = []
-    registry = load_yaml("sql_templates/_index.yaml", {}) or {}
+    registry = load_capability_file("templates.yaml", {}) or {}
     for item in registry.get("templates") or []:
         if str((item or {}).get("source")) != "builtin":
             continue

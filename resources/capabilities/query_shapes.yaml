@@ -1,5 +1,122 @@
 query_shapes:
   count:
-    allowed_views: [count]
+    allowed_views:
+    - count
   distribution:
     requires_dimensions: true
+  semantic:
+    shapes:
+    - count
+    - sum
+    - avg
+    - distribution
+    - list
+    - top
+    - trend
+    - bucket_compare
+    subjects:
+    - disease
+    - pile_point
+    - section
+    - patrol
+    - work_order
+    - asset
+    - route
+    - bridge
+    - tunnel
+    - slope
+    - project
+    group_by:
+    - damage_type
+    - pic_type
+    - route
+    - section
+    - route_level
+    - tech_grade
+    - surface_type
+    - direction
+    - image_presence
+    - category
+    - month
+    - day
+    - week
+    - half_month
+    - hour
+    - year
+    - half_year
+    - quarter
+    - season
+    - ten_day
+    - dow
+    - workday
+    - time_of_day
+    - minute
+    - every_n_days
+    - every_n_hours
+    - every_n_minutes
+    - device
+    - confidence
+    - area_bucket
+    - pile_bucket
+    - manage_dept
+    - problem_status
+    - problem_source
+    - collect
+    - mission_flag
+    - luge_name
+    - history_damage_interval
+    metrics:
+    - count
+    - total_area
+    - avg_area
+    - max_area
+    - min_area
+    - avg_length
+    - sum_effective_disease_length
+    - total_effective_disease_length
+    - avg_effective_disease_length
+    - max_effective_disease_length
+    - min_effective_disease_length
+    - converted_area
+    - confidence
+    - ratio
+    - density
+    - interval
+    - rate
+    - distinct_pile
+    - duration
+    derived:
+    - ratio
+    - density
+    - interval
+    - difference
+    - linear_area
+    output_fields:
+    - problem_number
+    - pile_number
+    - area
+    - confidence
+    - collection_time
+    - route_name
+    - problem_type_name
+    - lng_lat
+    - image
+    - memo
+    order:
+    - count_desc
+    - count_asc
+    - metric_desc
+    - metric_asc
+    condition_ops:
+    - '='
+    - '!='
+    - '>'
+    - '>='
+    - <
+    - <=
+    - between
+    - in
+    - is_null
+    - not_null
+    - empty
+    - not_empty

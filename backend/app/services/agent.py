@@ -5758,12 +5758,12 @@ def _followup_suggestions_sync(question: str, reply: str) -> str:
 
 
 # ── agent 侧词表外置（docs/代码结构重构与模板外置方案.md §5.3）───────────────
-# `resources/lexicon/result_words.yaml` 里配了就覆盖，没配就保持上面代码里的默认值。
+# `resources/capabilities/result_words.yaml` 里配了就覆盖，没配就保持默认值。
 def _result_words(section: str, default: Any) -> Any:
     try:
-        from .resource_loader import load_yaml
+        from .resource_loader import load_capability_file
 
-        data = load_yaml("lexicon/result_words.yaml", {}) or {}
+        data = load_capability_file("result_words.yaml", {}) or {}
     except Exception:  # noqa: BLE001
         return default
     value = data.get(section)
@@ -5791,9 +5791,9 @@ def _result_words(section: str, default: Any) -> Any:
 def _result_pairs(section: str, default: Any) -> Any:
     """[{words: [...], terms: [...]}] → ((words...), (terms...))，形状与代码一致。"""
     try:
-        from .resource_loader import load_yaml
+        from .resource_loader import load_capability_file
 
-        rows = (load_yaml("lexicon/result_words.yaml", {}) or {}).get(section)
+        rows = (load_capability_file("result_words.yaml", {}) or {}).get(section)
     except Exception:  # noqa: BLE001
         rows = None
     if not isinstance(rows, list) or not rows:

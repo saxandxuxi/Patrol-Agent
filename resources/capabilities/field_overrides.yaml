@@ -1,1 +1,151 @@
-field_overrides: {}
+field_overrides:
+  _note: 字段目录的人工覆盖：只写例外，其余全部来自库里的 COLUMN_COMMENT。事实源是数据库注释，这里只是覆盖层。见 docs/代码结构重构与模板外置方案.md §5.4。
+  _用法:
+    tables: 覆盖表的中文名（resolve_table 用）
+    columns: 覆盖某一列的 label / code_map / aliases（aliases = 用户口语说法，供字段触达识别）
+    roles: 额外角色：image / geo / code / time / numeric
+  mysql:
+    tables:
+      ai_problem:
+        label: 病害记录
+      ai_problem_base:
+        label: 病害类型字典
+      ai_asset_main:
+        label: 巡查资产记录
+      ai_asset_base:
+        label: 资产类型字典
+      ai_distance_capture:
+        label: 定距采集记录
+      basic_facilities_routes:
+        label: 路线台账
+      basic_facilities_sections:
+        label: 路段台账
+      basic_facilities_sections_pile_detail:
+        label: 里程桩点
+      basic_facilities_bridges:
+        label: 桥梁台账
+      basic_facilities_tunnels:
+        label: 隧道台账
+      basic_facilities_slope:
+        label: 边坡台账
+      project_manage_project_main:
+        label: 工程项目台账
+      maintenance_project:
+        label: 养护项目
+      maintenance_road_work_record:
+        label: 日常养护作业记录
+      ai_work_order:
+        label: 病害工单
+      maintenance_work_order:
+        label: 养护工单
+      ai_maintain_patrol:
+        label: 巡查任务
+    columns:
+      ai_problem_base:
+        problem_type:
+          aliases:
+          - 病害名称
+          - 病害名
+          - 类型名称
+          - 病害的类型名称
+      basic_facilities_sections_pile_detail:
+        lng:
+          label: 经度
+      ai_problem:
+        problem_url:
+          label: 病害图片
+        preview_url:
+          label: 缓存图片
+        pic_position:
+          label: 图片位置（含置信度）
+        collect:
+          label: 收藏
+          code_map:
+            '0': 未收藏
+            '1': 已收藏
+        track_problem:
+          label: 重点关注
+          code_map:
+            '0': 否
+            '1': 是
+        up_or_down:
+          label: 上下行
+          code_map:
+            '0': 全部
+            '1': 上行
+            '2': 下行
+        operate_type:
+          label: 病害操作
+          code_map:
+            '0': 待转工单
+            '3': 病害恢复
+            '5': 删除工单
+            '10': 转工单
+            '15': 忽略病害
+        history_damage_interval:
+          label: 历史损坏程度区间
+      basic_facilities_routes:
+        level:
+          label: 行政级别
+          code_map:
+            '0': 国道
+            '1': 省道
+            '2': 县道
+            '3': 乡道
+            '4': 村道
+      basic_facilities_sections:
+        tech_grade:
+          label: 路面技术等级
+        surface_type:
+          label: 路面类型
+        lane_type:
+          label: 车道特征
+        track_mileage:
+          label: 轨迹实测里程
+  postgresql:
+    tables:
+      gps_points:
+        label: GPS 轨迹点
+      inclination_points:
+        label: 倾斜监测点
+    columns:
+      gps_points:
+        device_id:
+          label: 设备编号
+        recv_time:
+          label: 接收时间
+        create_time:
+          label: 创建时间
+        lat:
+          label: 纬度
+        lon:
+          label: 经度
+        speed:
+          label: 速度
+        satellites:
+          label: 卫星数
+        direct:
+          label: 方向角
+        data:
+          label: 原始数据
+      inclination_points:
+        device_id:
+          label: 设备编号
+        collect_time:
+          label: 采集时间
+        recv_time:
+          label: 接收时间
+        vertical_distance:
+          label: 垂直距离
+        horizontal_distance:
+          label: 水平距离
+        x:
+          label: X 坐标
+        y:
+          label: Y 坐标
+        now_gps:
+          label: 当前 GPS 位置
+        last_gps:
+          label: 上一个 GPS 位置
+        raw_data:
+          label: 原始报文

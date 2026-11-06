@@ -4,4 +4,263 @@ metrics:
       expression: COUNT(*)
       label: 数量
       unit: 处
-      allowed_views: [count, distribution, top, trend]
+      allowed_views:
+      - count
+      - distribution
+      - top
+      - trend
+  _lexicon:
+    metric_expressions:
+    - fallback_words:
+      - 置信度
+      - 可信度
+      - 信度
+      expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.confidence')) AS DECIMAL(10,6))
+    - fallback_words:
+      - 标注宽度
+      - 图片宽度
+      - AI 宽度
+      expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.width')) AS DECIMAL(10,2))
+    - fallback_words:
+      - 标注高度
+      - 图片高度
+      - AI 高度
+      expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.height')) AS DECIMAL(10,2))
+    - fallback_words:
+      - 面积
+      expr: p.area
+    - fallback_words:
+      - 长度
+      expr: CASE WHEN p.disease_length IS NOT NULL AND p.disease_length > 0 THEN p.disease_length ELSE GREATEST(COALESCE(p.area_height,
+        0), COALESCE(p.area_width, 0)) END
+    dimensions:
+    - key: week
+      fallback_words:
+      - 哪几周
+      - 按周
+      - 第几周
+      - 周维度
+      - 每周
+      expr: CONCAT(DATE_FORMAT(p.collection_time, '%x'), '年第', DATE_FORMAT(p.collection_time, '%v'), '周')
+    - key: half_month
+      fallback_words:
+      - 半个月
+      - 上半月
+      - 下半月
+      - 每半个月
+      expr: CONCAT(DATE_FORMAT(p.collection_time, '%Y年%m月'), IF(DAY(p.collection_time) <= 15, '上半月', '下半月'))
+    - key: dow
+      fallback_words:
+      - 星期几
+      - 周几
+      - 星期
+      - 工作日
+      expr: CASE DAYOFWEEK(p.collection_time) WHEN 1 THEN '周日' WHEN 2 THEN '周一' WHEN 3 THEN '周二' WHEN 4 THEN '周三' WHEN 5 THEN
+        '周四' WHEN 6 THEN '周五' ELSE '周六' END
+    - key: hour
+      fallback_words:
+      - 几点
+      - 时段
+      - 时间段
+      - 小时
+      expr: HOUR(p.collection_time)
+    - key: day
+      fallback_words:
+      - 哪天
+      - 每天
+      - 按日
+      - 单日
+      - 每日
+      - 最近一次
+      - 最近
+      expr: DATE(p.collection_time)
+    - key: month
+      fallback_words:
+      - 哪个月
+      - 按月
+      - 每月的
+      - 月份
+      expr: DATE_FORMAT(p.collection_time, '%Y-%m')
+    - key: route
+      fallback_words:
+      - 哪条路
+      - 各条路
+      - 每条路
+      - 哪条路线
+      - 分布在哪
+      - 按路线
+      - 分路线
+      expr: r.short_name
+    - key: damage_type
+      fallback_words:
+      - 什么类型
+      - 各类型
+      - 按类型
+      - 哪些类型
+      - 什么病害
+      - 病害类型
+      - 哪种病害
+      - 哪种类型
+      expr: COALESCE(b.problem_type, '未知类型')
+    - key: direction
+      fallback_words:
+      - 上行还是下行
+      - 上下行
+      - 什么方向
+      - 方向分布
+      - 上行和下行
+      - 上行、下行
+      - 各方向
+      expr: CASE p.up_or_down WHEN '1' THEN '上行' WHEN '2' THEN '下行' WHEN '0' THEN '全部' WHEN '' THEN '未填' ELSE CONCAT('未知(',
+        p.up_or_down, ')') END
+    - key: device
+      fallback_words:
+      - 哪台设备
+      - 每台设备
+      - 按设备
+      expr: p.device_code
+    time_buckets:
+      day:
+      - DATE({alias}.collection_time)
+      - DATE({alias}.collection_time)
+      week:
+      - CONCAT(DATE_FORMAT({alias}.collection_time, '%x'), '年第', DATE_FORMAT({alias}.collection_time, '%v'), '周')
+      - CONCAT(DATE_FORMAT({alias}.collection_time, '%x'), '年第', DATE_FORMAT({alias}.collection_time, '%v'), '周')
+      - YEARWEEK({alias}.collection_time, 3)
+      half_month:
+      - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y年%m月'), IF(DAY({alias}.collection_time) <= 15, '上半月', '下半月'))
+      - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y年%m月'), IF(DAY({alias}.collection_time) <= 15, '上半月', '下半月'))
+      month:
+      - DATE_FORMAT({alias}.collection_time, '%Y-%m')
+      - DATE_FORMAT({alias}.collection_time, '%Y-%m')
+      hour:
+      - HOUR({alias}.collection_time)
+      - HOUR({alias}.collection_time)
+      year:
+      - CONCAT(YEAR({alias}.collection_time), '年')
+      - CONCAT(YEAR({alias}.collection_time), '年')
+      half_year:
+      - CONCAT(YEAR({alias}.collection_time), '年', IF(MONTH({alias}.collection_time) <= 6, '上半年', '下半年'))
+      - CONCAT(YEAR({alias}.collection_time), '年', IF(MONTH({alias}.collection_time) <= 6, '上半年', '下半年'))
+      quarter:
+      - CONCAT(YEAR({alias}.collection_time), '年第', QUARTER({alias}.collection_time), '季度')
+      - CONCAT(YEAR({alias}.collection_time), '年第', QUARTER({alias}.collection_time), '季度')
+      season:
+      - CONCAT(IF(MONTH({alias}.collection_time) <= 2, YEAR({alias}.collection_time) - 1, YEAR({alias}.collection_time)),
+        '年', CASE WHEN MONTH({alias}.collection_time) IN (3,4,5) THEN '春季' WHEN MONTH({alias}.collection_time) IN (6,7,8)
+        THEN '夏季' WHEN MONTH({alias}.collection_time) IN (9,10,11) THEN '秋季' ELSE '冬季' END)
+      - CONCAT(IF(MONTH({alias}.collection_time) <= 2, YEAR({alias}.collection_time) - 1, YEAR({alias}.collection_time)),
+        '年', CASE WHEN MONTH({alias}.collection_time) IN (3,4,5) THEN '春季' WHEN MONTH({alias}.collection_time) IN (6,7,8)
+        THEN '夏季' WHEN MONTH({alias}.collection_time) IN (9,10,11) THEN '秋季' ELSE '冬季' END)
+      - CONCAT(IF(MONTH({alias}.collection_time) <= 2, YEAR({alias}.collection_time) - 1, YEAR({alias}.collection_time)),
+        CASE WHEN MONTH({alias}.collection_time) IN (3,4,5) THEN '1' WHEN MONTH({alias}.collection_time) IN (6,7,8) THEN '2'
+        WHEN MONTH({alias}.collection_time) IN (9,10,11) THEN '3' ELSE '4' END)
+      ten_day:
+      - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y年%m月'), CASE WHEN DAY({alias}.collection_time) <= 10 THEN '上旬' WHEN
+        DAY({alias}.collection_time) <= 20 THEN '中旬' ELSE '下旬' END)
+      - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y年%m月'), CASE WHEN DAY({alias}.collection_time) <= 10 THEN '上旬' WHEN
+        DAY({alias}.collection_time) <= 20 THEN '中旬' ELSE '下旬' END)
+      - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y%m'), CASE WHEN DAY({alias}.collection_time) <= 10 THEN '1' WHEN DAY({alias}.collection_time)
+        <= 20 THEN '2' ELSE '3' END)
+      dow:
+      - CASE DAYOFWEEK({alias}.collection_time) WHEN 1 THEN '周日' WHEN 2 THEN '周一' WHEN 3 THEN '周二' WHEN 4 THEN '周三' WHEN 5
+        THEN '周四' WHEN 6 THEN '周五' ELSE '周六' END
+      - CASE DAYOFWEEK({alias}.collection_time) WHEN 1 THEN '周日' WHEN 2 THEN '周一' WHEN 3 THEN '周二' WHEN 4 THEN '周三' WHEN 5
+        THEN '周四' WHEN 6 THEN '周五' ELSE '周六' END
+      - WEEKDAY({alias}.collection_time)
+      workday:
+      - CASE WHEN WEEKDAY({alias}.collection_time) <= 4 THEN '工作日' ELSE '周末' END
+      - CASE WHEN WEEKDAY({alias}.collection_time) <= 4 THEN '工作日' ELSE '周末' END
+      - WEEKDAY({alias}.collection_time) <= 4
+      time_of_day:
+      - CASE WHEN HOUR({alias}.collection_time) < 6 THEN '凌晨' WHEN HOUR({alias}.collection_time) < 12 THEN '上午' WHEN HOUR({alias}.collection_time)
+        < 18 THEN '下午' ELSE '晚上' END
+      - CASE WHEN HOUR({alias}.collection_time) < 6 THEN '凌晨' WHEN HOUR({alias}.collection_time) < 12 THEN '上午' WHEN HOUR({alias}.collection_time)
+        < 18 THEN '下午' ELSE '晚上' END
+      - CASE WHEN HOUR({alias}.collection_time) < 6 THEN '1' WHEN HOUR({alias}.collection_time) < 12 THEN '2' WHEN HOUR({alias}.collection_time)
+        < 18 THEN '3' ELSE '4' END
+      minute:
+      - DATE_FORMAT({alias}.collection_time, '%Y-%m-%d %H:%i')
+      - DATE_FORMAT({alias}.collection_time, '%Y-%m-%d %H:%i')
+    numeric_fields:
+    - fallback_words:
+      - 面积
+      expr: p.area
+    - fallback_words:
+      - 置信度
+      - 可信度
+      - 信度
+      expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.confidence')) AS DECIMAL(10,6))
+    - fallback_words:
+      - 标注宽度
+      - 图片宽度
+      - AI 宽度
+      - 标注框宽
+      expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.width')) AS DECIMAL(10,2))
+    - fallback_words:
+      - 标注高度
+      - 图片高度
+      - AI 高度
+      - 标注框高
+      expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.height')) AS DECIMAL(10,2))
+    - fallback_words:
+      - 标注经度
+      - 图片经度
+      - 标注框经度
+      expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.lng')) AS DECIMAL(12,8))
+    - fallback_words:
+      - 标注纬度
+      - 图片纬度
+      - 标注框纬度
+      expr: CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.lat')) AS DECIMAL(12,8))
+    - fallback_words:
+      - 长度
+      expr: CASE WHEN p.disease_length IS NOT NULL AND p.disease_length > 0 THEN p.disease_length ELSE GREATEST(COALESCE(p.area_height,
+        0), COALESCE(p.area_width, 0)) END
+    - fallback_words:
+      - 桩号
+      - 里程
+      expr: p.pile_distance
+    numeric_ops:
+    - - 大于等于
+      - '>='
+    - - 不小于
+      - '>='
+    - - 不超过
+      - <=
+    - - 不高于
+      - <=
+    - - 等于
+      - '='
+    - - 正好
+      - '='
+    - - 恰好
+      - '='
+    - - 刚好
+      - '='
+    - - 为
+      - '='
+    - - 超过
+      - '>'
+    - - 大于
+      - '>'
+    - - 小于
+      - <
+    - - 低于
+      - <
+    - - 高于
+      - '>'
+    - - '>='
+      - '>='
+    - - <=
+      - <=
+    - - ≥
+      - '>='
+    - - ≤
+      - <=
+    - - '>'
+      - '>'
+    - - <
+      - <
+    - - '='
+      - '='

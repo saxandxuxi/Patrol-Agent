@@ -32,7 +32,7 @@ from . import preset_lib, schema_catalog
 from ..config import settings
 from .db import DatabaseError, db_manager
 from .logging_service import log_error, log_event
-from .resource_loader import load_yaml
+from .resource_loader import load_capability_file
 
 _FILE = Path(__file__).resolve().parents[1] / "data" / "auto_templates.json"
 _VERSION: tuple[float, int] | None = None
@@ -60,7 +60,7 @@ _COLUMN_LABELS = {
 
 
 def _cfg() -> dict[str, Any]:
-    return load_yaml("slots/predicate_slots.yaml", {}) or {}
+    return load_capability_file("predicates.yaml", {}) or {}
 
 
 # ── 注册表读写（自带 mtime/size 热加载，后端改文件不用重启）────────────────────
@@ -3026,7 +3026,7 @@ _AGG_METRIC = {
 
 
 def _metric_name(func: str, column: str) -> str:
-    """聚合 → 指标名（和 lexicon/metrics.yaml 的口径命名保持一致）。"""
+    """聚合 → 指标名（和 capabilities/metrics.yaml 的口径命名保持一致）。"""
     base = _AGG_METRIC.get(func, func)
     key = str(column or "").lower()
     if func == "count":

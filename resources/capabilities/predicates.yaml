@@ -1,1 +1,39 @@
-predicates: {}
+predicates:
+  version: 1
+  fixed_columns:
+  - del_flag
+  - tenant_id
+  - create_by
+  - update_by
+  - version
+  free_text_columns:
+  - memo
+  - problem_name
+  - problem_describe
+  - remark
+  - description
+  - content
+  numeric_ops:
+  - '='
+  - '>'
+  - '>='
+  - <
+  - <=
+  limit_range:
+  - 1
+  - 50
+  pile_columns:
+  - pile_distance
+  - pile_meter
+  dynamic_markers:
+  - percentile
+  - ntile
+  - percentile_cont
+  - median
+  wren_table_prefix: wren_src_
+  max_slots: 8
+  entity_sources:
+    basic_facilities_routes:
+      source: routes_with_data
+      value_column: id
+      label_column: short_name

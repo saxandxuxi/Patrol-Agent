@@ -1,1 +1,371 @@
-templates: {}
+templates:
+  version: 3
+  templates:
+  - id: route_density
+    title: 病害最密集桩号段（按 100 米分桶）
+    source: builtin
+    dialect: physical
+    trigger: shape=top + group_by=pile_bucket + 主体=disease
+    builder: _build_density_template
+    match:
+      shapes:
+      - top
+      subjects:
+      - disease
+      group_by:
+      - pile_bucket
+  - id: pile_bucket
+    title: 按桩号分段统计
+    source: builtin
+    dialect: physical
+    trigger: group_by=pile_bucket
+    builder: _build_pile_bucket_template
+    match:
+      group_by:
+      - pile_bucket
+      flags:
+        forbid:
+        - spatial_split
+  - id: bucket
+    title: 按指标中位数分两档对比
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_bucket_template）
+    builder: _build_bucket_template
+    match:
+      shapes:
+      - bucket_compare
+      flags:
+        forbid:
+        - numeric_condition
+        - spatial_split
+  - id: multi_route
+    title: 多路线对比（每条路一行）
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_multi_route_template）
+    builder: _build_multi_route_template
+    match:
+      group_by:
+      - route
+      metrics:
+      - avg_area
+      - total_area
+      - max_area
+      - avg_length
+      - count
+      flags:
+        require:
+        - multi_route
+    match_alt:
+      group_by:
+      - route
+      metrics:
+      - avg_area
+      - total_area
+      - max_area
+  - id: known_unknown
+    title: 已识别类型 vs 未识别类型分别计数
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_known_unknown_template）
+    builder: _build_known_unknown_template
+    match:
+      shapes:
+      - distribution
+      group_by:
+      - damage_type
+      flags:
+        require:
+        - has_damage_filter
+  - id: ratio
+    title: 占比计算（部分 ÷ 总数）
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_ratio_template）
+    builder: _build_ratio_template
+    match:
+      derived:
+      - ratio
+  - id: multi_metric
+    title: 一问多答（多个口径各占一列）
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_multi_metric_template）
+    builder: _build_multi_metric_template
+    match:
+      flags:
+        require:
+        - multi_metric
+      shapes:
+      - count
+      - sum
+      - avg
+  - id: table_count
+    title: 台账/对象计数
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_table_count_template）
+    builder: _build_table_count_template
+    match:
+      shapes:
+      - count
+      subjects:
+      - route
+      - section
+      - pile_point
+      - asset
+      - work_order
+      - patrol
+  - id: route_info
+    title: 路线台账信息
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_route_info_template）
+    builder: _build_route_info_template
+    match:
+      shapes:
+      - list
+      subjects:
+      - route
+    match_alt:
+      shapes:
+      - count
+      subjects:
+      - route
+      - section
+      flags:
+        require:
+        - route_length
+  - id: per_km
+    title: 每公里指标（密度/间距）
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_per_km_template）
+    builder: _build_per_km_template
+    match:
+      derived:
+      - density
+      - interval
+  - id: threshold_count
+    title: 数值阈值筛选后计数
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_threshold_count_template）
+    builder: _build_threshold_count_template
+    match:
+      flags:
+        require:
+        - numeric_condition
+  - id: coverage_compare
+    title: 覆盖范围对比
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_coverage_compare_template）
+    builder: _build_coverage_compare_template
+    match:
+      subjects:
+      - route
+      flags:
+        require:
+        - multi_route
+  - id: other_routes
+    title: 不属于指定路线的病害
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_other_routes_template）
+    builder: _build_other_routes_template
+    match:
+      flags:
+        require:
+        - multi_route
+  - id: generic_metric
+    title: 通用「维度 × 指标」聚合
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_generic_metric_template）
+    builder: _build_generic_metric_template
+    match:
+      shapes:
+      - distribution
+      - trend
+      group_by:
+      - year
+      - half_year
+      - quarter
+      - season
+      - month
+      - half_month
+      - ten_day
+      - day
+      - hour
+      - workday
+      - time_of_day
+      - minute
+      - dow
+      - week
+      - route
+      - damage_type
+      - direction
+      - device
+      - pile_bucket
+      flags:
+        forbid:
+        - comparison
+  - id: patrol_task
+    title: 巡查任务统计
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_patrol_task_template）
+    builder: _build_patrol_task_template
+    match:
+      subjects:
+      - patrol
+  - id: patrol_route_overview
+    title: 巡查任务路线与病害归属概览
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_patrol_route_overview_template）
+    builder: _build_patrol_route_overview_template
+    match:
+      subjects:
+      - patrol
+      flags:
+        require:
+        - patrol_route_overview
+  - id: patrol_top
+    title: 巡查任务 TOP
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_patrol_top_template）
+    builder: _build_patrol_top_template
+    match:
+      subjects:
+      - patrol
+  - id: patrol_group
+    title: 巡查任务分组统计
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_patrol_group_template）
+    builder: _build_patrol_group_template
+    match:
+      subjects:
+      - patrol
+  - id: spatial_split
+    title: 前 N 米 / 后 N 米分段对比
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_spatial_split_template）
+    builder: _build_spatial_split_template
+    match:
+      flags:
+        require:
+        - spatial_split
+  - id: metric_top
+    title: 按指标取极值（并列出并列）
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_metric_top_template）
+    builder: _build_metric_top_template
+    match:
+      shapes:
+      - top
+  - id: average
+    title: 平均值 + 超过平均值的条数
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_average_template）
+    builder: _build_average_template
+    match:
+      metrics:
+      - avg_area
+      - avg_length
+      - avg
+      - average
+      shapes:
+      - count
+      - avg
+      - sum
+  - id: distinct_pile
+    title: 不同桩号计数
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_distinct_pile_template）
+    builder: _build_distinct_pile_template
+    match:
+      metrics:
+      - distinct
+      derived:
+      - distinct
+  - id: quality
+    title: 时间跨度/字段缺失等质量统计
+    source: builtin
+    dialect: physical
+    trigger: 语义结构匹配（见 _build_quality_template）
+    builder: _build_quality_template
+    match:
+      derived:
+      - quality
+  - id: photo_list
+    title: 病害图片明细（固定取 problem_url）
+    source: builtin
+    dialect: physical
+    trigger: shape=photo
+    builder: _build_photo_template
+    match:
+      shapes:
+      - photo
+      subjects:
+      - disease
+  - id: pg_point_query
+    title: GPS/倾角点位查询（PostgreSQL 库）
+    source: builtin
+    dialect: postgresql
+    trigger: kind=postgresql（点位表按设备号/时间过滤）
+    builder: _build_pg_template
+    match:
+      kinds:
+      - postgresql
+      shapes:
+      - count
+      - trend
+      - list
+      - detail
+      - photo
+  - id: generic_detail
+    title: 通用明细（任意表 + 任意列 + 任意条件）
+    source: generic
+  - id: generic_group_distribution
+    title: 通用分组分布
+    source: generic
+  - id: generic_time_series
+    title: 通用时间序列
+    source: generic
+  - id: generic_rank
+    title: 通用 Top N
+    source: generic
+  - id: generic_column_stats
+    title: 通用数值列统计
+    source: generic
+  - id: generic_null_completeness
+    title: 通用空值率/完整度
+    source: generic
+  - id: generic_distinct_values
+    title: 通用取值清单
+    source: generic
+  - id: generic_geo_bounds
+    title: 通用经纬度范围
+    source: generic
+  - id: generic_profile_columns
+    title: 数据画像
+    source: generic
+  fields:
+    disease.lane_index:
+      status: unavailable
+      reason: 业务能力文档声明车道分布尚未更新，不能把 lane_index 当作可靠统计依据
+    disease.unit_id:
+      status: lookup_required
+      reason: 当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联，不能完成单位排名
+    patrol.unit_id:
+      status: lookup_required
+      reason: 当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联

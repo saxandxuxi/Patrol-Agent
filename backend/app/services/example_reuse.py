@@ -21,7 +21,7 @@ from ..store import list_recorded_example_pairs
 from ..config import settings
 from . import calibrate
 from .rag import document_content, list_documents
-from .resource_loader import load_yaml
+from .resource_loader import load_capability_file
 from .logging_service import log_error, log_event
 from .route_resolver import _known_damage_types, _resolve_route
 from .sql_engine import validate_sql as sql_engine_validate
@@ -384,9 +384,9 @@ def _limit_number(limit: Any) -> int | None:
 
 def _top_n_range() -> tuple[int, int]:
     """TopN 白名单区间（和挖模板共用同一份配置）。"""
-    from .resource_loader import load_yaml
+    from .resource_loader import load_capability_file
 
-    cfg = load_yaml("slots/predicate_slots.yaml", {}) or {}
+    cfg = load_capability_file("predicates.yaml", {}) or {}
     low, high = (cfg.get("limit_range") or [1, 50])[:2]
     return int(low), int(high)
 

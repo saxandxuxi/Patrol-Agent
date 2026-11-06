@@ -1,8 +1,58 @@
 repair_policy:
-  failures:
-    unknown_metric:
-      actions: [rewrite_query_spec]
-      max_rounds: 2
-    unresolved_enum:
-      actions: [ask_confirmation]
-      max_rounds: 0
+  sql_runtime_error:
+    candidates:
+    - query_data
+    repair_role: sql
+    max_repair_rounds: 2
+    retryable: true
+  sql_semantic_mismatch:
+    candidates:
+    - query_data
+    repair_role: sql
+    max_repair_rounds: 2
+    retryable: true
+  answer_presentation_mismatch:
+    candidates: []
+    repair_role: answer
+    max_repair_rounds: 0
+    retryable: false
+  result_shape_mismatch:
+    candidates:
+    - query_data
+    - check_coverage
+    repair_role: sql
+    max_repair_rounds: 2
+    retryable: true
+  plan_contract_violation:
+    candidates:
+    - ask_user
+    repair_role: null
+    max_repair_rounds: 0
+    retryable: false
+  empty_unexpected:
+    candidates:
+    - check_coverage
+    - query_data
+    - ask_user
+    repair_role: semantic
+    max_repair_rounds: 1
+    retryable: true
+  post_calc_empty:
+    candidates:
+    - post_calc
+    - ask_user
+    repair_role: semantic
+    max_repair_rounds: 2
+    retryable: true
+  missing_dependency:
+    candidates:
+    - ask_user
+    repair_role: null
+    max_repair_rounds: 0
+    retryable: false
+  tool_error:
+    candidates:
+    - ask_user
+    repair_role: null
+    max_repair_rounds: 0
+    retryable: false

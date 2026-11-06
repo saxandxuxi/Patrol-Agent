@@ -455,10 +455,10 @@ def _code_template_candidates(message: str, plan: dict[str, Any]) -> list[dict[s
     warn = False
     plan_metrics = {str(item) for item in ((plan.get("semantic") or {}).get("metrics") or [])}
     if plan_metrics:
-        from .resource_loader import load_yaml
+        from .resource_loader import load_capability_file
 
         declared: set[str] = set()
-        for item in (load_yaml("sql_templates/_index.yaml", {}) or {}).get("templates") or []:
+        for item in (load_capability_file("templates.yaml", {}) or {}).get("templates") or []:
             declared |= {str(metric) for metric in ((item or {}).get("match") or {}).get("metrics") or []}
         declared |= {
             "count",

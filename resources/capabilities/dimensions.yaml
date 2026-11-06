@@ -1,1 +1,87 @@
-dimensions: {}
+dimensions:
+  _lexicon:
+  - key: week
+    fallback_words:
+    - 哪几周
+    - 按周
+    - 第几周
+    - 周维度
+    - 每周
+    expr: CONCAT(DATE_FORMAT(p.collection_time, '%x'), '年第', DATE_FORMAT(p.collection_time, '%v'), '周')
+  - key: half_month
+    fallback_words:
+    - 半个月
+    - 上半月
+    - 下半月
+    - 每半个月
+    expr: CONCAT(DATE_FORMAT(p.collection_time, '%Y年%m月'), IF(DAY(p.collection_time) <= 15, '上半月', '下半月'))
+  - key: dow
+    fallback_words:
+    - 星期几
+    - 周几
+    - 星期
+    - 工作日
+    expr: CASE DAYOFWEEK(p.collection_time) WHEN 1 THEN '周日' WHEN 2 THEN '周一' WHEN 3 THEN '周二' WHEN 4 THEN '周三' WHEN 5 THEN
+      '周四' WHEN 6 THEN '周五' ELSE '周六' END
+  - key: hour
+    fallback_words:
+    - 几点
+    - 时段
+    - 时间段
+    - 小时
+    expr: HOUR(p.collection_time)
+  - key: day
+    fallback_words:
+    - 哪天
+    - 每天
+    - 按日
+    - 单日
+    - 每日
+    - 最近一次
+    - 最近
+    expr: DATE(p.collection_time)
+  - key: month
+    fallback_words:
+    - 哪个月
+    - 按月
+    - 每月的
+    - 月份
+    expr: DATE_FORMAT(p.collection_time, '%Y-%m')
+  - key: route
+    fallback_words:
+    - 哪条路
+    - 各条路
+    - 每条路
+    - 哪条路线
+    - 分布在哪
+    - 按路线
+    - 分路线
+    expr: r.short_name
+  - key: damage_type
+    fallback_words:
+    - 什么类型
+    - 各类型
+    - 按类型
+    - 哪些类型
+    - 什么病害
+    - 病害类型
+    - 哪种病害
+    - 哪种类型
+    expr: COALESCE(b.problem_type, '未知类型')
+  - key: direction
+    fallback_words:
+    - 上行还是下行
+    - 上下行
+    - 什么方向
+    - 方向分布
+    - 上行和下行
+    - 上行、下行
+    - 各方向
+    expr: CASE p.up_or_down WHEN '1' THEN '上行' WHEN '2' THEN '下行' WHEN '0' THEN '全部' WHEN '' THEN '未填' ELSE CONCAT('未知(',
+      p.up_or_down, ')') END
+  - key: device
+    fallback_words:
+    - 哪台设备
+    - 每台设备
+    - 按设备
+    expr: p.device_code

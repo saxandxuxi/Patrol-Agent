@@ -1,1 +1,64 @@
-time_buckets: {}
+time_buckets:
+  _lexicon:
+    day:
+    - DATE({alias}.collection_time)
+    - DATE({alias}.collection_time)
+    week:
+    - CONCAT(DATE_FORMAT({alias}.collection_time, '%x'), '年第', DATE_FORMAT({alias}.collection_time, '%v'), '周')
+    - CONCAT(DATE_FORMAT({alias}.collection_time, '%x'), '年第', DATE_FORMAT({alias}.collection_time, '%v'), '周')
+    - YEARWEEK({alias}.collection_time, 3)
+    half_month:
+    - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y年%m月'), IF(DAY({alias}.collection_time) <= 15, '上半月', '下半月'))
+    - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y年%m月'), IF(DAY({alias}.collection_time) <= 15, '上半月', '下半月'))
+    month:
+    - DATE_FORMAT({alias}.collection_time, '%Y-%m')
+    - DATE_FORMAT({alias}.collection_time, '%Y-%m')
+    hour:
+    - HOUR({alias}.collection_time)
+    - HOUR({alias}.collection_time)
+    year:
+    - CONCAT(YEAR({alias}.collection_time), '年')
+    - CONCAT(YEAR({alias}.collection_time), '年')
+    half_year:
+    - CONCAT(YEAR({alias}.collection_time), '年', IF(MONTH({alias}.collection_time) <= 6, '上半年', '下半年'))
+    - CONCAT(YEAR({alias}.collection_time), '年', IF(MONTH({alias}.collection_time) <= 6, '上半年', '下半年'))
+    quarter:
+    - CONCAT(YEAR({alias}.collection_time), '年第', QUARTER({alias}.collection_time), '季度')
+    - CONCAT(YEAR({alias}.collection_time), '年第', QUARTER({alias}.collection_time), '季度')
+    season:
+    - CONCAT(IF(MONTH({alias}.collection_time) <= 2, YEAR({alias}.collection_time) - 1, YEAR({alias}.collection_time)), '年',
+      CASE WHEN MONTH({alias}.collection_time) IN (3,4,5) THEN '春季' WHEN MONTH({alias}.collection_time) IN (6,7,8) THEN '夏季'
+      WHEN MONTH({alias}.collection_time) IN (9,10,11) THEN '秋季' ELSE '冬季' END)
+    - CONCAT(IF(MONTH({alias}.collection_time) <= 2, YEAR({alias}.collection_time) - 1, YEAR({alias}.collection_time)), '年',
+      CASE WHEN MONTH({alias}.collection_time) IN (3,4,5) THEN '春季' WHEN MONTH({alias}.collection_time) IN (6,7,8) THEN '夏季'
+      WHEN MONTH({alias}.collection_time) IN (9,10,11) THEN '秋季' ELSE '冬季' END)
+    - CONCAT(IF(MONTH({alias}.collection_time) <= 2, YEAR({alias}.collection_time) - 1, YEAR({alias}.collection_time)), CASE
+      WHEN MONTH({alias}.collection_time) IN (3,4,5) THEN '1' WHEN MONTH({alias}.collection_time) IN (6,7,8) THEN '2' WHEN
+      MONTH({alias}.collection_time) IN (9,10,11) THEN '3' ELSE '4' END)
+    ten_day:
+    - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y年%m月'), CASE WHEN DAY({alias}.collection_time) <= 10 THEN '上旬' WHEN DAY({alias}.collection_time)
+      <= 20 THEN '中旬' ELSE '下旬' END)
+    - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y年%m月'), CASE WHEN DAY({alias}.collection_time) <= 10 THEN '上旬' WHEN DAY({alias}.collection_time)
+      <= 20 THEN '中旬' ELSE '下旬' END)
+    - CONCAT(DATE_FORMAT({alias}.collection_time, '%Y%m'), CASE WHEN DAY({alias}.collection_time) <= 10 THEN '1' WHEN DAY({alias}.collection_time)
+      <= 20 THEN '2' ELSE '3' END)
+    dow:
+    - CASE DAYOFWEEK({alias}.collection_time) WHEN 1 THEN '周日' WHEN 2 THEN '周一' WHEN 3 THEN '周二' WHEN 4 THEN '周三' WHEN 5 THEN
+      '周四' WHEN 6 THEN '周五' ELSE '周六' END
+    - CASE DAYOFWEEK({alias}.collection_time) WHEN 1 THEN '周日' WHEN 2 THEN '周一' WHEN 3 THEN '周二' WHEN 4 THEN '周三' WHEN 5 THEN
+      '周四' WHEN 6 THEN '周五' ELSE '周六' END
+    - WEEKDAY({alias}.collection_time)
+    workday:
+    - CASE WHEN WEEKDAY({alias}.collection_time) <= 4 THEN '工作日' ELSE '周末' END
+    - CASE WHEN WEEKDAY({alias}.collection_time) <= 4 THEN '工作日' ELSE '周末' END
+    - WEEKDAY({alias}.collection_time) <= 4
+    time_of_day:
+    - CASE WHEN HOUR({alias}.collection_time) < 6 THEN '凌晨' WHEN HOUR({alias}.collection_time) < 12 THEN '上午' WHEN HOUR({alias}.collection_time)
+      < 18 THEN '下午' ELSE '晚上' END
+    - CASE WHEN HOUR({alias}.collection_time) < 6 THEN '凌晨' WHEN HOUR({alias}.collection_time) < 12 THEN '上午' WHEN HOUR({alias}.collection_time)
+      < 18 THEN '下午' ELSE '晚上' END
+    - CASE WHEN HOUR({alias}.collection_time) < 6 THEN '1' WHEN HOUR({alias}.collection_time) < 12 THEN '2' WHEN HOUR({alias}.collection_time)
+      < 18 THEN '3' ELSE '4' END
+    minute:
+    - DATE_FORMAT({alias}.collection_time, '%Y-%m-%d %H:%i')
+    - DATE_FORMAT({alias}.collection_time, '%Y-%m-%d %H:%i')

@@ -6,7 +6,7 @@ from typing import Any
 from ..services import preset_lib
 from ..services import templatizer
 from ..services.logging_service import log_event
-from ..services.resource_loader import load_yaml
+from ..services.resource_loader import load_capability_file
 from .contracts import QuerySpec, ValueBinding
 from .fields import PhysicalSchemaView
 from .templates import TemplateContract
@@ -117,7 +117,7 @@ class BuiltinTemplateProvider:
         spec: QuerySpec,
         schema: PhysicalSchemaView,
     ) -> tuple[TemplateContract, ...]:
-        registry = load_yaml("sql_templates/_index.yaml", {}) or {}
+        registry = load_capability_file("templates.yaml", {}) or {}
         contracts: list[TemplateContract] = []
         for raw in registry.get("templates") or []:
             if not isinstance(raw, dict) or raw.get("source") != "builtin":

@@ -780,32 +780,36 @@ def profile_columns(
 
 
 # ── 数据画像入口（方案第四节：meta/profiling 不经过业务 plan）─────────────────
-# 词表外置到 resources/lexicon/trigger_words.yaml（改说法不用动代码）
+# 词表外置到 resources/capabilities/aliases.yaml（改说法不用动代码）
 def _profile_words() -> tuple[str, ...]:
-    from .resource_loader import words
+    from .resource_loader import load_capability_file
 
-    return words(
-        "lexicon/trigger_words.yaml",
-        "profiling.signals",
-        (
-            "没数据",
-            "没有数据",
-            "没填",
-            "全空",
-            "空字段",
-            "空值率",
-            "完整度",
-            "填报",
-            "覆盖率",
-            "数据画像",
-        ),
+    data = load_capability_file("aliases.yaml", {}) or {}
+    values = ((data.get("profiling") or {}).get("signals")) or []
+    return tuple(str(item) for item in values if str(item).strip()) or (
+        "没数据",
+        "没有数据",
+        "没填",
+        "全空",
+        "空字段",
+        "空值率",
+        "完整度",
+        "填报",
+        "覆盖率",
+        "数据画像",
     )
 
 
 def _profile_subjects() -> tuple[str, ...]:
-    from .resource_loader import words
+    from .resource_loader import load_capability_file
 
-    return words("lexicon/trigger_words.yaml", "profiling.subjects", ("字段", "列", "表"))
+    data = load_capability_file("aliases.yaml", {}) or {}
+    values = ((data.get("profiling") or {}).get("subjects")) or []
+    return tuple(str(item) for item in values if str(item).strip()) or (
+        "字段",
+        "列",
+        "表",
+    )
 
 
 def is_profiling_question(message: str) -> bool:

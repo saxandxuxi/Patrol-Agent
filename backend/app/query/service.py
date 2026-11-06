@@ -16,7 +16,7 @@ from ..services import (
 )
 from ..services.llm import LLMError
 from ..services.logging_service import console_json
-from ..services.resource_loader import load_yaml
+from ..services.resource_loader import load_capability_file
 from .analysis import analyze_single_turn
 from .compiler import CompiledQuery, compile_query
 from .confirmations import (
@@ -98,7 +98,7 @@ def _default_template_executor(
         sql, _reason = preset_lib.bind(query, values)
         return sql or ""
     if candidate.contract.adapter_id == "builtin":
-        registry = load_yaml("sql_templates/_index.yaml", {}) or {}
+        registry = load_capability_file("templates.yaml", {}) or {}
         declaration = next(
             (
                 item

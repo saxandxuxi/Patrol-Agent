@@ -15,6 +15,25 @@ from .logging_service import log_error, log_event
 
 RESOURCES_DIR = Path(PROJECT_ROOT) / "resources"
 _CACHE: dict[str, tuple[tuple[float, int] | None, Any]] = {}
+_CAPABILITY_ROOT_KEYS = {
+    "subjects.yaml": "subjects",
+    "fields.yaml": "fields",
+    "field_overrides.yaml": "field_overrides",
+    "metrics.yaml": "metrics",
+    "derived_metrics.yaml": "derived_metrics",
+    "enums.yaml": "enums",
+    "entities.yaml": "entities",
+    "entity_hierarchies.yaml": "families",
+    "aliases.yaml": "aliases",
+    "identifiers.yaml": "identifiers",
+    "query_shapes.yaml": "query_shapes",
+    "dimensions.yaml": "dimensions",
+    "predicates.yaml": "predicates",
+    "time_buckets.yaml": "time_buckets",
+    "result_words.yaml": "result_words",
+    "repair_policy.yaml": "repair_policy",
+    "templates.yaml": "templates",
+}
 
 
 def _path(name: str) -> Path:
@@ -68,12 +87,22 @@ def load_json(name: str, default: Any = None) -> Any:
     return load_yaml(name, default)
 
 
+def load_capability_file(name: str, default: Any = None) -> Any:
+    root_key = _CAPABILITY_ROOT_KEYS.get(str(name))
+    if not root_key:
+        raise KeyError(f"unknown capability file: {name}")
+    data = _load(f"capabilities/{name}")
+    if not isinstance(data, dict):
+        return default
+    return data.get(root_key, default)
+
+
 def clear_cache() -> None:
     _CACHE.clear()
 
 
 def words(name: str, section: str = "", default: tuple[str, ...] = ()) -> tuple[str, ...]:
-    """取词表：`words("lexicon/trigger_words.yaml", "profiling.signals")`。"""
+    """取兼容词表；业务配置优先使用 load_capability_file。"""
     data = load_yaml(name, {}) or {}
     for key in [part for part in str(section).split(".") if part]:
         data = (data or {}).get(key) if isinstance(data, dict) else None

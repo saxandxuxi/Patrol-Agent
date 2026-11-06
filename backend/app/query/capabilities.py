@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..services.resource_loader import load_yaml
+from ..services.resource_loader import load_capability_file
 from .spec_mdl import UnsupportedQuerySpec
 
 
 def validate_capabilities(spec: Any) -> None:
-    fields = (load_yaml("query_capabilities.yaml", {}) or {}).get("fields") or {}
+    fields = (load_capability_file("templates.yaml", {}) or {}).get("fields") or {}
     if not isinstance(fields, dict):
         return
     logical_table = {

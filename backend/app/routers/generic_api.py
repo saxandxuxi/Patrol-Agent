@@ -109,7 +109,7 @@ def template_registry() -> dict:
     """
     from ..services import preset_lib
     from ..services import templatizer
-    from ..services.resource_loader import load_yaml
+    from ..services.resource_loader import load_capability_file
     from ..store import list_recorded_example_pairs
 
     # doc 名 → 问题原文：维护页删除时要让人看清"删的是哪几条问答"，只给 pair-xxx.md 认不出来
@@ -121,7 +121,7 @@ def template_registry() -> dict:
     except Exception:  # noqa: BLE001
         example_questions = {}
 
-    registry = load_yaml("sql_templates/_index.yaml", {}) or {}
+    registry = load_capability_file("templates.yaml", {}) or {}
     builtin, listed_presets, generic_items = [], [], []
     for item in registry.get("templates") or []:
         source = str((item or {}).get("source") or "builtin")

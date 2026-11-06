@@ -251,14 +251,17 @@ def is_comparison(message: str) -> bool:
 
 
 def _lexicon(section: str, default: set[str]) -> set[str]:
-    """从 `resources/lexicon/semantics.yaml` 读语义键表；读不到就用代码里的默认值。
+    """从 `resources/capabilities/query_shapes.yaml` 读语义键表；读不到就用默认值。
 
     （docs/代码结构重构与模板外置方案.md §5.3：新增一种维度/指标只改 YAML，不动 .py）
     """
     try:
-        from .resource_loader import words
+        from .resource_loader import load_capability_file
 
-        values = set(words("lexicon/semantics.yaml", section))
+        data = load_capability_file("query_shapes.yaml", {}) or {}
+        for key in [part for part in str(section).split(".") if part]:
+            data = data.get(key) if isinstance(data, dict) else None
+        values = set(data) if isinstance(data, list) else set()
     except Exception:  # noqa: BLE001
         values = set()
     return values or set(default)
@@ -6044,13 +6047,13 @@ def _builtin_builders() -> dict[str, Any]:
 def builtin_registry_issues() -> list[dict[str, str]]:
     """注册表自检：声明了 builder 却找不到实现 / 实现了却没人指向。
 
-    选模板现在完全由 `resources/sql_templates/_index.yaml` 驱动，而 builder 名字写错、
+    选模板现在完全由 `resources/capabilities/templates.yaml` 驱动，而 builder 名字写错、
     或者条目忘写 builder 时，`build_template_sql` 只会静默落到 Wren——现在把它显式列出来，
     管理页/日志能一眼看到配置漏了哪条。
     """
-    from .resource_loader import load_yaml
+    from .resource_loader import load_capability_file
 
-    registry = (load_yaml("sql_templates/_index.yaml", {}) or {}).get("templates") or []
+    registry = (load_capability_file("templates.yaml", {}) or {}).get("templates") or []
     builders = _builtin_builders()
     referenced = {
         str((item or {}).get("builder") or "")
@@ -8235,13 +8238,19 @@ _TIME_BUCKET_EXPRS: dict[str, tuple[str, str]] = {
 
 
 # ── 词表 / 语义键→SQL 映射外置（docs/代码结构重构与模板外置方案.md §5.3）──────
-# `resources/lexicon/metrics.yaml` 有对应段就用它覆盖，没有就保持上面代码里的默认值，
+# `resources/capabilities/metrics.yaml` 有对应段就用它覆盖，没有就保持默认值，
 # 行为完全不变；以后新增一个指标/维度改 YAML 即可。
 def _lexicon_section(section: str) -> Any:
     try:
-        from .resource_loader import load_yaml
+        from .resource_loader import load_capability_file
 
-        return (load_yaml("lexicon/metrics.yaml", {}) or {}).get(section)
+        if section == "dimensions":
+            return (load_capability_file("dimensions.yaml", {}) or {}).get("_lexicon")
+        if section == "time_buckets":
+            return (load_capability_file("time_buckets.yaml", {}) or {}).get("_lexicon")
+        return (load_capability_file("metrics.yaml", {}) or {}).get("_lexicon", {}).get(
+            section
+        )
     except Exception:  # noqa: BLE001
         return None
 

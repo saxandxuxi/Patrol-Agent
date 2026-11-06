@@ -15,7 +15,7 @@ _DEFAULT = {
 
 
 def _entry(failure_code: str) -> dict[str, Any]:
-    policies = resource_loader.load_yaml("repair_policy.yaml", {})
+    policies = resource_loader.load_capability_file("repair_policy.yaml", {})
     value = policies.get(failure_code) if isinstance(policies, dict) else None
     if not isinstance(value, dict):
         return _DEFAULT
