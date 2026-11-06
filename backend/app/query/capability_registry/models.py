@@ -127,6 +127,8 @@ class PlannerCapabilityView:
         return {
             "subject": self.subject,
             "base_table": self.base_table,
+            "metrics": list(self.metrics),
+            "derived_metrics": list(self.derived_metrics),
             "allowed_views": list(self.allowed_views),
             "fields": {
                 field_id: {
@@ -145,7 +147,5 @@ class PlannerCapabilityView:
                 }
                 for field_id, field in self.fields.items()
             },
-            "metrics": list(self.metrics),
-            "derived_metrics": list(self.derived_metrics),
             "field_reach_evidence": list(self.reach_evidence),
         }

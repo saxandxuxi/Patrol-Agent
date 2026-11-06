@@ -24,8 +24,8 @@ from .validator import validate_query_spec
 from .values import resolve_value
 
 
-def _text_context(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, default=str)[:8000]
+def _text_context(value: Any, limit: int = 8000) -> str:
+    return json.dumps(value, ensure_ascii=False, default=str)[:limit]
 
 
 def _string_tuple(value: Any) -> tuple[str, ...]:
@@ -216,8 +216,18 @@ def _analyze_once(
             question=original,
             kind=kind,
             current_date=datetime.now().strftime("%Y-%m-%d"),
-            capabilities=_text_context(planner_view),
-            schema=_text_context(sorted(schema.columns)),
+            capabilities=_text_context(planner_view, limit=24000),
+            schema=_text_context(
+                sorted(
+                    (table, column)
+                    for table, column in schema.columns
+                    if planner_view
+                    and table == planner_view.get("base_table")
+                ),
+                limit=5000,
+            )
+            if planner_view
+            else _text_context(sorted(schema.columns)),
             planning_feedback=planning_feedback or "无",
             reach=_text_context(
                 [
