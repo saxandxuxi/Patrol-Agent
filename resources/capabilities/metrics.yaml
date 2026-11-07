@@ -29,6 +29,14 @@ metrics:
       label: 有效病害总长度
       unit: 米
       allowed_views: [count, distribution, top_groups, trend]
+    # 条状病害按 0.2 米宽把长度换算成面积：热点桩号段的“换算面积”口径。
+    # 口径自带病害范围（条状修补是巡检库注册的条状病害类型），缺类型过滤时
+    # 也不会把坑槽、垃圾这类非条状病害的长度算进来。
+    strip_converted_area:
+      expression: SUM(CASE WHEN {alias}.problem_type_name = '条状修补' THEN {alias}.effective_disease_length * 0.2 ELSE 0 END)
+      label: 条状病害换算面积
+      unit: ㎡
+      allowed_views: [count, distribution, top_groups, trend]
     # 长度指标只认语义字段 effective_disease_length：原始列 disease_length
     # 大面积为空（坑槽 44 条全为空），自动生成的 avg_/max_/min_ 会算出 NULL。
     avg_disease_length:

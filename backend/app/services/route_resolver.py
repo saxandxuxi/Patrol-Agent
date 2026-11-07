@@ -56,6 +56,11 @@ def _resolve_route(route_text: str) -> dict[str, Any]:
         )
     ][:20]
     if not rows:
+        # 别名归一：用户按口语加"高速/高速公路/公路"后缀（"包头-茂名高速"），
+        # 台账里往往就是不带的短名（"包头-茂名"）；连字符全角/半角也常混用。
+        # 归一后**唯一**命中才认，命中多条仍然走"请确认是哪一条"。
+        rows = _alias_route_rows(route_text)
+    if not rows:
         # 用前两个字模糊找相近路线（"宝安大道龙华段" → 含"宝安"的两条路），
         # 比丢一句"可用路线示例"有用得多。
         probe = _clean_route_name(route_text)[:2]
@@ -244,6 +249,36 @@ def _route_pieces(message: str, name: str, min_len: int = 2, max_len: int = 6) -
 def _clean_route_name(text: str) -> str:
     """路线名去标点（"宝安中心--恒明珠" ↔ "宝安中心恒明珠段" 要能比得上）。"""
     return re.sub(r"[^0-9A-Za-z\u4e00-\u9fa5]", "", str(text or ""))
+
+
+# 口语里给路线加的类型后缀。台账短名大多不带后缀（"包头-茂名" ↔ "包头-茂名高速"）。
+_ROUTE_NAME_SUFFIXES = ("高速公路", "高速", "公路")
+
+
+def _route_alias_key(text: str) -> str:
+    """路线别名归一：NFKC + 去标点 + 去类型后缀（"长沙－芷江高速公路" → "长沙芷江"）。"""
+
+    key = text_match.normalize(text)
+    for suffix in _ROUTE_NAME_SUFFIXES:
+        if len(key) > len(suffix) and key.endswith(suffix):
+            return key[: -len(suffix)]
+    return key
+
+
+def _alias_route_rows(route_text: str) -> list[dict[str, Any]]:
+    """归一后与用户写法的短名完全相等的路线（唯一命中才认）。"""
+
+    key = _route_alias_key(route_text)
+    if len(key) < 2:
+        return []
+    return [
+        row
+        for row in _route_rows()
+        if any(
+            _route_alias_key(row.get(field)) == key
+            for field in ("short_name", "full_name")
+        )
+    ][:20]
 
 
 # 桩号区间（K10+000~K11+000 / K10+000 到 K11+000）——**不是路线名证据**。

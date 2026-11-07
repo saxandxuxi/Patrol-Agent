@@ -263,6 +263,148 @@ class SpecMdlTests(unittest.TestCase):
         self.assertIn("AS 桩号分段", sql)
         self.assertIn("GROUP BY CONCAT(", sql)
 
+    def test_pile_number_between_compiles_as_distance_range(self):
+        """“K120 到 K125”是两个边界都要保留的范围过滤，不是单点桩号。"""
+
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("problem_type_name",),
+            filters=(
+                binding("pile_number", "between", ("K120+000", "K125+000")),
+            ),
+            output_projection=("problem_type_name", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="K120到K125之间的病害类型和数量",
+        )
+        sql = compile_spec_mdl(spec)
+        self.assertIn("disease.pile_distance BETWEEN 120000 AND 125000", sql)
+
+    def test_pile_number_in_list_compiles_each_point(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(
+                binding("pile_number", "in", ["K16+500", "K33+500"]),
+            ),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="K16+500 和 K33+500 两处的病害数量",
+        )
+        sql = compile_spec_mdl(spec)
+        self.assertIn("disease.pile_distance IN (16500, 33500)", sql)
+
+    def test_pile_number_between_requires_two_edges(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(binding("pile_number", "between", ("K120+000",)),),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="只给一个桩号边界",
+        )
+        with self.assertRaisesRegex(
+            UnsupportedQuerySpec, "桩号区间必须提供两个边界值"
+        ):
+            compile_spec_mdl(spec)
+
+    def test_pile_number_numeric_binding_stays_meters(self):
+        """值解析器归一后的数值单位是米，编译器不能再乘 1000。"""
+
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(binding("pile_number", "between", (120000, 125000)),),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="K120到K125之间的病害数量",
+        )
+        sql = compile_spec_mdl(spec)
+        self.assertIn("disease.pile_distance BETWEEN 120000 AND 125000", sql)
+
+    def test_pile_number_zero_start_is_accepted(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(binding("pile_number", "between", (0, 50000)),),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="K0到K50之间的病害数量",
+        )
+        sql = compile_spec_mdl(spec)
+        self.assertIn("disease.pile_distance BETWEEN 0 AND 50000", sql)
+
+    def test_raw_pile_distance_grouping_points_to_registered_segments(self):
+        """按原始桩号数值分组（如"每300米一段"）要给出可执行的替代维度。"""
+
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="top_groups",
+            metrics=("count",),
+            dimensions=("pile_distance",),
+            filters=(),
+            output_projection=("pile_distance", "count"),
+            order_by=({"field": "count", "direction": "desc"},),
+            limit=3,
+            required_assertions=(),
+            question="每300米一段统计病害数量",
+        )
+        with self.assertRaisesRegex(
+            UnsupportedQuerySpec, "pile_segment_500m"
+        ):
+            compile_spec_mdl(spec)
+
+    def test_luge_name_grouping_points_to_registered_segments(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="top_groups",
+            metrics=("count",),
+            dimensions=("luge_name",),
+            filters=(),
+            output_projection=("luge_name", "count"),
+            order_by=({"field": "count", "direction": "desc"},),
+            limit=3,
+            required_assertions=(),
+            question="哪些公里段的病害最集中",
+        )
+        with self.assertRaisesRegex(
+            UnsupportedQuerySpec, "里程区段编号"
+        ):
+            compile_spec_mdl(spec)
+
     def test_history_damage_interval_is_rejected_when_all_rows_are_empty(self):
         with self.assertRaisesRegex(UnsupportedQuerySpec, "全部为空"):
             compile_spec_mdl(

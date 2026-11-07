@@ -10,3 +10,12 @@ families:
     resolution:
       default: expand_family
       ambiguity: confirm
+  strip_disease:
+    entity: disease_type
+    label: 条状病害
+    aliases: [条状类病害, 条状病害类]
+    members:
+      - 条状修补
+    resolution:
+      default: expand_family
+      ambiguity: confirm

@@ -5,7 +5,7 @@ from app.query.analysis import analyze_single_turn
 from app.query.fields import FieldReachSet, PhysicalSchemaView
 from app.query.service import start_single_turn
 from app.query.values import resolve_value
-from app.semantic_aids import canonical_field, detect_evidence
+from app.semantic_aids import canonical_field, detect_evidence, pile_meter
 
 
 def rule_ids(question: str) -> set[str]:
@@ -137,6 +137,14 @@ class SemanticAidTests(unittest.TestCase):
         self.assertEqual(binding.storage_value, (100000, 120000))
         self.assertEqual(binding.op, "between")
         self.assertEqual(binding.source, "code_rule")
+
+    def test_pile_meter_keeps_normalized_meters_and_zero(self):
+        """值解析器给下游的桩号单位是米；数值不能再按公里换算一次（K120→1.2亿），
+        K0 起点也必须是合法里程。"""
+
+        self.assertEqual(pile_meter(120000), 120000)
+        self.assertEqual(pile_meter(0), 0)
+        self.assertEqual(pile_meter("K120+500"), 120500)
 
     def test_grouping_and_metric_rules_are_evidence(self):
         ids = rule_ids("按路线和病害类型统计总数量和总面积")

@@ -913,6 +913,11 @@ def _analyze_once(
         unavailable = _unavailable_assist_reason(assist_evidence, registry)
         if unavailable:
             raise QuerySpecUnsupported(unavailable)
+        if contract.unknown_terms:
+            # 规划器按契约把"当前能力覆盖不到什么"写进了 unknown_terms
+            # （例如只注册了 500 米 / 1 公里两种分段粒度），要原样作为
+            # 不支持原因返回，而不是暴露"缺少 views"这种内部错误。
+            raise QuerySpecUnsupported("；".join(contract.unknown_terms))
         raise QuerySpecError("QuerySpec 缺少 views")
     for index, raw in enumerate(raw_views, 1):
         if not isinstance(raw, dict):

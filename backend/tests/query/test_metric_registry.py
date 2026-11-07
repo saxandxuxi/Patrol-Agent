@@ -74,6 +74,26 @@ class MetricRegistryTests(unittest.TestCase):
         self.assertIn("problem_type_name", metric.expression)
         self.assertEqual(metric.unit, "种")
 
+    def test_strip_converted_area_uses_point_two_meter_width(self):
+        """条状病害 0.2 米宽换算面积是注册指标，不是模型自造公式。"""
+
+        metric = self.registry.snapshot.metrics["disease"]["strip_converted_area"]
+
+        self.assertIn("effective_disease_length * 0.2", metric.expression)
+        self.assertIn("problem_type_name = '条状修补'", metric.expression)
+        self.assertIn("ELSE 0", metric.expression)
+        self.assertEqual(metric.unit, "㎡")
+        self.assertIn("top_groups", metric.allowed_views)
+
+    def test_strip_disease_family_expands_to_registered_member(self):
+        """“条状病害”是实体族，解析后落到注册成员条状修补。"""
+
+        family = self.registry.snapshot.entity_families["strip_disease"]
+
+        self.assertEqual(family.entity, "disease_type")
+        self.assertEqual(family.members, ("条状修补",))
+        self.assertIn("条状病害", {family.label, *family.aliases})
+
 
 if __name__ == "__main__":
     unittest.main()

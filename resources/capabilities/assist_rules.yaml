@@ -148,13 +148,13 @@ regex_rules:
     candidate_field: patrol_status
     candidate_value: patrol_status
   - id: damage_severity
-    pattern: "(?:损坏程度|病害等级|严重(?:程度|等级|病害)?)"
+    pattern: "(?:损坏程度|病害等级|严重[“”\"']?(?:程度|等级))"
     candidate_type: semantic_field
     candidate_field: history_damage_interval
     candidate_value: damage_severity
     discouraged_fields: [damage_type]
     requires_field: true
-    reason: "巡检库的损坏程度/严重等级物理字段是 history_damage_interval；damage_type 是历史遗留列名，不是病害类型。"
+    reason: "巡检库的损坏程度/严重等级物理字段是 history_damage_interval；damage_type 是历史遗留列名，不是病害类型。'最严重/最突出'这类排名语气词不是损坏程度证据，不能触发本规则。"
   - id: lane_ordinal
     pattern: "(第[一二三四五六七八九十两0-9]+车道)"
     group: 1

@@ -1,0 +1,129 @@
+version: 1
+exam_id: disease-segment-unit-20261107-01
+generated_at: '2026-11-07T19:21:01.480509+08:00'
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20270110
+code_fingerprint: content:2e44448d0999a109e5d1482947f4f3ca9ae9d73b92ee01f66a0936a380c5dd14
+fresh_case_ids:
+- seg6_cz_km_count_top5
+- seg6_cz_km_area_top3
+- seg6_cz_strip_area_top3
+- seg6_cz_500m_top3
+- seg6_cz_k120_125_types
+- seg6_cz_k57_detail
+- seg6_bt_k2165_2170
+- seg6_sh_k1300_1350_total
+- seg6_bt_k30_40_empty
+- seg6_cz_oct_km_top5
+- seg6_cz_k0_50_oct_total
+- seg6_cz_2km_granularity
+- seg6_cz_100m_granularity
+- seg6_cz_km_top5_paraphrase
+- seg6_cz_strip_hotspot_paraphrase
+old_case_ids:
+- disease_monthly_area_this_year
+- type_patrol_batch_distribution
+- fresh_detail_large_crack_list
+- disease_oct_20_22_daily
+- asset5_up_total_b
+cases:
+- id: seg6_cz_km_count_top5
+  category: 病害/分段/热点桩号
+  question: 长沙－芷江高速公路，按每1公里一段统计，病害数量最多的前5个桩号段分别是哪里？各有多少处？
+  focus: 1公里分段维度 + 数量TopN。
+  source: fresh
+- id: seg6_cz_km_area_top3
+  category: 病害/分段/热点桩号
+  question: 长沙－芷江高速公路上，病害总面积最集中的3个公里段分别是哪里？各自的病害总面积是多少？
+  focus: 1公里分段维度 + 面积TopN。
+  source: fresh
+- id: seg6_cz_strip_area_top3
+  category: 病害/分段/条状病害
+  question: 若条状类病害按0.2米宽折算成面积，长沙－芷江高速公路上换算面积最严重的3个公里段是哪里？
+  focus: 条状病害0.2米宽换算面积指标 + 分段热点。
+  source: fresh
+- id: seg6_cz_500m_top3
+  category: 病害/分段/热点桩号
+  question: 长沙－芷江高速公路按500米一段统计，病害数量最多的前3段是哪些，各检出多少处？
+  focus: 500米分段维度 + 数量TopN。
+  source: fresh
+- id: seg6_cz_k120_125_types
+  category: 病害/分段/桩号区间
+  question: 长沙－芷江高速公路K120到K125之间，各病害类型分别有多少处？
+  focus: 起止桩号区间过滤 + 类型分布。
+  source: fresh
+- id: seg6_cz_k57_detail
+  category: 病害/分段/桩号区间
+  question: 长沙－芷江高速公路K57到K58这一段里，条状修补有多少处？按0.2米宽换算的面积是多少平方米？
+  focus: 单公里段内的病害类型过滤与换算面积。
+  source: fresh
+- id: seg6_bt_k2165_2170
+  category: 病害/分段/桩号区间
+  question: 包头-茂名高速K2165到K2170之间有哪些病害类型？各自的处数和面积是多少？
+  focus: 百万级桩号前缀的区间过滤 + 类型分布。
+  source: fresh
+- id: seg6_sh_k1300_1350_total
+  category: 病害/分段/桩号区间
+  question: 上海-昆明高速K1300至K1350区间一共检出多少处病害？
+  focus: 大跨度桩号区间的病害总数。
+  source: fresh
+- id: seg6_bt_k30_40_empty
+  category: 病害/分段/空窗口
+  question: 包头-茂名高速K30到K40之间检出了多少处病害？
+  focus: 范围内确实没有记录时必须如实说明，不能编造。
+  source: fresh
+- id: seg6_cz_oct_km_top5
+  category: 病害/分段/时间+桩号
+  question: 2026年10月，长沙－芷江高速公路上病害最集中的5个公里段分别是哪里？各有多少处？
+  focus: 时间过滤 + 1公里分段热点。
+  source: fresh
+- id: seg6_cz_k0_50_oct_total
+  category: 病害/分段/时间+桩号
+  question: 长沙－芷江高速K0到K50范围内，2026年10月一共检出多少处病害？
+  focus: 时间过滤 + 桩号区间总数。
+  source: fresh
+- id: seg6_cz_2km_granularity
+  category: 病害/分段/能力边界
+  question: 长沙－芷江高速公路按每2公里一段统计病害数量，最多的前3段是哪些？
+  focus: 只注册500米/1公里粒度，2公里必须如实说明边界并给替代做法。
+  source: fresh
+- id: seg6_cz_100m_granularity
+  category: 病害/分段/能力边界
+  question: 长沙－芷江高速公路每100米统计一次病害数量，哪一段最多？
+  focus: 只注册500米/1公里粒度，100米必须如实说明边界并给替代做法。
+  source: fresh
+- id: seg6_cz_km_top5_paraphrase
+  category: 病害/分段/热点桩号
+  question: 长沙－芷江高速哪些公里段的病害最集中？给我前5段和每段的数量。
+  focus: 与seg6_cz_km_count_top5同义改写，检查答案稳定性。
+  source: fresh
+- id: seg6_cz_strip_hotspot_paraphrase
+  category: 病害/分段/条状病害
+  question: 长沙-芷江高速上哪一段路的条状病害折算成面积以后最突出？按公里段看前3名。
+  focus: 与seg6_cz_strip_area_top3同义改写，检查答案稳定性。
+  source: fresh
+- id: disease_monthly_area_this_year
+  category: 病害/时间/月粒度
+  question: 今年每个月病害的总面积有什么变化？
+  focus: 检查年度范围、逐月面积指标与变化判断。
+  source: old
+- id: type_patrol_batch_distribution
+  category: 病害类型/巡查批次
+  question: 巡查编号 XCBH202607220003 这次检出的病害类型分布是怎样的？
+  focus: 检查按巡查批次查看病害类型分布。
+  source: old
+- id: fresh_detail_large_crack_list
+  category: 明细
+  question: 请列出最近一次巡检中，所有长度超过3米的纵向裂缝的详细记录，包括所在路线、桩号和精确长度。
+  focus: 验证系统能否根据病害尺寸阈值和类型筛选，输出完整的明细字段列表。
+  source: old
+- id: disease_oct_20_22_daily
+  category: 病害/时间/日粒度
+  question: 10月20日到10月22日，各天的病害检出情况怎么样？
+  focus: 检查无数据时间段必须如实说明，不能编造趋势。
+  source: old
+- id: asset5_up_total_b
+  category: 病害/资产/上下行数量同义改写
+  question: 上行侧一共检出了多少处病害？
+  focus: 同一事实的同义问法稳定性。
+  source: old

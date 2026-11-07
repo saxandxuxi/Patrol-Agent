@@ -38,6 +38,37 @@ def plan_payload(*, metric: str = "count", damage_type: str = "裂缝"):
 
 
 class CapabilityEndToEndTests(unittest.TestCase):
+    @patch("app.query.service.field_grounding.ground")
+    @patch("app.query.analysis.chat_json")
+    def test_missing_views_with_unknown_terms_returns_clear_reason(
+        self,
+        chat_json,
+        ground,
+    ):
+        """规划器说"能力覆盖不到"时必须把原因带给用户，而不是报内部错误。"""
+
+        ground.return_value = {
+            "subject": "disease",
+            "table": "ai_problem",
+            "columns": [],
+        }
+        chat_json.return_value = {
+            "final_goal": "按300米分段统计病害数量",
+            "intent_family": "distribution",
+            "unknown_terms": [
+                "当前只注册了 500 米和 1 公里两种分段粒度，可改用其中一种",
+            ],
+            "views": [],
+        }
+
+        result = start_single_turn(
+            "长沙－芷江高速公路按每300米一段统计病害数量",
+            providers=[],
+        )
+
+        self.assertIn("只注册了 500 米和 1 公里", result.answer.text)
+        self.assertNotIn("缺少 views", result.answer.text)
+
     @patch("app.query.service._execute_plan", return_value=AnswerPackage("ok"))
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
     @patch("app.query.analysis.chat_json")

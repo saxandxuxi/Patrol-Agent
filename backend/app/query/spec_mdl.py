@@ -200,6 +200,27 @@ def _disease_filter(
         "order_number": "work_order.order_number",
     }
     if normalized == "pile_number":
+        # 起止桩号区间（"K120 到 K125"）是范围过滤：两个边界都要落到
+        # pile_distance 上。此前只处理单点，区间会当成一个值去解析桩号，
+        # 直接报“无法解析桩号”。
+        if op in {"in", "between"} or isinstance(value, (list, tuple)):
+            values = list(value) if isinstance(value, (list, tuple)) else [value]
+            if op == "between":
+                if len(values) != 2:
+                    raise UnsupportedQuerySpec("桩号区间必须提供两个边界值")
+                start = _pile_meter(values[0])
+                end = _pile_meter(values[1])
+                where.append(
+                    f"disease.pile_distance BETWEEN {start} AND {end}"
+                )
+                return
+            distances = [_pile_meter(item) for item in values]
+            where.append(
+                "disease.pile_distance IN ("
+                + ", ".join(str(item) for item in distances)
+                + ")"
+            )
+            return
         distance = _pile_meter(value)
         where.append(f"disease.pile_distance {op} {distance}")
         return
@@ -426,6 +447,17 @@ def _disease_dimension(
         return _pile_segment_expression(500), "桩号分段"
     if normalized == "pile_segment_1000m":
         return _pile_segment_expression(1000), "桩号分段"
+    if normalized == "pile_distance":
+        raise UnsupportedQuerySpec(
+            "不支持按原始桩号数值分组；固定长度分段统计只能用注册维度 "
+            "pile_segment_500m（500米）或 pile_segment_1000m（1公里）。"
+        )
+    if normalized == "luge_name":
+        raise UnsupportedQuerySpec(
+            "luge_name 是里程区段编号（形如 k0+800-k0+899），不支持作为"
+            "固定长度分段的聚合维度；分段统计用 pile_segment_500m（500米）"
+            "或 pile_segment_1000m（1公里）。"
+        )
     if normalized == "unit_id":
         return "disease.unit_id", "管养单位"
     if normalized == "lane_index":
