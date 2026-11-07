@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 TIME_FIELDS = frozenset({"collection_time", "create_time"})
+PILE_FIELDS = frozenset({"pile_number", "pile_distance"})
 INSIDE = "inside"
 OUTSIDE = "outside"
 
@@ -23,6 +24,25 @@ def empty_scope_facts(spec: Any) -> ScopeFacts:
     - `""`：拿不到事实，按原来的保守处理。
     """
 
+    checks = [
+        facts
+        for facts in (_time_scope_facts(spec), _pile_scope_facts(spec))
+        if facts.verdict
+    ]
+    if not checks:
+        return ScopeFacts()
+    for facts in checks:
+        if facts.verdict == OUTSIDE:
+            return facts
+    if all(facts.verdict == INSIDE for facts in checks):
+        return ScopeFacts(
+            verdict=INSIDE,
+            detail="；".join(facts.detail for facts in checks),
+        )
+    return ScopeFacts()
+
+
+def _time_scope_facts(spec: Any) -> ScopeFacts:
     window = _time_window(spec)
     if window is None:
         return ScopeFacts()
@@ -45,6 +65,33 @@ def empty_scope_facts(spec: Any) -> ScopeFacts:
     except Exception:  # noqa: BLE001
         return ScopeFacts()
     return _verdict(window, earliest, latest, count, label)
+
+
+def _pile_scope_facts(spec: Any) -> ScopeFacts:
+    """桩号区间同理：问的区间有没有落在该路线的病害数据桩号范围内。"""
+
+    window = _pile_window(spec)
+    if window is None:
+        return ScopeFacts()
+    try:
+        from ..services import calibrate
+
+        route_id = _route_id(spec)
+        if route_id:
+            facts = calibrate.route_facts(route_id)
+            low = facts.get("data_min_pile")
+            high = facts.get("data_max_pile")
+            count = facts.get("data_count")
+            label = str(facts.get("route") or route_id)
+        else:
+            facts = calibrate.global_data_range()
+            low = facts.get("min_pile")
+            high = facts.get("max_pile")
+            count = facts.get("cnt")
+            label = "全库病害台账"
+    except Exception:  # noqa: BLE001
+        return ScopeFacts()
+    return _pile_verdict(window, low, high, count, label)
 
 
 def _route_id(spec: Any) -> str:
@@ -83,6 +130,45 @@ def _time_window(spec: Any) -> tuple[datetime, datetime] | None:
     return start, end
 
 
+def _pile_window(spec: Any) -> tuple[int, int] | None:
+    start: int | None = None
+    end: int | None = None
+    for item in spec.filters:
+        field = str(item.field).rsplit(".", 1)[-1]
+        if field not in PILE_FIELDS:
+            continue
+        op = str(item.op)
+        value = item.storage_value
+        if op == "between" and isinstance(value, (list, tuple)) and len(value) == 2:
+            pair = (_pile_number(value[0]), _pile_number(value[1]))
+            if pair[0] is not None:
+                start = pair[0]
+            if pair[1] is not None:
+                end = pair[1]
+            continue
+        number = _pile_number(value)
+        if number is None:
+            continue
+        if op in {">=", ">"}:
+            start = number
+        elif op in {"<", "<="}:
+            end = number
+    if start is None or end is None or end <= start:
+        return None
+    return start, end
+
+
+def _pile_number(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    if not text or not text.isdigit():
+        return None
+    return int(text)
+
+
 def _parse(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         return value
@@ -111,6 +197,38 @@ def _covered(
         return False
     start, end = window
     return start <= latest and end >= earliest
+
+
+def _pile_verdict(
+    window: tuple[int, int],
+    min_pile: Any,
+    max_pile: Any,
+    count: Any,
+    label: str,
+) -> ScopeFacts:
+    try:
+        total = int(count or 0)
+        low = int(min_pile)
+        high = int(max_pile)
+    except (TypeError, ValueError):
+        return ScopeFacts()
+    if total <= 0:
+        return ScopeFacts(
+            verdict=OUTSIDE,
+            detail=f"{label}当前没有任何病害记录",
+        )
+    covered = (
+        f"{label}现有病害记录的桩号在 "
+        f"{_format_pile(low)}~{_format_pile(high)}"
+    )
+    start, end = window
+    if start <= high and end >= low:
+        return ScopeFacts(verdict=INSIDE, detail=covered)
+    return ScopeFacts(verdict=OUTSIDE, detail=covered)
+
+
+def _format_pile(meters: int) -> str:
+    return f"K{meters // 1000}+{meters % 1000:03d}"
 
 
 def _verdict(

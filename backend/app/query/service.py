@@ -32,6 +32,7 @@ from .contracts import (
     QueryPlan,
     QuerySpecAmbiguity,
     QuerySpecError,
+    QuerySpecUnsupported,
     UserDecision,
     ValueBinding,
     immutable_scope_hash,
@@ -450,6 +451,37 @@ def _inherited_note(section: dict[str, Any]) -> str:
     if not inherited:
         return ""
     return f"本次结果沿用了上一节点筛选出的条件：{inherited}"
+
+
+def _aggregate_is_empty(spec: Any, observation: ExecutionObservation) -> bool:
+    """聚合视图把"没有记录"算成了 0/NULL，也要走空范围判定。
+
+    `COUNT(*)` 在没有匹配行时返回 1 行 0，`SUM` 返回 1 行 NULL；如果不认这种
+    "空聚合"，超范围查询就会被当成"共 0处"轻描淡写地放过。
+    """
+
+    view = str(spec.view)
+    if view not in {"count", "sum", "avg"}:
+        return False
+    rows = observation.result_rows or observation.preview_rows
+    if len(rows) != 1:
+        return False
+    values = list(rows[0].values())
+    if not values:
+        return False
+    # COUNT 的空结果是 0；SUM/AVG 的空结果是 NULL（0 可能是真实数据，不能当空）。
+    zero_is_empty = view == "count"
+    for value in values:
+        if value is None or value == "":
+            continue
+        if not zero_is_empty:
+            return False
+        try:
+            if float(value) != 0.0:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
 
 
 def _empty_metric_note(rows: list[dict[str, Any]]) -> str:
@@ -1245,8 +1277,11 @@ def _execute_plan(
                     truncated=inherited_total > observation.rows_fetched,
                 )
         scoped_empty = (
-            observation.rows_fetched == 0
-            and bool(effective_spec.filters)
+            bool(effective_spec.filters)
+            and (
+                observation.rows_fetched == 0
+                or _aggregate_is_empty(effective_spec, observation)
+            )
         )
         scope_facts = (
             empty_scope_facts(effective_spec)
@@ -1566,6 +1601,24 @@ def start_single_turn(
                         "status": "ambiguous",
                         "failure_code": "query_scope_ambiguous",
                         "answer": str(exc),
+                    },
+                ),
+            ),
+        )
+    except QuerySpecUnsupported as exc:
+        # 能力边界是**事实**，不是"这次没问好"：直接说明不支持的原因
+        # （例如只注册了 500 米 / 1 公里两种分段粒度），不要再挂
+        # "请换一种说法再问，或切换模型重试"这种把责任推回用户的尾巴。
+        detail = str(exc).strip().rstrip("。") or "当前数据能力不支持这一问"
+        return TurnStart(
+            plan=QueryPlan(question=question, nodes=()),
+            answer=AnswerPackage(
+                f"{detail}。",
+                (
+                    {
+                        "status": "unsupported",
+                        "failure_code": "query_plan_not_executable",
+                        "answer": f"{detail}。",
                     },
                 ),
             ),

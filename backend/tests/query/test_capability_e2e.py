@@ -68,6 +68,8 @@ class CapabilityEndToEndTests(unittest.TestCase):
 
         self.assertIn("只注册了 500 米和 1 公里", result.answer.text)
         self.assertNotIn("缺少 views", result.answer.text)
+        self.assertNotIn("换一种说法", result.answer.text)
+        self.assertNotIn("切换模型重试", result.answer.text)
 
     @patch("app.query.service._execute_plan", return_value=AnswerPackage("ok"))
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
