@@ -1,0 +1,129 @@
+version: 1
+exam_id: disease-asset-quantity-unit-20261107-03
+generated_at: '2026-11-07T14:33:47.398086+08:00'
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20261220
+code_fingerprint: content:edda6f5e8ec501c2134271404112c68b4fd92f1be00562b63a1614523dcfb107
+fresh_case_ids:
+- asset3_patrol_202610300001_count
+- asset3_patrol_202610270002_scale
+- asset3_patrol_pair_compare
+- asset3_changzhi_down_count
+- asset3_changzhi_up_area
+- asset3_xixiang_up_avg
+- asset3_surface_asphalt_concrete_count
+- asset3_surface_cement_scale
+- asset3_route_level_county_town
+- asset3_route_level_national_area
+- asset3_tech_grade_second_count
+- asset3_tech_grade_area_distribution
+- asset3_lane_third_count
+- asset3_total_length_scale
+- asset3_baotou_shanghai_compare
+old_case_ids:
+- disease_hengmingzhu_type_change_two_dates
+- disease_last_week_top_longitudinal_routes
+- fresh_time_trend_area
+- route_top_type
+- fresh_topn_route_area
+cases:
+- id: asset3_patrol_202610300001_count
+  category: 病害/资产/巡查批次数量
+  question: 巡查编号 XCBH202610300001 这一次巡查一共检出多少处病害？
+  focus: 检查巡查编号过滤与总数量统计。
+  source: fresh
+- id: asset3_patrol_202610270002_scale
+  category: 病害/资产/巡查批次规模
+  question: XCBH202610270002 这次巡查检出的病害，总面积和平均单处面积分别是多少？
+  focus: 检查巡查编号过滤与面积规模指标。
+  source: fresh
+- id: asset3_patrol_pair_compare
+  category: 病害/资产/巡查批次比较
+  question: XCBH202610300001 和 XCBH202610300004 这两次巡查，哪一次检出的病害更多？相差多少处？
+  focus: 检查两次巡查批次的病害数量比较与差值。
+  source: fresh
+- id: asset3_changzhi_down_count
+  category: 病害/资产/上下行
+  question: 长沙－芷江高速公路下行方向检出了多少处病害？
+  focus: 检查路线与下行方向的病害数量统计。
+  source: fresh
+- id: asset3_changzhi_up_area
+  category: 病害/资产/上下行规模
+  question: 长沙－芷江高速公路上行方向的病害总面积是多少平方米？
+  focus: 检查路线与上行方向的面积统计。
+  source: fresh
+- id: asset3_xixiang_up_avg
+  category: 病害/资产/上下行规模
+  question: 宝安大道西乡段上行方向的平均单处病害面积是多少？
+  focus: 检查单侧方向的平均面积规模。
+  source: fresh
+- id: asset3_surface_asphalt_concrete_count
+  category: 病害/资产/路面类型
+  question: 沥青混凝土路面上的病害有多少处？
+  focus: 检查路面类型过滤与病害数量统计。
+  source: fresh
+- id: asset3_surface_cement_scale
+  category: 病害/资产/路面类型规模
+  question: 水泥混凝土路面的病害数量和总面积分别是多少？
+  focus: 检查路面类型过滤与规模指标。
+  source: fresh
+- id: asset3_route_level_county_town
+  category: 病害/资产/行政等级
+  question: 县道和乡道上的病害数量分别是多少？
+  focus: 检查行政等级过滤与零结果枚举补齐。
+  source: fresh
+- id: asset3_route_level_national_area
+  category: 病害/资产/行政等级规模
+  question: 国道上的病害总面积是多少平方米？
+  focus: 检查行政等级过滤与面积统计。
+  source: fresh
+- id: asset3_tech_grade_second_count
+  category: 病害/资产/公路技术等级
+  question: 二级公路上的病害有多少处？
+  focus: 检查公路技术等级过滤与数量统计。
+  source: fresh
+- id: asset3_tech_grade_area_distribution
+  category: 病害/资产/公路技术等级分布
+  question: 按公路技术等级分组，各等级的病害总面积分别是多少？
+  focus: 检查技术等级分组与面积分布。
+  source: fresh
+- id: asset3_lane_third_count
+  category: 病害/资产/车道
+  question: 第三车道检出了多少处病害？
+  focus: 检查车道维度尚未更新时系统能否明确说清能力边界。
+  source: fresh
+- id: asset3_total_length_scale
+  category: 病害/资产/规模
+  question: 全库病害的总长度是多少米？
+  focus: 检查长度规模指标。
+  source: fresh
+- id: asset3_baotou_shanghai_compare
+  category: 病害/资产/路线规模比较
+  question: 包头-茂名和上海-昆明这两条路，哪一条的病害更多？各自多少处？
+  focus: 检查两条路线的数量比较。
+  source: fresh
+- id: disease_hengmingzhu_type_change_two_dates
+  category: 病害/路段/两次巡检
+  question: 10月23日到10月26日，宝安中心--恒明珠的病害类型构成发生了什么变化？
+  focus: 检查同路段两个明确日期的病害类型和数量变化。
+  source: old
+- id: disease_last_week_top_longitudinal_routes
+  category: 病害/时间/路线排名
+  question: 十月最后一周，哪些路线新增的纵向裂缝最多？排个前几名看看。
+  focus: 检查自然周范围、病害类型、路线分组和 TopN。
+  source: old
+- id: fresh_time_trend_area
+  category: 趋势
+  question: 展示S20外环高速在过去六个月中，每月病害总面积的变化趋势图。
+  focus: 按月度时间维度聚合指定路段的病害面积数据，并以趋势形式呈现变化情况。
+  source: old
+- id: route_top_type
+  category: 历史题
+  question: 按路线和病害类型分组，统计各路线下每种病害类型的数量，找出每条路线数量最多的主要病害类型
+  focus: ''
+  source: old
+- id: fresh_topn_route_area
+  category: TopN/病害
+  question: 列出全路网中，单次巡检检出病害总面积最大的前3个路段，并显示其具体面积数值。
+  focus: 验证系统能否按路段聚合病害面积，进行降序排列并提取Top N结果。
+  source: old
