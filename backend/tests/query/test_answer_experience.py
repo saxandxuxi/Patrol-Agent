@@ -369,6 +369,33 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertIn("工作台", answer.text)
         self.assertNotIn("路线名称 A", answer.text)
 
+    def test_single_row_group_lists_everything_it_has(self):
+        """分组只有 1 行时要说明“已全部列出”，
+        否则用户分不清是完整清单还是只看了前几名。"""
+
+        answer = assemble_answer(
+            [
+                {
+                    "node_id": "q1",
+                    "title": "q1. 按病害类型分组统计",
+                    "type": "query_data",
+                    "view": "distribution",
+                    "status": "accepted",
+                    "answer": "",
+                    "rows": [{"病害类型": "防眩板缺损", "数量": "1"}],
+                    "preview_rows": [{"病害类型": "防眩板缺损", "数量": "1"}],
+                    "rows_fetched": 1,
+                    "total_count": 1,
+                    "truncated": False,
+                }
+            ],
+            response_mode="data",
+        )
+
+        self.assertIn("已全部列出", answer.text)
+        self.assertIn("防眩板缺损", answer.text)
+        self.assertNotIn("按排序前列", answer.text)
+
     def test_data_detail_answer_reports_displayed_rows(self):
         answer = assemble_answer(
             [

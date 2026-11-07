@@ -83,6 +83,33 @@ def resolve_enum(
             evidence=({"field": enum.key, "match": "unique_label"},),
         )
     if len(partial) > 1:
+        # 输入同时包含多个枚举标签时（“沥青混凝土路面”既含“沥青混凝土”也含“沥青”），
+        # 更具体的更长标签优先；只有并列最长才算真正的歧义。
+        contained = [
+            value
+            for value in partial
+            if str(value.label) in text or str(value.display or "") in text
+        ]
+        if contained:
+            longest = max(len(str(value.label)) for value in contained)
+            best = [
+                value
+                for value in contained
+                if len(str(value.label)) == longest
+            ]
+            if len(best) == 1:
+                return EnumResolution(
+                    status="resolved",
+                    values=(best[0],),
+                    evidence=(
+                        {"field": enum.key, "match": "longest_label"},
+                    ),
+                )
+            return EnumResolution(
+                status="ambiguous",
+                values=tuple(best),
+                evidence=({"field": enum.key, "match": "multiple_labels"},),
+            )
         return EnumResolution(
             status="ambiguous",
             values=tuple(partial),

@@ -140,6 +140,9 @@
 34. 依赖前序节点取值的查询，必须让结果自带依赖条件：明细节点把该字段写进
     `output_projection`，分组节点把该字段写进 `dimensions`。否则用户看到
     “K0+000~K0+500 共 304 处”时无法知道这是哪条路、哪种病害的数据。
+35. 问“多少种、几种、去重后有多少个”时，必须用能力视图里对应的去重计数指标
+    （例如病害类型用 `distinct_problem_type_count`，标签为“病害类型种数”），
+    不能拿 `count` 顶替：`count` 数的是记录条数，不是种类数。
 
 允许的 view：
 count / sum / avg / distribution / list / detail / top / trend / bucket_compare / photo / data

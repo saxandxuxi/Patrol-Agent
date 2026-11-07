@@ -67,6 +67,20 @@ def _declared_view(source: dict[str, Any]) -> str:
     return str(spec.get("view") or "") if isinstance(spec, dict) else ""
 
 
+def _operand_caption(source: dict[str, Any]) -> str:
+    """给计算操作数起个人能看懂的名字：优先用上游节点的分组条件，其次用它的问法。"""
+    labels = source.get("group_labels")
+    if isinstance(labels, Mapping):
+        parts = [
+            str(value).strip()
+            for value in labels.values()
+            if str(value).strip()
+        ]
+        if parts:
+            return "、".join(dict.fromkeys(parts))
+    return str(source.get("question") or "").strip()
+
+
 def request_from_task(task: dict[str, Any]) -> CalculationRequest | None:
     value = task.get("calculation")
     if "calculation" in task and value is not None and not isinstance(
@@ -140,6 +154,7 @@ def execute_calculation(
     dependencies = [
         results[item] for item in dependency_ids if item in results
     ]
+    operand_labels: dict[str, str] = {}
     if request.tool == "calculate_scalar":
         resolved: list[CalculationOperand] = []
         for operand in request.operands:
@@ -172,6 +187,9 @@ def execute_calculation(
                         ),
                     )
                 )
+                caption = _operand_caption(source)
+                if caption:
+                    operand_labels[operand.name] = caption
             else:
                 resolved.append(operand)
         result = calculate_scalar(
@@ -350,6 +368,7 @@ def execute_calculation(
         request,
         task,
         output_label,
+        operand_labels or None,
     )
     if request.tool in {"calculate_scalar", "calculate_series"}:
         analysis = {

@@ -1,0 +1,129 @@
+version: 1
+exam_id: disease-asset-quantity-unit-20261107-05
+generated_at: '2026-11-07T18:51:06.204389+08:00'
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20270103
+code_fingerprint: content:5e76aeead17058d6d87c5eade8554ce05cd7366395010e3b431d2c9c7991f525
+fresh_case_ids:
+- asset5_patrol_0721_count
+- asset5_patrol_1104b_area
+- asset5_shanghai_sides_compare
+- asset5_erlian_up_length
+- asset5_down_total
+- asset5_level_avg
+- asset5_cement_avg
+- asset5_shengdao_length
+- asset5_grade1_avg
+- asset5_lane_each
+- asset5_two_routes_length_compare
+- asset5_changzhi_avg_length
+- asset5_top_route_count
+- asset5_up_total_a
+- asset5_up_total_b
+old_case_ids:
+- fresh_time_trend_area
+- disease_q3_vs_q4_composition
+- type3_network_area_top_type
+- fresh_asset_surface_type_breakdown
+- disease_last_seven_days_total
+cases:
+- id: asset5_patrol_0721_count
+  category: 病害/资产/巡查批次数量
+  question: 巡查编号 XCBH202607210004 这次巡查检出的病害数量是多少？
+  focus: 巡查批次过滤与总数统计。
+  source: fresh
+- id: asset5_patrol_1104b_area
+  category: 病害/资产/巡查批次规模
+  question: XCBH202611040002 巡检的病害面积合计是多少平方米？
+  focus: 巡查批次过滤与面积合计。
+  source: fresh
+- id: asset5_shanghai_sides_compare
+  category: 病害/资产/上下行比较
+  question: 上海-昆明高速公路上行和下行两边，哪一侧的病害更多？多多少处？
+  focus: 同一条路两个方向的病害数量比较与差值结论。
+  source: fresh
+- id: asset5_erlian_up_length
+  category: 病害/资产/上下行规模
+  question: 二连浩特-广州这条路上行方向的病害总长度是多少米？
+  focus: 路线与方向的长度规模指标。
+  source: fresh
+- id: asset5_down_total
+  category: 病害/资产/上下行数量
+  question: 全路网下行方向的病害有多少处？
+  focus: 单侧方向的病害总数。
+  source: fresh
+- id: asset5_level_avg
+  category: 病害/资产/行政等级规模
+  question: 按行政等级分组，国道和省道的平均单处病害面积分别是多少？
+  focus: 行政等级分组与平均面积指标。
+  source: fresh
+- id: asset5_cement_avg
+  category: 病害/资产/路面类型规模
+  question: 水泥混凝土路面上的病害，平均每处面积是多少平方米？
+  focus: 路面类型过滤与平均面积。
+  source: fresh
+- id: asset5_shengdao_length
+  category: 病害/资产/行政等级规模
+  question: 省道上的病害总长度是多少米？
+  focus: 行政等级过滤与长度合计。
+  source: fresh
+- id: asset5_grade1_avg
+  category: 病害/资产/公路技术等级规模
+  question: 一级公路上检出的病害平均单处面积是多少平方米？
+  focus: 技术等级过滤与平均面积指标。
+  source: fresh
+- id: asset5_lane_each
+  category: 病害/资产/车道
+  question: 每个车道分别检出了多少处病害？
+  focus: 车道维度尚未更新时需明确说明能力边界。
+  source: fresh
+- id: asset5_two_routes_length_compare
+  category: 病害/资产/路线规模比较
+  question: 包头-茂名和长沙－芷江高速公路，哪条路的病害总长度更长？长多少米？
+  focus: 两条路线的长度规模比较与差值结论。
+  source: fresh
+- id: asset5_changzhi_avg_length
+  category: 病害/资产/规模
+  question: 长沙－芷江高速公路的病害平均每处长度是多少米？
+  focus: 指定路线的平均长度指标。
+  source: fresh
+- id: asset5_top_route_count
+  category: 病害/资产/路线规模
+  question: 病害数量最多的那条路是哪条？一共有多少处？
+  focus: 路线数量排名与最高项。
+  source: fresh
+- id: asset5_up_total_a
+  category: 病害/资产/上下行数量
+  question: 全路网上行方向的病害数量是多少处？
+  focus: 单侧方向的病害总数。
+  source: fresh
+- id: asset5_up_total_b
+  category: 病害/资产/上下行数量同义改写
+  question: 上行侧一共检出了多少处病害？
+  focus: 同一事实的同义问法稳定性。
+  source: fresh
+- id: fresh_time_trend_area
+  category: 趋势
+  question: 展示S20外环高速在过去六个月中，每月病害总面积的变化趋势图。
+  focus: 按月度时间维度聚合指定路段的病害面积数据，并以趋势形式呈现变化情况。
+  source: old
+- id: disease_q3_vs_q4_composition
+  category: 病害/时间/季度比较
+  question: 第三季度和第四季度到现在，病害类型构成有什么变化？
+  focus: 检查两个季度范围的类型构成对比。
+  source: old
+- id: type3_network_area_top_type
+  category: 病害类型/面积规模
+  question: 全库范围内，哪类病害的总面积排第一？
+  focus: 检查总面积Top1。
+  source: old
+- id: fresh_asset_surface_type_breakdown
+  category: 资产
+  question: 按路面材料类型（如沥青、水泥）统计当前路网中的病害总数，哪类路面的病害更多？
+  focus: 验证系统能否基于资产属性（路面类型）进行分组统计和比较。
+  source: old
+- id: disease_last_seven_days_total
+  category: 病害/时间/相对日
+  question: 最近7天一共检出多少处病害？
+  focus: 检查相对最近 7 天窗口与总数。
+  source: old

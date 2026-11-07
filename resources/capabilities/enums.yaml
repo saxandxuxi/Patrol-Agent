@@ -43,3 +43,19 @@ enums:
         label: 四级公路
       "5":
         label: 等外公路
+  # 路面类型是自由文本列，值本身就是存储值。登记成字典后，
+  # “沥青混凝土路面”这类带后缀的说法也能解析回存储值，
+  # 不会再因为“来源是模型推断且没经过字典”被拦下。
+  ai_problem.road_surface_type:
+    table: ai_problem
+    column: road_surface_type
+    label: 路面类型
+    values:
+      "沥青混凝土":
+        label: 沥青混凝土
+      "水泥混凝土":
+        label: 水泥混凝土
+      "沥青":
+        label: 沥青
+      "水泥":
+        label: 水泥

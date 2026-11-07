@@ -1,0 +1,194 @@
+{
+  "exam_id": "disease-asset-quantity-unit-20261107-04",
+  "code_fingerprint": "content:f2746a73920b4b5606c19fa99218960007adc6219aad23e91bacb895aafcd9aa",
+  "passed_fresh": 15,
+  "total_fresh": 15,
+  "passed_old": 5,
+  "total_old": 5,
+  "passed_total": 20,
+  "total": 20,
+  "promoted": true,
+  "promotion_reason": "达到 15 新题 80% 和 5 旧题 80% 晋级线",
+  "results": [
+    {
+      "id": "asset4_patrol_1026_count",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统针对巡查编号 XCBH202610260001 执行了 COUNT 查询，SQL 正确过滤了 patrol_number 且排除了删除标记 (del_flag=0)，返回结果为 103。同时系统提供了明细列表作为核对，rows_fetched 为 103，total_count 为 103，truncated 为 false，证明数据完整且一致。最终回答明确给出总数 103 处，完全符合用户问题要求。",
+      "answer": "共 103处；“q2. 列出巡查编号为 XCBH202610260001 的所有病害明细，用于核对总数”共 103 条，当前展示前 103 条，完整明细请在结果工作台查看。"
+    },
+    {
+      "id": "asset4_patrol_0721_area",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "系统针对巡查编号 XCBH202607210004 执行了面积求和查询，SQL 正确过滤了 patrol_number 并计算 SUM(area)，返回结果 10128.80。最终回答明确给出了总面积数值及单位（㎡），并补充说明了明细条数（106条）及截断情况（未截断），完全覆盖了用户关于‘这次巡查检出病害总面积’的询问。",
+      "answer": "总面积 10128.80 ㎡；“q2_list_diseases. 列出巡查编号为 XCBH202607210004 的所有病害明细，包含定位和面积字段”返回 106 条，明细已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "asset4_patrol_1104b_routes",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "用户询问特定巡查批次（XCBH202611040002）检出的病害分布在哪些路及数量。系统生成的 SQL 正确过滤了 patrol_number，按 route_name 分组并统计数量。结果返回了两条路线及其对应的病害数量（上海-昆明 94处，怀化市绕城高速公路 2处），且明确说明共2行已全部列出，无截断。回答完整覆盖了用户问题的实体、维度和指标要求。",
+      "answer": "“q1. 按 route_name 分组，统计巡查编号为 XCBH202611040002 的病害数量”查询完成，共 2 行（已全部列出）：路线名称 上海-昆明，数量 94；路线名称 怀化市绕城高速公路，数量 2；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "asset4_pingjiang_sides_compare",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "系统正确识别了用户问题中的实体（平江－洞口高速公路）和维度（上行/下行），并执行了按方向分组的病害数量统计。SQL 逻辑正确，结果返回了上行 454 处和下行 8682 处的具体数值。最终回答明确指出了下行病害更多，并准确引用了这两个数值，完全覆盖了用户要求的比较结论和各自数量。",
+      "answer": "下行方向的病害数量显著多于上行方向。\n\n依据提供的统计结果，下行方向记录的病害数量为 8682 处，而上行方向仅为 454 处。通过对比这两个明确给出的数值，下行的病害体量远超上行，两者差距巨大。判断主要基于“上下行方向”这一维度对“数量”指标进行的分组统计结果。\n\n需要说明的是，本次分析仅基于证据中直接给出的病害计数值进行比较，未涉及路线长度、病害面积或密度等其他可能影响路况评估的代理指标。此外，数据仅展示了平江－洞口高速公路的汇总情况，未提供其他路段或更细粒度的分布信息，因此结论仅适用于当前给定的数据范围。若需进一步分析病害严重程度或养护优先级，需补充病害类型、面积及位置等详细信息。"
+    },
+    {
+      "id": "asset4_shanghai_kunming_sides_area",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "用户询问上海-昆明路线上行和下行的病害总面积。系统生成的SQL正确关联了路线表，过滤了指定路线ID，并按上下行方向分组求和面积字段。执行结果返回了两行数据，分别对应上行（139312.74）和下行（21930.48），单位与问题要求的平方米一致（数据库area字段通常默认为平方米或已在业务层定义，且回答中未出现单位换算错误）。最终回答完整覆盖了用户要求的两个方向的数值，无截断，无猜测。",
+      "answer": "“q1. 按上下行方向分组，统计上海-昆明路线的病害总面积”查询完成，共 2 行（已全部列出）：上下行方向 上行，总面积 139312.74；上下行方向 下行，总面积 21930.48；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "asset4_changzhi_sides_avg",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "系统正确识别了路线（长沙－芷江高速公路）和维度（上下行方向），SQL 使用 AVG(area) 计算平均单处面积，并按 up_or_down 分组。结果返回了上行（18.890707）和下行（43.208853）的具体数值，完整覆盖了用户问题要求的对比内容，且无截断或错误。",
+      "answer": "“q1. 按上下行方向分组，统计长沙－芷江高速公路所有病害的平均单处面积（average_area）”查询完成，共 2 行（已全部列出）：上下行方向 下行，平均面积 43.208853；上下行方向 上行，平均面积 18.890707；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "asset4_surface_avg_area",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "系统正确识别了用户意图，按路面类型（road_surface_type）分组并计算了平均单处病害面积（AVG(area)）。SQL逻辑正确，处理了空值（归类为'未填写'），结果包含5种路面类型的具体数值，且最终回答完整列出了所有分组及其对应的平均面积，符合考察重点。",
+      "answer": "“q1. 按路面类型（road_surface_type）分组，统计每种路面的平均单处病害面积（avera”查询完成，共 5 行；按排序前列：路面类型 未填写，平均面积 58.541090；路面类型 水泥混凝土，平均面积 26.310480；路面类型 沥青，平均面积 25.674860；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "asset4_asphalt_vs_cement_concrete",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明无法规划查询，原因是过滤值 road_surface_type 来源为 model_inference 且未经过字典或业务规则解析，属于具体的数据能力/字段缺失说明，符合 correct_unsupported 判定规则。",
+      "answer": "无法可靠规划该查询：过滤值 road_surface_type 来源为 model_inference，但没有经过字典、业务规则或受控解析。请换一种说法再问，或切换模型重试。"
+    },
+    {
+      "id": "asset4_level_guodao_shengdao_compare",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统分别查询了国道（10872处）和省道（24017处）的病害数量，SQL逻辑正确关联了路线行政等级。最终回答明确指出了省道更多，并给出了正确的差值计算（10872 - 24017 = -13145），完全覆盖了用户关于‘哪一类更多’和‘相差多少处’的两个考察重点。",
+      "answer": "共 10872处；共 24017处；数量差值 = -13145（10872 - 24017）。"
+    },
+    {
+      "id": "asset4_grade_second_area",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "用户询问二级公路病害总面积。系统生成的SQL正确关联了病害表(ai_problem)与路段表(basic_facilities_sections)，通过tech_grade字段过滤出'二级公路'（映射值为'2'），并计算了area字段的总和。执行结果显示总面积为46104.34，最终回答明确给出了该数值及单位平方米，完全覆盖了用户问题的实体、指标和结论要求。",
+      "answer": "总面积 46104.34 ㎡。"
+    },
+    {
+      "id": "asset4_grade_first_metrics",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "用户询问一级公路病害数量及总面积。系统生成 SQL 通过 JOIN `ai_problem` (disease) 和 `basic_facilities_sections` (section)，利用 CASE WHEN 将 `tech_grade='1'` 映射为 '一级公路' 进行过滤，并计算 COUNT(*) 和 SUM(area)。执行结果返回数量 1455 处，总面积 77310.13㎡。最终回答准确复述了这两个指标及单位，完全覆盖用户问题要求。",
+      "answer": "数量 1455处；总面积 77310.13㎡。"
+    },
+    {
+      "id": "asset4_lane_four_lanes",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "业务能力文档明确说明'区分车道的病害数量查询及数量统计（目前系统未更新车道分布）'。系统识别到该能力边界，在最终回答中明确声明'当前数据能力不支持：业务能力文档声明车道分布尚未更新'，并拒绝进行猜测，符合判定规则中关于明确说明缺失原因并停止猜测可判为 correct_unsupported 的要求。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：业务能力文档声明车道分布尚未更新，不能把 lane_index 当作可靠统计依据。请换一种说法再问，或切换模型重试。"
+    },
+    {
+      "id": "asset4_baotou_length_total",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "用户询问包头-茂名路线的病害总长度。系统生成的SQL正确关联了病害表与路线表，通过route_name解析出对应的route_id进行过滤，并计算了effective_disease_length的总和。最终回答明确给出了数值15605.49米，单位正确，且覆盖了用户指定的路线实体和规模指标要求。",
+      "answer": "有效病害总长度 15605.4900000000 米。"
+    },
+    {
+      "id": "asset4_nov2_total_a",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了用户问题中的时间范围（11月2日），并执行了全库病害数量统计。SQL使用了正确的日期区间过滤（>= '2026-11-02' AND < '2026-11-03'）。最终回答明确给出了总数1433处，并针对明细列表的截断情况（共1433条，展示前500条）进行了准确说明，符合判定规则中关于明细截断需说明命中总数和展示行数的要求。",
+      "answer": "共 1433处；“q1_list. 列出2026年11月2日（>=2026-11-02 且 <2026-11-03）采集的病害明细，”共 1433 条，当前展示前 500 条，完整明细请在结果工作台查看。"
+    },
+    {
+      "id": "asset4_nov2_total_b",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了用户问题中的时间范围（11月2日），并执行了SQL查询统计该日期内的病害总数。SQL逻辑正确（collection_time >= '2026-11-02' AND < '2026-11-03'），返回结果为1433处。最终回答明确给出了总数，并针对明细列表的截断情况（共1433条，展示前500条）进行了准确说明，符合判定规则中关于明细截断需说明命中总数和展示行数的要求。",
+      "answer": "共 1433处；“q2. 列出2026年11月2日（>=2026-11-02 且 <2026-11-03）采集的病害明细，”共 1433 条，当前展示前 500 条，完整明细请在结果工作台查看。"
+    },
+    {
+      "id": "disease_last_week_top_longitudinal_routes",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了时间范围（十月最后一周，即2026-10-25至2026-11-01）、病害类型（纵向裂缝）和分组维度（路线）。SQL逻辑正确，按路线分组统计数量并降序排列。最终回答列出了前几名路线及其数量，符合用户‘排个前几名看看’的需求。虽然未明确说明总命中数，但结果非截断且展示了所有返回行，满足基本查询要求。",
+      "answer": "“q1. 按 route_name 分组，统计 2026-10-25 至 2026-11-01 期间 pr”查询完成，共 8 行；按排序前列：路线名称 上海-昆明，数量 120；路线名称 长沙－芷江高速公路，数量 104；路线名称 宝安大道西乡段，数量 37；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "asset_dir_xixiang_updown",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "系统正确识别了用户意图，针对'宝安大道西乡段'按'上下行方向'分组统计了病害数量。SQL逻辑正确，通过JOIN关联路线表并过滤指定路线ID，使用CASE WHEN将up_or_down编码映射为中文'上行'/'下行'。结果明确显示上行1320处，下行0处，且回答中说明了'范围内没有下行的记录，已按0计入'，完整覆盖了用户关于方向和数量的查询需求。",
+      "answer": "“q1. 按 up_or_down 分组，统计 route_name='宝安大道西乡段' 的病害数量 co”查询完成，共 2 行（已全部列出）：上下行方向 上行，数量 1320；上下行方向 下行，数量 0；范围内没有下行的记录，已按 0 计入；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "type_huaihua_route_types",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了路线'怀化市绕城高速公路'，按病害类型分组统计了数量。SQL逻辑正确（JOIN route表过滤，GROUP BY problem_type_name）。结果返回28行，未截断。最终回答列出了所有28种病害类型及其对应数量，完全覆盖了用户问题要求的'有哪些病害类型'和'各多少处'。",
+      "answer": "“q1. 按 problem_type_name 分组，统计怀化市绕城高速公路上的病害数量分布”查询完成，共 28 行；按排序前列：病害类型 条状修补，数量 659；病害类型 横向裂缝，数量 65；病害类型 抛洒物，数量 32；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "holdout_19",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确指出当前数据能力缺失：只有管养单位 ID，缺少可验证的单位名称和台账关联，因此无法完成基于真实单位名称的排名。根据规则，当数据库确实缺少字段或关联能力，且系统明确说明具体缺失原因并停止猜测时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联，不能完成单位排名。请换一种说法再问，或切换模型重试。"
+    },
+    {
+      "id": "disease_last_month_top_type",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户问题中的'新增'存在业务定义歧义（可能指首次发现、本月采集总数或环比增量）。系统未进行猜测，而是明确指出了三种可能的口径差异，并说明在缺乏明确定义的情况下直接假设可能导致偏差，符合'如果问题本身缺少必要的业务定义，系统明确要求补充口径且没有猜测，可以判为 correct_unsupported'的规则。",
+      "answer": "该查询需要补充明确口径：用户问题中的“新增”一词存在歧义。它可能指：1. 本月内首次发现的病害类型数量（去重后新增类型）；2. 本月内所有新采集的病害记录总数（按类型分组）；3. 相比上月，哪种病害类型的数量增长最多。当前计划采用了第2种解释（本月采集总数）。在没有明确业务定义的情况下，直接假设为绝对数量而非增量或新出现类型，可能导致回答偏差。特别是“新增”常用于对比语境。"
+    }
+  ]
+}

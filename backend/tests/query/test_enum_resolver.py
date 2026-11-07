@@ -59,6 +59,54 @@ class EnumResolverTests(unittest.TestCase):
         self.assertEqual(value.storage_value, "0")
         self.assertEqual(value.display_value, "全部/未区分")
 
+    def test_surface_type_suffix_resolves_to_storage_value(self):
+        """“沥青混凝土路面”要解析成存储值“沥青混凝土”，
+        不能因为同时包含“沥青”被判成歧义。"""
+
+        for text, code in (
+            ("沥青混凝土", "沥青混凝土"),
+            ("水泥混凝土", "水泥混凝土"),
+            ("沥青混凝土路面", "沥青混凝土"),
+            ("水泥混凝土路面", "水泥混凝土"),
+            ("沥青路面", "沥青"),
+        ):
+            with self.subTest(text=text):
+                result = resolve_enum(
+                    self.registry,
+                    "ai_problem",
+                    "road_surface_type",
+                    text,
+                )
+
+                self.assertEqual(result.status, "resolved")
+                self.assertEqual(result.values[0].code, code)
+
+    def test_equal_length_labels_stay_ambiguous(self):
+        """并列具体的说法仍然要问用户，不能猜。"""
+
+        result = resolve_enum(
+            self.registry,
+            "basic_facilities_routes",
+            "level",
+            "国道和省道",
+        )
+
+        self.assertEqual(result.status, "ambiguous")
+
+    def test_surface_type_filter_is_dictionary_backed(self):
+        value = resolve_value(
+            "road_surface_type",
+            "=",
+            "沥青混凝土路面",
+            "沥青混凝土路面上的病害有多少处？",
+            "mysql",
+            subject="disease",
+            registry=self.registry,
+        )
+
+        self.assertEqual(value.storage_value, "沥青混凝土")
+        self.assertEqual(value.resolver, "enum:ai_problem.road_surface_type")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -63,6 +63,17 @@ class MetricRegistryTests(unittest.TestCase):
             self.assertIn("effective_disease_length", expression)
             self.assertNotIn("}.disease_length", expression)
 
+    def test_distinct_type_count_metric_is_registered(self):
+        """“多少种病害类型”是去重计数，不能拿 count 顶替。"""
+
+        metric = self.registry.snapshot.metrics["disease"][
+            "distinct_problem_type_count"
+        ]
+
+        self.assertIn("COUNT(DISTINCT", metric.expression.upper())
+        self.assertIn("problem_type_name", metric.expression)
+        self.assertEqual(metric.unit, "种")
+
 
 if __name__ == "__main__":
     unittest.main()

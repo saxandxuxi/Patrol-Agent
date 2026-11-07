@@ -4,7 +4,12 @@ from decimal import Decimal
 from app.calculations.columns import calculate_columns
 from app.calculations.domain.trend import render_series_calculation
 from app.calculations.evidence import compact_table_evidence
-from app.calculations.models import CalculationOperand, CalculationRequest
+from app.calculations.executor import execute_calculation
+from app.calculations.models import (
+    CalculationOperand,
+    CalculationOutput,
+    CalculationRequest,
+)
 from app.calculations.numbers import as_decimal, numeric_value
 from app.calculations.registry import CalculationRegistry
 from app.calculations.scalar import calculate_scalar
@@ -257,6 +262,113 @@ class ColumnCalculationTests(unittest.TestCase):
         self.assertEqual(
             [row["share"] for row in result.rows],
             [Decimal("25.000000"), Decimal("75.000000")],
+        )
+
+
+class ScalarDifferenceRenderingTests(unittest.TestCase):
+    """差值要给出“谁更多、多多少”，不能只甩一条可能为负的公式。"""
+
+    def _execute(
+        self,
+        left: dict[str, object],
+        right: dict[str, object],
+    ) -> dict[str, object]:
+        task = {
+            "id": "pc",
+            "question": "比较两侧的病害数量",
+            "depends_on": ["q1", "q2"],
+        }
+        request = CalculationRequest(
+            tool="calculate_scalar",
+            operation="subtract",
+            operands=(
+                CalculationOperand(
+                    name="left",
+                    source={"node": "q1", "field": "count"},
+                ),
+                CalculationOperand(
+                    name="right",
+                    source={"node": "q2", "field": "count"},
+                ),
+            ),
+            output=CalculationOutput(name="count_change", label="数量差值"),
+        )
+        return execute_calculation(
+            task,
+            request,
+            {"q1": dict(left), "q2": dict(right)},
+        )
+
+    def test_difference_reports_magnitude_and_winner(self):
+        payload = self._execute(
+            {
+                "question": "统计行政等级为'国道'的病害数量",
+                "field_labels": {"count": "数量"},
+                "rows": [{"数量": "10872"}],
+            },
+            {
+                "question": "统计行政等级为'省道'的病害数量",
+                "field_labels": {"count": "数量"},
+                "rows": [{"数量": "24017"}],
+            },
+        )
+
+        reply = str(payload["reply"])
+        self.assertIn("数量差值 = 13145", reply)
+        self.assertIn("省道", reply)
+        self.assertIn("更多", reply)
+        self.assertNotIn("-13145", reply)
+
+    def test_difference_without_labels_still_reports_positive_gap(self):
+        payload = self._execute(
+            {"field_labels": {"count": "数量"}, "rows": [{"数量": "3"}]},
+            {"field_labels": {"count": "数量"}, "rows": [{"数量": "9"}]},
+        )
+
+        reply = str(payload["reply"])
+        self.assertIn("相差 6", reply)
+        self.assertNotIn("-6", reply)
+
+    def test_multiply_keeps_plain_formula(self):
+        task = {
+            "id": "pc",
+            "question": "计算乘积",
+            "depends_on": ["q1", "q2"],
+        }
+        request = CalculationRequest(
+            tool="calculate_scalar",
+            operation="multiply",
+            operands=(
+                CalculationOperand(
+                    name="left",
+                    source={"node": "q1", "field": "count"},
+                ),
+                CalculationOperand(
+                    name="right",
+                    source={"node": "q2", "field": "count"},
+                ),
+            ),
+            output=CalculationOutput(name="product", label="乘积"),
+        )
+
+        payload = execute_calculation(
+            task,
+            request,
+            {
+                "q1": {
+                    "field_labels": {"count": "数量"},
+                    "rows": [{"数量": "4"}],
+                },
+                "q2": {
+                    "field_labels": {"count": "数量"},
+                    "rows": [{"数量": "3"}],
+                },
+            },
+        )
+
+        self.assertEqual(
+            str(payload["reply"]),
+            "乘积 = 12.000000（4 * 3）。",
         )
 
 

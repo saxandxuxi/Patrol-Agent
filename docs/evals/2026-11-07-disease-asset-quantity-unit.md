@@ -93,3 +93,74 @@ unit-3 报告记录的代码指纹与跑完后重新计算的指纹一致（运�
 1. 继续按业务单元考试：病害类型（路段各类病害、上下行主病害、上下行差异、
    车道能力缺失、尺寸阈值）。
 2. 代码一旦再改动，当前考试集立即作废，必须重新生成 15 道新题。
+
+## 七、去重计数指标与单行完整性（本轮共同层）
+
+1. **去重计数指标**：`resources/capabilities/metrics.yaml` 新增
+   `distinct_problem_type_count`（`COUNT(DISTINCT problem_type_name)`，单位“种”）；
+   `prompts/query_spec.md` 第 35 条要求“多少种/几种/去重”必须用它，
+   不能拿 `count` 顶替。实库冒烟：全路网上行 37 种 / 下行 32 种（此前会拿
+   记录条数 21413 当类型数）。
+2. **单行完整性说明**：`app/query/service.py` 在分组结果 ≤3 行时写
+   “（已全部列出）”，明细无总数且未截断时写“共 N 条（已全部列出）”，
+   避免用户分不清完整清单和“只看了前几名”。实库冒烟：许昌-广州
+   “共 1 行（已全部列出）：病害类型 防眩板缺损，数量 2”。
+
+## 八、第四套考试（资产数量与规模 unit-4）
+
+- 考试集：`disease-asset-quantity-unit-20261107-04`
+- 随机种子：`20261227`
+- 旧题：`disease_last_week_top_longitudinal_routes`、`asset_dir_xixiang_updown`、
+  `type_huaihua_route_types`、`holdout_19`、`disease_last_month_top_type`
+- 结果：新题 `15/15`，旧题 `5/5`，总计 `20/20`，首次运行即晋级
+
+人工抽检（不依赖裁判结论）发现裁判放过了两个真实缺陷：
+
+| 现象 | 真实根因 |
+| --- | --- |
+| “沥青混凝土和水泥混凝土哪种路面病害更多”被拒：过滤值来源未解析 | `road_surface_type` 是自由文本列、没有登记枚举字典；规划器只要把值写成“沥青混凝土路面”，就成了 `model_inference + identity`，被 `unresolved_provenance` 拦下。同一道题会随机时对时错 |
+| “国道和省道哪类更多？相差多少”回答 `数量差值 = -13145（10872 - 24017）` | 标量差值只渲染公式：负的“相差”，且没有点名谁更多 |
+
+## 九、两处共同层修复
+
+1. **路面类型按“表+字段”登记枚举**：`resources/capabilities/enums.yaml` 增加
+   `ai_problem.road_surface_type`（沥青混凝土 / 水泥混凝土 / 沥青 / 水泥）。
+   同时 `enum_resolver` 增加具体度规则：输入里同时包含多个枚举标签时
+   （“沥青混凝土路面”既含“沥青混凝土”也含“沥青”），取最长、最具体的标签；
+   只有并列最长才判歧义（“国道和省道”仍会问用户）。
+2. **差值结论**：`app/calculations/domain/rendering.py` 与
+   `app/calculations/executor.py` 对 `subtract` 输出正数差值并点名谁更多：
+   `数量差值 = 13145（统计行政等级为省道的病害总数量更多：24017 vs 10872）`。
+   标签优先取上游节点的分组条件，取不到时用上游节点的问法；两边都没有标签时
+   至少输出“{大} vs {小} 相差 {差值}”，不再出现负的“相差”。
+
+契约测试：`tests/query/test_enum_resolver.py`（后缀写法、真歧义、字典来源）、
+`tests/query/test_calculations.py`（正数差值、点名、非减法不受影响）。
+
+## 十、第五套考试（资产数量与规模 unit-5，修复后重考）
+
+- 考试集：`disease-asset-quantity-unit-20261107-05`
+- 随机种子：`20270103`
+- 旧题：`fresh_time_trend_area`、`disease_q3_vs_q4_composition`、
+  `type3_network_area_top_type`、`fresh_asset_surface_type_breakdown`、
+  `disease_last_seven_days_total`
+- 代码指纹：`content:5e76aeea...`
+- 结果：新题 `15/15`，旧题 `5/5`，总计 `20/20`，首次运行即晋级
+
+抽检确认：
+
+1. 两条路长度比较回答“长度差值 = 53056.63（长沙－芷江更多：68662.12 vs
+   15605.49 米）”，正数差值且点名。
+2. 同义问法“全路网上行方向的病害数量是多少处？”与“上行侧一共检出了多少处
+   病害？”两次都回答 21413 处。
+3. “上海-昆明高速公路”因名称不精确触发确认卡（上海-昆明 / 上海-瑞丽），
+   属于实体消歧；车道题仍按能力边界如实说明缺失原因。
+
+## 十一、回归
+
+`python -m unittest discover -s tests/query` → `369` 项通过。
+
+## 十二、下一步
+
+本单元（资产病害数量与规模）已按修复后指纹重新考试通过，下一单元：
+**分段查询**。每次代码改动后仍必须重新生成 15 道新题再考。

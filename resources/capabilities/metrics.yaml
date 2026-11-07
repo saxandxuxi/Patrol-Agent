@@ -46,6 +46,13 @@ metrics:
       label: 最短病害长度
       unit: 米
       allowed_views: [count, distribution, top_groups, trend]
+    # “多少种病害类型”是去重计数，不是记录条数：没有这条指标时模型只能拿
+    # count 顶上，把 21413 处病害说成 21413 种类型。
+    distinct_problem_type_count:
+      expression: COUNT(DISTINCT {alias}.problem_type_name)
+      label: 病害类型种数
+      unit: 种
+      allowed_views: [count, distribution, top_groups, trend]
     route_length_km:
       expression: "{route}.route_length_km"
       label: 路线长度

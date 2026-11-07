@@ -377,6 +377,10 @@ def _data_answer_text(section: dict[str, Any]) -> str:
                     f"{prefix}共 {int(total_count)} 条，当前展示前 {len(preview)} 条："
                     f"{detail}；完整明细请在结果工作台查看{suffix}。"
                 )
+            # 没有总数、也没有被截断时，这几条就是全部：说清楚，别让用户
+            # 怀疑“是不是还有没列出来的”。
+            if total_count is None and not section.get("truncated"):
+                return f"{prefix}共 {rows_fetched} 条（已全部列出）：{detail}{suffix}"
             return f"{prefix}{detail}{suffix}"
         if total_count is not None:
             return (
@@ -398,7 +402,12 @@ def _data_answer_text(section: dict[str, Any]) -> str:
         digest = _grouped_digest(result_rows)
         text = f"{prefix}查询完成，共 {shown} 行"
         if digest:
-            text = f"{text}；按排序前列：{digest}"
+            # 结果很少时要说明“这就是全部”，否则用户分不清是完整清单
+            # 还是只看了前几名。
+            if shown <= 3:
+                text = f"{text}（已全部列出）：{digest}"
+            else:
+                text = f"{text}；按排序前列：{digest}"
         notes = [
             _inherited_note(section),
             str(section.get("coverage_note") or ""),
