@@ -12,6 +12,45 @@
     </div>
 
     <div class="settings-grid">
+      <div class="panel-card catalog-card">
+        <div class="card-heading">
+          <div>
+            <h2>可用文本模型</h2>
+            <span>每 30 天自动检查一次；只显示用当前密钥实际调用成功的模型</span>
+          </div>
+          <el-button
+            size="small"
+            :loading="catalogLoading || catalog.refreshing"
+            @click="refreshCatalog"
+          >
+            刷新模型目录
+          </el-button>
+        </div>
+        <div class="catalog-summary">
+          <span><strong>{{ catalog.models?.length || 0 }}</strong> 个已验证文本模型</span>
+          <span>上次更新：{{ formatCatalogTime(catalog.updated_at) }}</span>
+          <span>自动更新周期：{{ catalog.ttl_days || 30 }} 天</span>
+        </div>
+        <el-alert
+          v-if="catalog.refreshing"
+          title="正在拉取模型目录并逐个验证当前密钥的调用权限，完成后下拉框会自动更新。"
+          type="info"
+          :closable="false"
+          show-icon
+        />
+        <el-alert
+          v-else-if="catalog.last_error"
+          :title="`模型目录刷新失败：${catalog.last_error}`"
+          type="warning"
+          :closable="false"
+          show-icon
+        />
+        <p class="catalog-note">
+          模型直接进入角色模型下拉框，不需要在「已保存模型」里逐条注册。
+          未开通、无权限、非文本生成或不兼容 Chat Completions 的模型会自动忽略。
+        </p>
+      </div>
+
       <div class="panel-card form-card">
         <div class="card-heading">
           <h2>角色模型</h2>
@@ -28,7 +67,18 @@
               style="width: 100%"
             >
               <el-option :label="defaultLabel('sql_model')" value="" />
-              <el-option v-for="name in roleChoices" :key="name" :label="name" :value="name" />
+              <el-option-group
+                v-for="group in roleOptionGroups"
+                :key="group.label"
+                :label="group.label"
+              >
+                <el-option
+                  v-for="item in group.items"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-option-group>
             </el-select>
             <span class="param-hint">当前生效：{{ effective('sql_model') }}</span>
           </el-form-item>
@@ -42,7 +92,18 @@
               style="width: 100%"
             >
               <el-option :label="defaultLabel('knowledge_model')" value="" />
-              <el-option v-for="name in roleChoices" :key="name" :label="name" :value="name" />
+              <el-option-group
+                v-for="group in roleOptionGroups"
+                :key="group.label"
+                :label="group.label"
+              >
+                <el-option
+                  v-for="item in group.items"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-option-group>
             </el-select>
             <span class="param-hint">当前生效：{{ effective('knowledge_model') }}</span>
           </el-form-item>
@@ -56,7 +117,18 @@
               style="width: 100%"
             >
               <el-option :label="defaultLabel('verify_model')" value="" />
-              <el-option v-for="name in roleChoices" :key="name" :label="name" :value="name" />
+              <el-option-group
+                v-for="group in roleOptionGroups"
+                :key="group.label"
+                :label="group.label"
+              >
+                <el-option
+                  v-for="item in group.items"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-option-group>
             </el-select>
             <span class="param-hint">当前生效：{{ effective('verify_model') }}</span>
           </el-form-item>
@@ -70,7 +142,18 @@
               style="width: 100%"
             >
               <el-option :label="defaultLabel('semantic_model')" value="" />
-              <el-option v-for="name in roleChoices" :key="name" :label="name" :value="name" />
+              <el-option-group
+                v-for="group in roleOptionGroups"
+                :key="group.label"
+                :label="group.label"
+              >
+                <el-option
+                  v-for="item in group.items"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-option-group>
             </el-select>
             <span class="param-hint">当前生效：{{ effective('semantic_model') }}</span>
           </el-form-item>
@@ -84,7 +167,18 @@
               style="width: 100%"
             >
               <el-option :label="defaultLabel('planner_model')" value="" />
-              <el-option v-for="name in roleChoices" :key="name" :label="name" :value="name" />
+              <el-option-group
+                v-for="group in roleOptionGroups"
+                :key="group.label"
+                :label="group.label"
+              >
+                <el-option
+                  v-for="item in group.items"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-option-group>
             </el-select>
             <span class="param-hint">当前生效：{{ effective('planner_model') }}</span>
           </el-form-item>
@@ -98,7 +192,18 @@
               style="width: 100%"
             >
               <el-option :label="defaultLabel('controller_model')" value="" />
-              <el-option v-for="name in roleChoices" :key="name" :label="name" :value="name" />
+              <el-option-group
+                v-for="group in roleOptionGroups"
+                :key="group.label"
+                :label="group.label"
+              >
+                <el-option
+                  v-for="item in group.items"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-option-group>
             </el-select>
             <span class="param-hint">当前生效：{{ effective('controller_model') }}</span>
           </el-form-item>
@@ -292,12 +397,22 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 
 const models = ref([])
 const roleChoices = ref([])
+const catalog = ref({
+  models: [],
+  updated_at: '',
+  refreshing: false,
+  stale: true,
+  last_error: '',
+  ttl_days: 30,
+})
+const catalogLoading = ref(false)
+let catalogPollTimer = null
 // 每个角色「跟随默认」时实际用的是哪个模型：值由后端从 .env 算出来（payload._defaults），
 // 这样用户一眼能看出默认是什么，而不是只看到一个空下拉框。
 const roleDefaults = ref({})
@@ -318,6 +433,57 @@ const roles = reactive({
   semantic_model: '',
   planner_model: '',
   controller_model: '',
+})
+
+const PROVIDER_LABELS = {
+  dashscope: '百炼',
+  zhipu: '智谱',
+  deepseek: 'DeepSeek',
+  moonshot: 'Moonshot',
+}
+
+function providerLabel(value) {
+  return PROVIDER_LABELS[value] || value || '其他'
+}
+
+function formatContext(value) {
+  const number = Number(value || 0)
+  if (number >= 1_000_000) return `${Math.round(number / 100_000) / 10}M`
+  if (number >= 1000) return `${Math.round(number / 1000)}K`
+  return ''
+}
+
+function catalogLabel(item) {
+  const context = formatContext(item.context_window)
+  const vendor = item.vendor && item.vendor !== item.gateway_provider
+    ? ` · ${item.vendor}`
+    : ''
+  const capability = (item.capabilities || []).includes('Reasoning') ? ' · 推理' : ''
+  return `${item.name} · ${item.id}${vendor}${context ? ` · ${context}` : ''}${capability}`
+}
+
+const roleOptionGroups = computed(() => {
+  const groups = new Map()
+  const add = (group, item) => {
+    if (!groups.has(group)) groups.set(group, [])
+    groups.get(group).push(item)
+  }
+  const seen = new Set()
+  for (const model of catalog.value.models || []) {
+    if (!model.role_choice || seen.has(model.role_choice)) continue
+    seen.add(model.role_choice)
+    add(providerLabel(model.gateway_provider), {
+      label: catalogLabel(model),
+      value: model.role_choice,
+    })
+  }
+  for (const name of roleChoices.value || []) {
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    const prefix = String(name).includes('/') ? String(name).split('/', 1)[0] : '原有 / 手动配置'
+    add(providerLabel(prefix), { label: name, value: name })
+  }
+  return [...groups.entries()].map(([label, items]) => ({ label, items }))
 })
 const chatOptions = reactive({
   enable_thinking: true,
@@ -347,6 +513,57 @@ async function load() {
   } catch (err) {
     ElMessage.error(err.message)
   }
+}
+
+function clearCatalogPoll() {
+  if (catalogPollTimer) {
+    window.clearTimeout(catalogPollTimer)
+    catalogPollTimer = null
+  }
+}
+
+function scheduleCatalogPoll() {
+  clearCatalogPoll()
+  catalogPollTimer = window.setTimeout(async () => {
+    await loadCatalog()
+  }, 4000)
+}
+
+async function loadCatalog(force = false) {
+  catalogLoading.value = true
+  try {
+    const data = force ? await api.refreshModelCatalog() : await api.modelCatalog()
+    catalog.value = {
+      ...catalog.value,
+      ...data,
+      models: Array.isArray(data.models) ? data.models : [],
+    }
+    if (data.refreshing) scheduleCatalogPoll()
+    else clearCatalogPoll()
+  } catch (err) {
+    ElMessage.error(err.message)
+  } finally {
+    catalogLoading.value = false
+  }
+}
+
+async function refreshCatalog() {
+  clearCatalogPoll()
+  await loadCatalog(true)
+}
+
+function formatCatalogTime(value) {
+  if (!value) return '尚未更新'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
 }
 
 async function loadRoles() {
@@ -442,10 +659,15 @@ async function remove(id) {
 }
 
 onMounted(async () => {
+  await loadCatalog()
   await load()
   await loadRoles()
   await loadChatBehaviour()
 })
+
+onActivated(loadCatalog)
+
+onBeforeUnmount(clearCatalogPoll)
 </script>
 
 <style scoped>
@@ -465,6 +687,43 @@ onMounted(async () => {
 .form-card,
 .table-card {
   padding: 20px;
+}
+
+.catalog-card {
+  grid-column: 1 / -1;
+  padding: 20px;
+}
+
+.catalog-card .card-heading {
+  align-items: flex-start;
+}
+
+.catalog-card .card-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.catalog-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin-bottom: 12px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.catalog-summary strong {
+  color: var(--blue);
+  font-family: var(--font-mono);
+  font-size: 16px;
+}
+
+.catalog-note {
+  margin: 10px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.65;
 }
 
 .card-heading {

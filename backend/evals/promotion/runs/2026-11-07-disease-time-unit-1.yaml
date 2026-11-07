@@ -1,0 +1,129 @@
+version: 1
+exam_id: disease-time-unit-20261107-01
+generated_at: "2026-11-07T15:00:00+08:00"
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20261111
+code_fingerprint: content:c5dabf0e21b6098f95b42ca9ae89227995745ea96c58660be5173e84dd040563
+fresh_case_ids:
+  - disease_q4_pothole_monthly
+  - disease_three_month_oil_routes
+  - disease_half_year_lateral_crack_trend
+  - disease_recent_three_patrol_pothole_change
+  - disease_hengmingzhu_type_change_two_dates
+  - disease_xixiang_longitudinal_two_dates
+  - disease_baotou_pothole_two_days
+  - disease_last_week_top_longitudinal_routes
+  - disease_october_crack_family_by_route
+  - disease_shanghai_kunming_oil_month_change
+  - disease_changzhi_two_types_two_dates
+  - disease_q4_lateral_crack_route_share
+  - disease_strip_repair_across_routes_window
+  - disease_recent_five_strip_repair_change
+  - disease_august_crack_no_data
+old_case_ids:
+  - fresh_time_monthly_trend_multi_route
+  - fresh_lane_disease_unsupported
+  - fresh_task_completion_rate_ranking
+  - fresh_disease_direction_type_diff
+  - fresh_time_trend_area
+cases:
+  - id: disease_q4_pothole_monthly
+    category: 病害/时间/季度
+    question: 本季度坑槽病害整体检出多少处？按月份拆开看，哪个月冒得最多？
+    focus: 检查相对季度范围、指定病害类型、月度拆分和峰值判断。
+    source: fresh
+  - id: disease_three_month_oil_routes
+    category: 病害/时间/路线
+    question: 最近三个月泛油主要出现在哪些路上？各路线累计多少处？
+    focus: 检查相对时间范围、泛油病害和路线分布，并说明覆盖不足的月份。
+    source: fresh
+  - id: disease_half_year_lateral_crack_trend
+    category: 病害/时间趋势
+    question: 从六月到十一月，横向裂缝每月检出量怎么走，哪个阶段增长最明显？
+    focus: 检查指定病害类型、逐月趋势和阶段峰值。
+    source: fresh
+  - id: disease_recent_three_patrol_pothole_change
+    category: 病害/巡检批次
+    question: 最近3次巡查里，坑槽新增数量有没有越查越多？
+    focus: 检查最近巡查批次窗口、坑槽数量序列和变化结论。
+    source: fresh
+  - id: disease_hengmingzhu_type_change_two_dates
+    category: 病害/路段/两次巡检
+    question: 10月23日到10月26日，宝安中心--恒明珠的病害类型构成发生了什么变化？
+    focus: 检查同路段两个明确日期的病害类型和数量变化。
+    source: fresh
+  - id: disease_xixiang_longitudinal_two_dates
+    category: 病害/路段/两次巡检
+    question: 宝安大道西乡段10月23日和10月26日这两次巡查，纵向裂缝数量差多少？
+    focus: 检查同路段、两个日期、指定病害类型和差值。
+    source: fresh
+  - id: disease_baotou_pothole_two_days
+    category: 病害/时间
+    question: 11月2日和11月3日，包头-茂名的坑槽病害是多了还是少了？
+    focus: 检查同路线相邻两天、指定病害类型和变化方向。
+    source: fresh
+  - id: disease_last_week_top_longitudinal_routes
+    category: 病害/时间/路线排名
+    question: 十月最后一周，哪些路线新增的纵向裂缝最多？排个前几名看看。
+    focus: 检查自然周范围、病害类型、路线分组和 TopN。
+    source: fresh
+  - id: disease_october_crack_family_by_route
+    category: 病害/实体族/路线
+    question: 10月裂缝类病害在不同路线上的构成怎么样？横向裂缝和纵向裂缝分别集中在哪里？
+    focus: 检查裂缝实体族展开、路线分组和两种成员类型的区分。
+    source: fresh
+  - id: disease_shanghai_kunming_oil_month_change
+    category: 病害/时间
+    question: 上海-昆明从10月到11月，泛油数量是增加还是减少？
+    focus: 检查同路线两个月、指定病害类型和变化方向。
+    source: fresh
+  - id: disease_changzhi_two_types_two_dates
+    category: 病害/两次巡检/多类型
+    question: 长沙－芷江高速10月27日和10月31日两次检出中，坑槽和泛油分别变化多少？
+    focus: 检查两个日期、两种病害类型和多组差值比较。
+    source: fresh
+  - id: disease_q4_lateral_crack_route_share
+    category: 病害/时间/占比
+    question: 本季度横向裂缝按路线看，哪些路最多？给我各路线数量和占比。
+    focus: 检查季度范围、病害类型、路线分组和占比计算。
+    source: fresh
+  - id: disease_strip_repair_across_routes_window
+    category: 病害/时间/跨路线
+    question: 10月20日到11月4日，条状修补在不同道路上的新增数量怎么分布？
+    focus: 检查明确时间范围、指定病害类型和跨路线分布。
+    source: fresh
+  - id: disease_recent_five_strip_repair_change
+    category: 病害/巡检批次
+    question: 最近五次巡查中，条状修补的数量变化明显吗？
+    focus: 检查最近五次巡查窗口、条状修补数量序列和变化结论。
+    source: fresh
+  - id: disease_august_crack_no_data
+    category: 病害/能力边界
+    question: 今年8月裂缝类病害在各路线新增多少？能看出暑期哪条路更严重吗？
+    focus: 检查无数据月份能否明确说明不能判断路线严重程度。
+    source: fresh
+  - id: fresh_time_monthly_trend_multi_route
+    category: 时间
+    question: 展示S20外环高速和G60沪昆高速在过去六个月中，每月病害总数的变化趋势对比。
+    focus: 验证系统能否同时处理多条路线的时间序列数据，并按月粒度聚合病害数量以生成趋势对比。
+    source: old
+  - id: fresh_lane_disease_unsupported
+    category: 不支持能力
+    question: 请列出G4京港澳高速K100至K120路段第三车道的具体病害分布明细。
+    focus: 系统需明确告知当前车道分布数据未更新，无法提供指定车道的病害查询服务，并说明数据缺失情况。
+    source: old
+  - id: fresh_task_completion_rate_ranking
+    category: 巡检任务
+    question: 对各管养片区上个月的巡检任务完成率进行排名，完成率最低的片区是哪个？
+    focus: 验证系统能否计算任务完成率（实际/计划），并按片区进行排序找出最小值。
+    source: old
+  - id: fresh_disease_direction_type_diff
+    category: 病害/方向
+    question: 在包头-茂名高速上，上行方向和下行方向的“横向裂缝”病害数量差异有多大？哪一侧更多？
+    focus: 考察按路线和方向分组，统计特定病害类型的数量，并计算两侧差值及判断大小关系。
+    source: old
+  - id: fresh_time_trend_area
+    category: 趋势
+    question: 展示S20外环高速在过去六个月中，每月病害总面积的变化趋势图。
+    focus: 按月度时间维度聚合指定路段的病害面积数据，并以趋势形式呈现变化情况。
+    source: old

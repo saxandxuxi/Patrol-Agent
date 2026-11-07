@@ -14,7 +14,11 @@ def _provider_choices() -> list[str]:
     try:
         from . import llm
 
-        return llm.provider_choices()
+        from .model_catalog import role_choices as catalog_role_choices
+
+        return sorted(
+            set(llm.provider_choices() + catalog_role_choices())
+        )
     except Exception:  # noqa: BLE001
         return []
 

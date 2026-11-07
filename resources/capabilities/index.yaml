@@ -19,3 +19,4 @@ files:
   - templates.yaml
   - calculators.yaml
   - preset_bindings.yaml
+  - assist_rules.yaml

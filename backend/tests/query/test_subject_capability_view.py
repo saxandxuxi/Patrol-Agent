@@ -27,6 +27,16 @@ class SubjectCapabilityViewTests(unittest.TestCase):
         self.assertIn("route_length_km", view.fields)
         self.assertIn("route_length_km", view.metrics)
 
+    def test_planner_view_exposes_unavailable_field_status(self):
+        view = self.registry.planner_view("disease", FieldReachSet())
+
+        severity = view.fields["history_damage_interval"]
+        lane = view.fields["lane_index"]
+        self.assertEqual(severity.status, "unavailable")
+        self.assertIn("全部为空", severity.unavailable_reason)
+        self.assertEqual(lane.status, "unavailable")
+        self.assertIn("车道分布尚未更新", lane.unavailable_reason)
+
     def test_subject_resolver_uses_grounding_fact(self):
         reach = FieldReachSet(
             hits=(FieldReachHit("ai_problem", "up_or_down", "上下行", "test", 3.0),)

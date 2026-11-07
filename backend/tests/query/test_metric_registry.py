@@ -52,6 +52,17 @@ class MetricRegistryTests(unittest.TestCase):
         )
         self.assertEqual(density["evaluator"], "post_calc")
 
+    def test_length_metrics_use_semantic_length_field(self):
+        """原始列 disease_length 大面积为空（坑槽 44 条全为 NULL），
+        平均/最长长度必须走语义字段 effective_disease_length。"""
+
+        metrics = self.registry.snapshot.metrics["disease"]
+
+        for metric_id in ("avg_disease_length", "max_disease_length"):
+            expression = metrics[metric_id].expression
+            self.assertIn("effective_disease_length", expression)
+            self.assertNotIn("}.disease_length", expression)
+
 
 if __name__ == "__main__":
     unittest.main()

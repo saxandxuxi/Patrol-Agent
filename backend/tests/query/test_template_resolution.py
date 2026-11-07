@@ -88,6 +88,54 @@ class TemplateResolutionTests(unittest.TestCase):
             "preset:device_month_records:q1:v1",
         )
 
+    def test_preset_sql_must_use_the_bound_time_column(self):
+        raw = preset_lib.query_by_id("patrol_times")
+        self.assertIsNotNone(raw)
+        contract = contract_from_preset(raw)
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(
+                ValueBinding(
+                    field="create_time",
+                    op=">=",
+                    storage_value="2026-10-31 00:00:00",
+                    display_value="2026-10-31",
+                    source="user_explicit",
+                    resolver="time_range",
+                    raw_text="2026年10月31日",
+                ),
+                ValueBinding(
+                    field="create_time",
+                    op="<",
+                    storage_value="2026-11-01 00:00:00",
+                    display_value="2026-11-01",
+                    source="user_explicit",
+                    resolver="time_range",
+                    raw_text="2026年10月31日",
+                ),
+            ),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+
+        result = resolve_templates(
+            spec,
+            PhysicalSchemaView(columns=frozenset()),
+            [FixedProvider([contract])],
+        )
+
+        self.assertEqual(result.candidates, ())
+        self.assertTrue(
+            any("missing_bound_column:create_time" in item for item in result.rejections)
+        )
+
     def test_preset_with_identifier_outside_options_is_not_offered(self):
         raw = preset_lib.query_by_id("device_month_records")
         self.assertIsNotNone(raw)

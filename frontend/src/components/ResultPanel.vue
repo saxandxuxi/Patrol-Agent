@@ -31,15 +31,16 @@
 
     <template v-else>
       <div class="result-tabs">
-        <template v-if="result.sections?.length">
+        <template v-if="resultSections.length">
           <button
-            v-for="(section, index) in result.sections"
+            v-for="(section, index) in resultSections"
             :key="section.id"
             type="button"
             :class="{ active: activeSection === index }"
+            :title="sectionQuestion(section)"
             @click="activeSection = index"
           >
-            {{ section.title }}
+            Query {{ index + 1 }}
           </button>
         </template>
         <template v-else>
@@ -56,9 +57,9 @@
       </div>
 
       <div class="result-content">
-        <template v-if="result.sections?.length">
+        <template v-if="resultSections.length">
           <section
-            v-for="(section, index) in result.sections"
+            v-for="(section, index) in resultSections"
             v-show="activeSection === index"
             :key="section.id"
             class="sub-section"
@@ -66,7 +67,7 @@
             <div class="sub-head">
               <div>
                 <span class="result-eyebrow">{{ section.type }}</span>
-                <h3>{{ section.title }}</h3>
+                <h3>子问题 {{ index + 1 }}</h3>
               </div>
               <div class="sub-actions">
                 <el-tag effect="plain">{{ engineLabel(section.engine) }}</el-tag>
@@ -83,10 +84,15 @@
               </div>
             </div>
 
+            <div class="sub-question">
+              <span>对应子问题</span>
+              <p>{{ sectionQuestion(section) }}</p>
+            </div>
+
             <div v-if="section.shape === 'count'" class="count-card compact">
-              <span class="count-label">{{ section.title }}</span>
+              <span class="count-label">子问题结果</span>
               <div class="count-value">
-                <strong>{{ section.rows?.[0]?.count ?? 0 }}</strong>
+                <strong>{{ sectionCountValue(section) }}</strong>
                 <span>处</span>
               </div>
               <p>{{ section.reply }}</p>
@@ -462,6 +468,28 @@ const pageSize = ref(25)
 const sectionChartRefs = new Map()
 const approvedIds = ref([])
 
+// 单轮编译链曾把子段写成 answer/preview_rows，而 ReAct/看板写 reply/rows。
+// 在展示层做一次兼容归一，历史结果不需要重跑也能正常显示。
+const resultSections = computed(() => {
+  const sections = props.result?.sections || []
+  return sections.map((section, index) => {
+    const rows = Array.isArray(section.rows)
+      ? section.rows
+      : Array.isArray(section.preview_rows)
+        ? section.preview_rows
+        : []
+    return {
+      ...section,
+      id: section.id ?? section.node_id ?? index,
+      type: section.type || 'data',
+      reply: section.reply ?? section.answer ?? '',
+      rows,
+      row_count: Number(section.row_count ?? section.rows_fetched ?? rows.length),
+      columns: Array.isArray(section.columns) ? section.columns : [],
+    }
+  })
+})
+
 // 切到「图片」页签才去批量取图（放在 activeTab 声明**之后**：watch 在 setup 阶段就会执行，
 // 抢在 const 前面引用会直接抛 "Cannot access 'activeTab' before initialization"，
 // 整个结果面板渲染不出来——实测空白过一次）。
@@ -535,10 +563,16 @@ async function approve(section = null) {
 // key -> { el, instance }：Vue 重建元素时同步重建实例，避免画到已失效的节点。
 const echartsTargets = new Map()
 
-const countValue = computed(() => {
-  const row = props.result?.rows?.[0] || {}
+function firstCountValue(target) {
+  const row = target?.rows?.[0] || {}
   return row.count ?? row.COUNT ?? Object.values(row)[0] ?? 0
-})
+}
+
+const countValue = computed(() => firstCountValue(props.result))
+
+function sectionCountValue(section) {
+  return firstCountValue(section)
+}
 
 const shapeLabel = computed(() => {
   const labels = {
@@ -587,6 +621,12 @@ function conditionLabel(value) {
     damage_type: '病害类型',
     time_range: '时间',
   }[value] || value
+}
+
+function sectionQuestion(section) {
+  const question = String(section?.question || '').trim()
+  if (question) return question
+  return String(section?.title || '').replace(/^\d+\.\s*/, '').trim() || '未记录子问题'
 }
 
 function chartOption(data) {
@@ -639,12 +679,12 @@ function renderEChart(key, el, data) {
 
 function renderCharts() {
   nextTick(() => {
-    if (!props.result?.sections) {
+    if (!resultSections.value.length) {
       renderEChart('main', chartRef.value, props.result?.chart_data)
       return
     }
     for (const [index, el] of sectionChartRefs.entries()) {
-      renderEChart(`section-${index}`, el, props.result?.sections?.[index]?.chart_data)
+      renderEChart(`section-${index}`, el, resultSections.value[index]?.chart_data)
     }
   })
 }
@@ -700,7 +740,7 @@ function download(section = null) {
 }
 
 function focusSources() {
-  if (props.result?.sections?.length) return
+  if (resultSections.value.length) return
   activeTab.value = 'sources'
 }
 
@@ -856,6 +896,13 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
+.result-tabs button {
+  display: inline-flex;
+  max-width: 280px;
+  align-items: center;
+  gap: 6px;
+}
+
 .result-content {
   flex: 1;
   min-height: 0;
@@ -974,6 +1021,28 @@ onBeforeUnmount(() => {
 .sub-head h3 {
   margin: 4px 0 0;
   font-size: 18px;
+}
+
+.sub-question {
+  padding: 12px 14px;
+  border-left: 3px solid var(--blue);
+  border-radius: 0 10px 10px 0;
+  background: #f5f8ff;
+}
+
+.sub-question span {
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.sub-question p {
+  margin: 5px 0 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.65;
 }
 
 .section-table {

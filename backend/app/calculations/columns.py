@@ -31,6 +31,7 @@ def calculate_columns(
     *,
     precision: int = 6,
     zero_denominator: str = "error",
+    constants: dict[str, Any] | None = None,
 ) -> CalculationResult:
     base = CalculationResult(
         accepted=False,
@@ -70,8 +71,11 @@ def calculate_columns(
             "列计算没有输入行",
         )
     available = set(source_rows[0])
+    constant_values = dict(constants or {})
     missing_columns = [
-        operands[role] for role in roles if operands[role] not in available
+        operands[role]
+        for role in roles
+        if role not in constant_values and operands[role] not in available
     ]
     if not output_field:
         missing_columns.append("output_field")
@@ -88,7 +92,11 @@ def calculate_columns(
     formula = ""
     for index, row in enumerate(source_rows):
         values = {
-            role: as_decimal(row.get(operands[role]))
+            role: as_decimal(
+                constant_values[role]
+                if role in constant_values
+                else row.get(operands[role])
+            )
             for role in roles
         }
         if any(value is None for value in values.values()):

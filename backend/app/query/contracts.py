@@ -29,6 +29,10 @@ class QuerySpecError(ValueError):
     """Raised when model output cannot become a trustworthy QuerySpec."""
 
 
+class QuerySpecUnsupported(QuerySpecError):
+    """Raised when the requested scope requires unavailable capability."""
+
+
 class QuerySpecAmbiguity(QuerySpecError):
     """Raised when the question itself needs a missing business definition."""
 

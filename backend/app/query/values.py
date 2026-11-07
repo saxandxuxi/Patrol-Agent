@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from ..services import parsers, route_resolver
+from ..semantic_aids import detect_evidence, pile_meter, pile_range
 from .contracts import QuerySpecAmbiguity, QuerySpecError, ValueBinding
 
 
@@ -210,6 +211,40 @@ def resolve_value(
             "查询条件缺少可执行值。请补充具体任务、时间范围或比较批次。"
         )
     if field == "route_name":
+        if isinstance(raw_value, (list, tuple)):
+            route_values = [
+                str(item).strip() for item in raw_value if str(item).strip()
+            ]
+            resolved_routes = [
+                route_resolver._resolve_route(item)
+                for item in route_values
+            ]
+            if not resolved_routes or any(
+                not route or not route.get("id")
+                for route in resolved_routes
+            ):
+                raise QuerySpecError(
+                    f"路线不在数据库台账中：{'、'.join(route_values)}"
+                )
+            displays = [
+                str(
+                    route.get("short_name")
+                    or route.get("full_name")
+                    or route.get("code")
+                    or text
+                )
+                for route, text in zip(resolved_routes, route_values)
+            ]
+            joined = "、".join(dict.fromkeys(displays))
+            return ValueBinding(
+                field=field,
+                op="in",
+                storage_value=list(dict.fromkeys(displays)),
+                display_value=joined,
+                source=_source(joined, question),
+                resolver="route_dictionary",
+                raw_text="、".join(route_values),
+            )
         route = route_resolver._resolve_route(text)
         if not route or not route.get("id"):
             raise QuerySpecError(f"路线不在数据库台账中：{text}")
@@ -284,6 +319,74 @@ def resolve_value(
                 source=_source(text, question),
                 resolver="time_range",
                 raw_text=text,
+            )
+    if field == "lane_index":
+        lane = next(
+            (
+                item
+                for item in detect_evidence(question, kind)
+                if item.rule_id == "lane_ordinal"
+            ),
+            None,
+        )
+        if lane is not None:
+            return ValueBinding(
+                field=field,
+                op=op,
+                storage_value=str(lane.candidate_value),
+                display_value=lane.raw_span,
+                source="code_rule",
+                resolver=f"assist_rule:{lane.rule_id}",
+                raw_text=lane.raw_span,
+            )
+    if field == "pile_number":
+        parsed_single = pile_meter(raw_value)
+        parsed_range = pile_range(raw_value)
+        if parsed_range is None:
+            parsed_range = pile_range(question)
+        if op == "between" or isinstance(raw_value, (list, tuple)):
+            values = (
+                list(raw_value)
+                if isinstance(raw_value, (list, tuple))
+                else [raw_value]
+            )
+            if len(values) == 1:
+                values = [values[0], values[0]]
+            parsed_values = [pile_meter(item) for item in values]
+            if len(parsed_values) == 2 and all(
+                item is not None for item in parsed_values
+            ):
+                return ValueBinding(
+                    field=field,
+                    op=op,
+                    storage_value=(
+                        int(parsed_values[0]),
+                        int(parsed_values[1]),
+                    ),
+                    display_value=str(raw_value),
+                    source="code_rule",
+                    resolver="assist_rule:pile_number",
+                    raw_text=str(raw_value),
+                )
+        if parsed_range is not None:
+            return ValueBinding(
+                field=field,
+                op="between",
+                storage_value=parsed_range,
+                display_value=str(raw_value or question),
+                source="code_rule",
+                resolver="assist_rule:pile_interval",
+                raw_text=str(raw_value or question),
+            )
+        if parsed_single is not None:
+            return ValueBinding(
+                field=field,
+                op=op,
+                storage_value=parsed_single,
+                display_value=str(raw_value),
+                source="code_rule",
+                resolver="assist_rule:pile_number",
+                raw_text=str(raw_value),
             )
     business_values = (
         registry.snapshot.predicates.get("business_values")

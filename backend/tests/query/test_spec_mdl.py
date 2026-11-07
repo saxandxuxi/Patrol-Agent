@@ -263,6 +263,85 @@ class SpecMdlTests(unittest.TestCase):
         self.assertIn("AS 桩号分段", sql)
         self.assertIn("GROUP BY CONCAT(", sql)
 
+    def test_history_damage_interval_is_rejected_when_all_rows_are_empty(self):
+        with self.assertRaisesRegex(UnsupportedQuerySpec, "全部为空"):
+            compile_spec_mdl(
+                QuerySpec(
+                    id="q1",
+                    kind="mysql",
+                    subject="disease",
+                    view="distribution",
+                    metrics=("count",),
+                    dimensions=("history_damage_interval",),
+                    filters=(),
+                    output_projection=(),
+                    order_by=(),
+                    limit=None,
+                    required_assertions=(),
+                    question="按损坏程度统计病害数量",
+                )
+            )
+
+    def test_year_and_quarter_time_dimensions_compile(self):
+        year_sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("collection_time_year",),
+                filters=(),
+                output_projection=(),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="按年份统计病害数量",
+            )
+        )
+        quarter_sql = compile_spec_mdl(
+            QuerySpec(
+                id="q2",
+                kind="mysql",
+                subject="disease",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("collection_time_quarter",),
+                filters=(),
+                output_projection=(),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="按季度统计病害数量",
+            )
+        )
+
+        self.assertIn("DATE_FORMAT(disease.collection_time, '%Y') AS 年份", year_sql)
+        self.assertIn("QUARTER(disease.collection_time)", quarter_sql)
+        self.assertIn("AS 季度", quarter_sql)
+
+    def test_week_time_dimension_compiles(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="trend",
+                metrics=("count",),
+                dimensions=("week",),
+                filters=(),
+                output_projection=(),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="按周统计病害数量",
+            )
+        )
+
+        self.assertIn("DATE_FORMAT(disease.collection_time, '%x')", sql)
+        self.assertIn("DATE_FORMAT(disease.collection_time, '%v')", sql)
+        self.assertIn("AS 周", sql)
+
     def test_month_dimension_aliases_compile_consistently(self):
         sql = compile_spec_mdl(
             QuerySpec(

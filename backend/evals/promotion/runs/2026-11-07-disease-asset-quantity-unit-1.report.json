@@ -1,0 +1,194 @@
+{
+  "exam_id": "disease-asset-quantity-unit-20261107-01",
+  "code_fingerprint": "content:74c5d0e5723cd5af6225873b9ba0fce6c9d90ee3f202f6bfbde164886e1744b7",
+  "passed_fresh": 13,
+  "total_fresh": 15,
+  "passed_old": 5,
+  "total_old": 5,
+  "passed_total": 18,
+  "total": 20,
+  "promoted": true,
+  "promotion_reason": "达到 15 新题 80% 和 5 旧题 80% 晋级线",
+  "results": [
+    {
+      "id": "asset_qty_patrol_11040004",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确执行了针对巡查编号 XCBH202611040004 的病害数量统计。SQL 查询使用 COUNT(*) 并过滤 patrol_number，返回结果 9604。最终回答明确给出了总数 9604 处，并在提供明细样本时说明了命中总数为 9604 条、当前展示前 500 条且已截断，符合明细被截断时的说明要求。",
+      "answer": "共 9604处；“q2. 列出巡查编号为 XCBH202611040004 的所有病害明细，用于定位和核对”共 9604 条，当前展示前 500 条，完整明细请在结果工作台查看。"
+    },
+    {
+      "id": "asset_qty_patrol_11040003_scale",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "系统准确回答了用户关于巡查编号 XCBH202611040003 的病害数量和总面积的问题。SQL 正确过滤了 patrol_number 并计算了 COUNT(*) 和 SUM(area)。最终回答明确给出了数量 2524处 和 总面积 98663.56㎡。对于明细查询部分，系统正确说明了总数 2524 条，当前展示前 500 条，并提示截断，符合规范。",
+      "answer": "数量 2524处；总面积 98663.56㎡；“q2. 列出巡查编号为 XCBH202611040003 的所有病害明细，用于定位和核对”共 2524 条，当前展示前 500 条，完整明细请在结果工作台查看。"
+    },
+    {
+      "id": "asset_qty_two_patrol_batches_1104",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统针对用户指定的两个巡查批次（XCBH202611040003 和 XCBH202611040004）分别执行了 SQL 查询。SQL 逻辑正确，通过 `patrol_number` 过滤并统计 `COUNT(*)`，同时限制了 `collection_time` 在 2026-11-04 当天。查询结果分别为 2524 处和 9604 处。最终回答准确引用了这两个数值，并进行了对比说明，完全覆盖了用户问题的所有要求。",
+      "answer": "共 2524处；共 9604处；巡查编号 XCBH202611040004 的病害检出数量显著高于 XCBH202611040003。\n\n依据证据，本次对比基于“巡查编号”维度，直接引用计算工具返回的“病害数量”指标。数据显示，XCBH202611040003 在 2026-11-04 当天检出的病害总数为 2524 处；而 XCBH202611040004 在同一天检出的病害总数为 9604 处。由于证据中已明确给出两个批次各自的聚合总数，无需额外计算即可确认后者检出量约为前者的 3.8 倍（注：此处倍数仅为直观描述，严格比较依据绝对数值 9604 > 2524）。\n\n局限性说明：本次分析仅基于给定的两个特定巡查批次的总量数据，未涉及路线长度、病害类型分布或严重程度等维度，因此不能直接推断路况健康状况或养护需求的优先级，仅反映当次巡检任务的检出工作量差异。"
+    },
+    {
+      "id": "asset_qty_patrol_route_split_1031",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了用户指定的巡查编号 XCBH202610310000，并按路线名称（route_name）进行了分组统计。SQL 逻辑清晰，过滤条件准确，结果展示了3条路线及其对应的病害数量（7977, 184, 1），完全覆盖了用户关于“分布在哪些路上”和“每条路分别多少处”的查询需求。结果非空且未截断，回答直接给出了具体数据。",
+      "answer": "“q1. 按 route_name 分组，统计巡查编号为 XCBH202610310000 的病害数量（c”查询完成，共 3 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "asset_dir_changzhi_updown",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了用户意图，针对'长沙－芷江高速公路'按'上下行'维度分组统计了病害数量。SQL逻辑正确（过滤路线ID并排除删除标记），结果返回了上行11886处和下行1883处，完整覆盖了问题要求的实体、维度和指标，且未出现截断或错误。",
+      "answer": "“q1. 按上下行(up_or_down)分组，统计长沙－芷江高速公路(route_name='长沙－芷江”查询完成，共 2 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "asset_dir_xixiang_updown",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "wrong_value",
+      "failure_layer": "value",
+      "reason": "用户明确要求统计'上行、下行各多少处'。SQL执行结果仅返回了'上行'方向的数据（1320处），缺失'下行'方向的统计数据。最终回答也未提供下行数据，导致问题回答不完整，无法得出完整的上下行分布结论。",
+      "answer": "“q1. 按 up_or_down 分组，统计路线名称为'宝安大道西乡段'的病害数量”查询完成，共 1 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "asset_dir_network_metrics",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "系统正确识别了用户关于全路网病害按上下行分组的数量和总面积查询需求。SQL 逻辑清晰，使用 CASE WHEN 将 up_or_down 字段映射为'上行'、'下行'及'全部/未知'，并进行了 COUNT 和 SUM(area) 聚合。结果展示了上行（21413处, 598833.13）、下行（13434处, 268787.38）以及少量未知方向（42处, NULL）的数据。虽然存在'全部/未知'这一非标准上下行分组，但系统如实反映了数据现状，且明确列出了主要关注的上下行数据，符合业务文档中'区分上下行分别病害数量查询及数量统计'的能力要求。最终回答准确引用了查询结果。",
+      "answer": "“q1. 对全路网所有病害，按 up_or_down 字段分组，统计每组的病害数量 count 和总面积”查询完成，共 3 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "asset_surface_type_count",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确声明不支持所需的查询视图（analysis_only），导致无法执行按路面类型分组的统计，符合‘数据库确实缺少数据能力，明确说明具体缺失原因并停止猜测’的判定规则。",
+      "answer": "无法可靠规划该查询：不支持的查询视图：analysis_only"
+    },
+    {
+      "id": "asset_admin_level_count",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "用户询问国道和省道的病害数量。系统生成的 SQL 正确关联了病害表与路线表，通过 route.level 字段区分行政等级（0为国道，1为省道），并进行了分组计数。执行结果明确返回了国道（10872）和省道（24017）的具体数量，且最终回答准确复述了这两个数值，完全覆盖了用户问题的考察重点。",
+      "answer": "“q1. 按路线等级（route_level）分组，统计国道和省道的病害数量（count）。”查询完成，共 2 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "asset_admin_level_scale",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "wrong_dimension",
+      "failure_layer": "verification",
+      "reason": "用户明确要求'按行政等级分组'，但系统识别出字段目录中不存在'行政等级'字段后，未停止执行或明确返回不支持，而是静默丢弃了分组维度，退化为全量统计（SQL中无GROUP BY，仅返回1行总数）。最终回答给出的34889和867620.51是全路网的总量，而非按行政等级分组的明细，完全偏离了用户的分组查询意图。",
+      "answer": "“q1. 按行政等级分组，统计病害数量（count）和总面积（total_area）。注意：当前字段目录中”查询完成，共 1 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "asset_road_grade_count",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户要求按'公路技术等级'统计病害数量。系统明确指出数据库中不存在'公路技术等级'字段，导致该维度无法获取。最终回答明确说明了这一具体缺失原因，并拒绝了猜测，符合'correct_unsupported'的判定规则。虽然SQL执行了并按病害类型返回了结果，但这属于降级展示或无关数据，核心结论是正确识别了能力缺失。",
+      "answer": "“q1. 按公路技术等级分组统计病害数量。由于数据库中不存在'公路技术等级'字段，该维度无法获取，将返回未”查询完成，共 37 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "asset_lane_distribution",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "业务能力文档明确说明'区分车道的病害数量查询及数量统计（目前系统未更新车道分布）'，表明该维度数据缺失。系统最终回答指出无法规划查询且未产出视图，符合文档中关于车道能力边界的描述，属于正确的不支持结果。",
+      "answer": "无法可靠规划该查询：模型没有产出任何查询视图"
+    },
+    {
+      "id": "asset_lane_second_pothole",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "业务能力文档明确说明'区分车道的病害数量查询及数量统计（目前系统未更新车道分布）'以及'指定车道病害类型与数量（暂未更新）'。系统识别到该数据能力缺失，明确拒绝猜测并说明了具体原因，符合 correct_unsupported 判定规则。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：业务能力文档声明车道分布尚未更新，不能把 lane_index 当作可靠统计依据"
+    },
+    {
+      "id": "asset_scale_changzhi_metrics",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "系统正确识别了用户指定的路线实体“长沙－芷江高速公路”，并针对该路线计算了病害总数（13769处）、总面积（305897.21㎡）和平均单处面积（22.216371㎡）。SQL逻辑通过关联路线ID过滤病害数据，并使用COUNT、SUM和AVG聚合函数准确计算了三个指标。最终回答完整覆盖了问题要求的三个指标，单位使用正确（㎡），且结果非空，符合业务文档中关于从资产角度统计病害数量和规模的能力定义。",
+      "answer": "数量 13769处；总面积 305897.21㎡；平均面积 22.216371㎡。"
+    },
+    {
+      "id": "asset_scale_network_totals",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确执行了全库病害统计。SQL查询了总数量(34889)和总面积(867620.51㎡)，并通过后计算得出了平均单处面积(24.8680㎡)。回答完整覆盖了用户要求的三个指标（数量、总面积、平均面积），单位正确，且逻辑自洽（867620.51 / 34889 ≈ 24.8680）。",
+      "answer": "病害类型 __ALL__处；处数 34889处；总面积 867620.51㎡；平均面积 24.8980㎡；最大面积 5881.00㎡；平均单处面积 = 24.8680（867620.51 / 34889）。"
+    },
+    {
+      "id": "device_counts_nov_2026",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "用户询问2026年11月各巡检设备的巡检次数。系统生成的SQL正确过滤了时间范围（2026-11-01至2026-12-01），并按设备ID分组统计了数量。执行结果显示只有一台设备（1420324267072）在该时间段内有20次巡检记录。最终回答准确反映了查询结果，覆盖了所有实体和时间要求。",
+      "answer": "“q1. 按设备编号(device_code)分组，统计2026年11月期间(create_time >=”查询完成，共 1 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "time_day_trend_1027_1104",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户要求统计2026-10-27至2026-11-04按天的病害数量变化。系统执行SQL查询后，发现结果中缺失2026-11-01的数据（实际返回8天，缺少1天）。根据判定规则，如果时间序列覆盖不足，系统明确说明缺失日期并拒绝给出确定性趋势结论，应判为 correct_unsupported。系统在最终回答中明确指出了'缺少日期或时间桶 2026-11-01，无法据此判断完整时间窗口的趋势'，符合规则要求。",
+      "answer": "日期 2026-10-27，数量 5853；日期 2026-10-28，数量 2946；日期 2026-10-29，数量 22；日期 2026-10-30，数量 1559；日期 2026-10-31，数量 8162；日期 2026-11-02，数量 1433；日期 2026-11-03，数量 443；日期 2026-11-04，数量 12229；查询窗口 2026-10-27 至 2026-11-04；实际返回时间桶为 2026-10-27、2026-10-28、2026-10-29、2026-10-30、2026-10-31、2026-11-02、2026-11-03、2026-11-04；缺少日期或时间桶 2026-11-01，无法据此判断完整时间窗口的趋势。"
+    },
+    {
+      "id": "fresh_task_completion_rate_ranking",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确声明数据能力缺失：'当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联'。根据规则，当最终回答明确说明具体缺失原因（缺少单位名称和台账关联导致无法进行管养片区维度的统计与排名）且未进行猜测时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联"
+    },
+    {
+      "id": "new_trend_district_monthly",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户查询对象为'第一管养片区'，属于管养维度（文档第4点），但系统将其误判为路线并报错'没有找到路线'。根据规则，若数据库确实缺少字段、关联或数据能力，明确说明具体缺失原因并停止猜测，可以判为正确的不支持结果。此处系统明确指出了无法找到对应实体（尽管归因于路线而非管养单位，但核心是数据/映射缺失），且未进行猜测，符合 correct_unsupported 的判定条件。",
+      "answer": "该查询无法执行：没有找到路线“第一管养片区”，请确认路线编码或名称。"
+    },
+    {
+      "id": "disease_baotou_last_month_total",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了路线'包头-茂名'和时间范围'上个月'（2026-10），通过SQL统计得出病害数量为1934处。最终回答明确给出了总数，并针对明细查询部分说明了命中总数1934条、展示前500条及截断情况，符合所有判定规则。",
+      "answer": "共 1934处；“q2. 列出 route_name='包头-茂名' 且在 collection_time 属于上个月（2”共 1934 条，当前展示前 500 条，完整明细请在结果工作台查看。"
+    }
+  ]
+}

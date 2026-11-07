@@ -1,9 +1,11 @@
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 from fastapi import HTTPException
 
 from app.query.contracts import AnswerPackage
+from app.query.confirmations import issue_confirmation
 from app.query.review import ReviewSuspicion, issue_review_gate
 from app.query.review_repair import ReviewRepairResult
 from app.query.service import TurnStart
@@ -422,3 +424,49 @@ class AgentIntegrationTests(unittest.TestCase):
             payload["process"]["steps"][0]["failure_code"],
             "confirmation_candidate_missing",
         )
+
+    @patch("app.services.agent._persist_conversation_turn")
+    @patch(
+        "app.services.agent.chat_settings.load",
+        return_value={"single_turn_compiler_enabled": True},
+    )
+    @patch("app.query.service.confirm_single_turn")
+    @patch("app.query.service.pending_confirmation")
+    def test_confirm_selects_one_candidate_for_each_candidate_node(
+        self,
+        pending_confirmation,
+        confirm,
+        _settings,
+        _persist,
+    ):
+        base_turn = turn_with_confirmation_card()
+        first = base_turn.candidate_set.candidates[0]
+        second = replace(
+            first,
+            candidate_id="c2",
+            node_id="q2",
+        )
+        second_node = replace(base_turn.plan.nodes[0], id="q2")
+        plan = replace(
+            base_turn.plan,
+            nodes=(base_turn.plan.nodes[0], second_node),
+        )
+        candidates = CandidateSet(candidates=(first, second))
+        ticket = issue_confirmation(plan, candidates, "schema-1")
+        pending_confirmation.return_value = TurnStart(
+            plan=plan,
+            candidate_set=candidates,
+            confirmation_ticket=ticket,
+        )
+        confirm.return_value = AnswerPackage("完成")
+
+        agent.handle_message(
+            "同时查两个指标",
+            session_id="s1",
+            choose_token="ticket",
+            capability_id="c1",
+            slot_values={},
+        )
+
+        choices = confirm.call_args.args[1]
+        self.assertEqual(choices, {"q1": "c1", "q2": "c2"})

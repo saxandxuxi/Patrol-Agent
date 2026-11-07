@@ -21,3 +21,11 @@ fields:
       physical_table: basic_facilities_routes
       physical_column: route_length_km
       requires_join: [route]
+    route_level:
+      expression: route.level
+      label: 行政等级
+      roles: [code, dimension]
+      physical_table: basic_facilities_routes
+      physical_column: level
+      requires_join: [route]
+      enum_key: basic_facilities_routes.level

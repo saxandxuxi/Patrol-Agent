@@ -1,0 +1,194 @@
+{
+  "exam_id": "time-unit-20261107-03",
+  "code_fingerprint": "content:6573c6db002192b8e795d19c15e18e3c8bd77dcc0cb0aaaed101747a1958a96e",
+  "passed_fresh": 11,
+  "total_fresh": 15,
+  "passed_old": 5,
+  "total_old": 5,
+  "passed_total": 16,
+  "total": 20,
+  "promoted": false,
+  "promotion_reason": "未晋级：新题 11/15，旧题 5/5，总计 16/20",
+  "results": [
+    {
+      "id": "time_day_total_1030",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了用户关于2026年10月30日病害检出的查询意图。SQL使用了半开区间 [2026-10-30 00:00:00, 2026-10-31 00:00:00) 准确覆盖了当天时间范围。执行结果显示共检出1559处病害，最终回答明确给出了该总数，并针对明细列表说明了命中总数1559条、展示前500条以及存在截断的情况，完全符合判定规则中关于明细截断说明的要求。",
+      "answer": "共 1559处；“q2. 列出2026年10月30日当天检出的病害明细，用于核对和定位”共 1559 条，当前展示前 500 条，完整明细请在结果工作台查看。"
+    },
+    {
+      "id": "time_day_route_distribution_1030",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了时间范围（2026-10-30全天），按路线名称分组统计了病害数量。SQL逻辑正确，结果非空且展示了所有命中记录（共3条，未截断）。最终回答完整列出了路线名称及对应的病害处数，完全覆盖了用户问题要求的实体、时间和指标。",
+      "answer": "“q1. 按 route_name 分组，统计 2026-10-30 当天检出的病害数量 count”查询完成，共 3 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "time_route_two_patrol_difference_1028_1030",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了用户问题中的路线（长沙－芷江高速公路）和两个具体日期（2026-10-28, 2026-10-30）。SQL查询分别针对这两个日期的全天范围进行了病害数量统计，结果均为0。最终回答明确给出了两天的数量（隐含在差值计算中）以及比较结论（差值为0，即一样多/无变化），完全覆盖了考察重点中的同路线比较、差值和方向。",
+      "answer": "数量差值 = 0（0 - 0）。"
+    },
+    {
+      "id": "time_year_grouped_disease_count",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确拒绝执行，指出过滤字段 del_flag 来源为 model_inference 且缺乏字典或业务规则支持，无法可靠规划查询。根据规则，当系统明确说明具体缺失原因（字段解析能力缺失）并停止猜测时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：过滤值 del_flag 来源为 model_inference，但没有经过字典、业务规则或受控解析"
+    },
+    {
+      "id": "time_quarter_q2_q3_count",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "execution",
+      "reason": "系统返回错误信息 '你刚才选择的查询口径已失效：candidate confirmation missing for node q1_q3'，且 error 字段非空，sections 状态为 unsupported 但原因是执行层面的确认缺失而非数据能力缺失，属于系统执行失败。",
+      "answer": "你刚才选择的查询口径已失效：candidate confirmation missing for node q1_q3"
+    },
+    {
+      "id": "time_month_existing_months_count",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "execution",
+      "reason": "系统返回错误信息 '你刚才选择的查询口径已失效：candidate confirmation missing for node q_jul'，且 error 字段非空，sections 状态为 unsupported 但伴随执行错误，属于系统执行失败，未能提供用户要求的2026年指定月份的病害总数。",
+      "answer": "你刚才选择的查询口径已失效：candidate confirmation missing for node q_jul"
+    },
+    {
+      "id": "time_day_trend_1026_1031",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确执行了按日分组的病害数量统计，SQL覆盖了2026-10-26至2026-10-31的时间范围。结果包含完整的6天数据，无缺失日期。最终回答准确描述了每日的具体数值、变化趋势（剧烈波动），并正确指出了峰值（10月31日，8162例）和谷值（10月29日，22例），完全符合用户对日粒度趋势、极值和缺失提示的考察重点。",
+      "answer": "2026年10月26日至31日期间，依赖节点的病害检出数量呈现剧烈波动趋势，无平稳线性变化。极值方面，最低值出现在10月29日（22例），最高值出现在10月31日（8162例）。\n\n判断依据基于“日期”维度与“数量”指标。数据序列显示：10月26日为135例，随后在27日激增至5853例，28日回落至2946例，29日骤降至谷底22例，之后迅速反弹，30日升至1559例，并在31日达到峰值8162例。关键数字引用自证据中的min/max统计及每日明细：最小值组为2026-10-29（22.0），最大值组为2026-10-31（8162.0）。\n\n局限性说明：本次分析仅基于已有的病害检出数量计数，未涉及病害类型、严重程度或路线长度等加权因素，因此该“数量”变化仅反映检出频次波动，不能直接等同于道路健康状况的恶化或改善程度。此外，数据仅覆盖6天，样本周期较短，难以推断长期季节性规律。"
+    },
+    {
+      "id": "time_week_range_1023_1031",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "execution",
+      "reason": "系统未能完成用户要求的周粒度聚合。SQL仅查询了日粒度明细（14308行），且`post_calc`节点明确声明“无法直接给出每周总病害数量的具体数值结论”，导致最终回答缺失核心指标（各周病害数量）。",
+      "answer": "“q1. 按 collection_time 的自然日粒度分组，统计 2026-10-23 至 2026-”查询完成，共 14308 行，详细结果已生成，请在结果工作台查看。；无法直接给出每周总病害数量的具体数值结论。\n\n依据现有证据，上游任务仅完成了按“采集时间”自然日粒度的分组统计，生成了14308行明细数据（预览显示单条记录数量为1至9不等）。虽然元数据指出下游将通过`post_calc`聚合为周数据，但当前提供的紧凑证据中并未包含该聚合计算后的结果字段或汇总数值。\n\n判断维度依赖于“采集时间”和“数量”。由于证据中缺少按ISO周或自然周分组后的聚合指标（如每周总和），且硬规则禁止自行对14308行数据进行加减乘除或总量计算，因此无法得出每周的具体总数。\n\n局限性在于：必须调用计算工具对上游产出的14308行日粒度数据，按周维度执行求和运算，才能获取所需的每周总病害数量。当前仅能确认数据存在且单点数量范围为1-9，无法提供周度汇总结果。"
+    },
+    {
+      "id": "time_route_month_trend_shanghai",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了路线（上海-昆明）和时间范围（2026年10月、11月）。SQL分别查询了两个月的病害数量，结果分别为3146处和143处。最终回答明确给出了两个月份的具体数值，并计算了变化百分比（-95.45%），完整覆盖了用户关于‘分别检出多少处’和‘数量如何变化’的提问。",
+      "answer": "数量变化百分比 = -95.45（(143 - 3146) / 3146 * 100）。"
+    },
+    {
+      "id": "time_route_multimetric_xixiang",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了路线'宝安大道西乡段'和时间范围'2026年10月'，SQL逻辑通过JOIN关联路线ID并过滤时间，计算了COUNT(*)作为病害数量和SUM(area)作为总面积。最终回答明确给出了数量409处和总面积20526.17㎡，单位正确，完全覆盖了用户问题的所有要求。",
+      "answer": "数量 409处；总面积 20526.17㎡。"
+    },
+    {
+      "id": "time_month_type_distribution_erlian",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了用户问题中的路线（二连浩特-广州）和时间范围（2026年10月），生成了按病害类型分组的SQL查询。执行结果显示共19种病害类型及其具体数量，且最终回答完整列出了所有19行数据，未发生截断。SQL逻辑与业务文档中“区分病害类型统计数量”的能力相符，时间过滤和分组维度均正确覆盖。",
+      "answer": "“q1. 统计二连浩特-广州路线在2026年10月（2026-10-01至2026-10-31）的病害，按”查询完成，共 19 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "time_day_type_filter_1103",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "用户询问2026年11月3日坑槽病害数量。系统SQL正确过滤了时间范围（>=2026-11-03 AND <2026-11-04）和病害类型（problem_type_name = '坑槽'）。查询结果显示COUNT为1，明细列表也返回1条记录且未截断。最终回答明确给出“共 1处”，与SQL执行结果一致，完全覆盖了用户问题的实体、时间和指标要求。",
+      "answer": "共 1处；“q2. 列出2026年11月3日（>=2026-11-03 且 <2026-11-04）采集时间范围内，”共 1 条，当前展示前 1 条，完整明细请在结果工作台查看。"
+    },
+    {
+      "id": "time_day_patrol_tasks_1026",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "用户询问2026年10月26日创建的巡检任务数量。系统生成的SQL正确筛选了patrol表，使用create_time字段覆盖完整自然日（>= '2026-10-26 00:00:00' AND < '2026-10-27 00:00:00'），并排除了逻辑删除数据（del_flag = 0）。查询结果为COUNT(*) = 4，最终回答明确给出“共 4次”，与执行结果一致，完全覆盖了用户问题的实体、时间和指标要求。",
+      "answer": "共 4次。"
+    },
+    {
+      "id": "time_month_patrol_total_october",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "用户询问2026年10月巡检任务总次数。系统生成的SQL正确使用了时间范围过滤（create_time >= '2026-10-01' AND create_time < '2026-11-01'）并排除了逻辑删除记录（del_flag = 0），对patrol表进行了计数。执行结果为41，最终回答明确给出“共 41次”，完全覆盖了用户问题的实体、时间和指标要求，且SQL与结果一致支持结论。",
+      "answer": "共 41次。"
+    },
+    {
+      "id": "time_month_no_data_september",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "compiler",
+      "reason": "系统返回错误信息 '节点 q1 丢失了用户明确要求涉及的字段 month'，表明查询计划生成阶段出现内部编译或映射错误。根据规则，内部编译字段名错误不能冒充数据能力缺失，且 error 非空或 section 状态为 unsupported/repairable/blocked 时属于执行失败，不得判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：节点 q1 丢失了用户明确要求涉及的字段 month；请补回该字段并保持用户范围不变。"
+    },
+    {
+      "id": "fresh_time_monthly_trend_multi_route",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明数据库中不存在用户指定的路线实体“S20外环高速”，并提供了相近路线列表要求确认，未进行猜测或静默替换，符合数据能力缺失的判定规则。",
+      "answer": "该查询无法执行：没有找到路线“S20外环高速”。名字相近的路线有：新化文田-东安井头圩、龙山石牌(省界)-凤凰茶田(省界)、慈利-安化县渠江、双峰洪山殿-嘉禾县城、望城乌山-湘潭茶恩寺，请确认是哪一条。"
+    },
+    {
+      "id": "fresh_lane_disease_unsupported",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户要求查询指定车道（第三车道）的病害分布。业务能力文档明确说明“区分车道的病害数量查询及数量统计（目前系统未更新车道分布）”以及“指定车道病害类型与数量（暂未更新）”。系统最终回答明确指出“当前数据能力不支持：业务能力文档声明车道分布尚未更新”，符合考察重点中要求的“明确告知当前车道分布数据未更新，无法提供指定车道的病害查询服务，并说明数据缺失情况”。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：业务能力文档声明车道分布尚未更新，不能把 lane_index 当作可靠统计依据"
+    },
+    {
+      "id": "fresh_task_completion_rate_ranking",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确声明数据能力缺失：'当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联'。根据规则，当数据库确实缺少字段或关联导致无法查询时，明确说明具体缺失原因并停止猜测，应判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联"
+    },
+    {
+      "id": "fresh_disease_direction_type_diff",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统检测到用户输入的路线名称“包头-茂名高速”在数据库中不存在，并提供了相近的候选项“包头-茂名”。根据规则，当数据库确实缺少对应实体数据能力时，明确说明具体缺失原因并停止猜测，应判为 correct_unsupported。",
+      "answer": "该查询无法执行：没有找到路线“包头-茂名高速”。名字相近的路线有：包头-茂名，请确认是哪一条。"
+    },
+    {
+      "id": "fresh_time_trend_area",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明数据库中不存在用户指定的实体“S20外环高速”，并提供了相近路线供确认，未进行猜测或静默替换，符合数据能力缺失的判定规则。",
+      "answer": "该查询无法执行：没有找到路线“S20外环高速”。名字相近的路线有：新化文田-东安井头圩、龙山石牌(省界)-凤凰茶田(省界)、慈利-安化县渠江、双峰洪山殿-嘉禾县城、望城乌山-湘潭茶恩寺，请确认是哪一条。"
+    }
+  ]
+}

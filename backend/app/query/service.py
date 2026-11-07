@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
 from typing import Any
 
 from ..services import (
@@ -18,6 +17,7 @@ from ..services import (
 from ..services.llm import LLMError
 from ..services.logging_service import console_json
 from ..services.resource_loader import load_capability_file
+from ..services.route_resolver import QueryPlanError
 from .analysis import analyze_single_turn
 from .capability_registry import CapabilityRegistry, resolve_subject
 from .compiler import CompiledQuery, compile_query
@@ -41,6 +41,8 @@ from .executor import execute_compiled
 from .fields import FieldReachHit, FieldReachSet, PhysicalSchemaView
 from .preset_bindings import apply_overrides, values_from_spec
 from .review import ReviewSuspicion, issue_review_gate, serialize_query_spec
+from .result_projection import result_field_map
+from .scope_facts import INSIDE, OUTSIDE, ScopeFacts, empty_scope_facts
 from .template_sources import (
     AutoTemplateProvider,
     BuiltinTemplateProvider,
@@ -49,6 +51,8 @@ from .template_sources import (
 )
 from .spec_mdl import UnsupportedQuerySpec, compile_spec_mdl
 from .templates import CandidateSet, TemplateCandidate, resolve_templates
+from .time_coverage import time_window_coverage
+from .values import _enum_location, resolve_value as resolve_binding_value
 from .verifier import verify_result
 
 
@@ -68,6 +72,7 @@ class _PendingTurn:
     plan: QueryPlan
     candidates: CandidateSet
     schema: PhysicalSchemaView
+    registry: CapabilityRegistry | None = None
 
 
 _PENDING: dict[str, _PendingTurn] = {}
@@ -354,18 +359,121 @@ def _data_answer_text(section: dict[str, Any]) -> str:
     if section_type == "post_calc":
         return str(section.get("answer") or "").strip()
     if view in {"list", "detail", "top_records"}:
+        preview = [
+            row
+            for row in (section.get("rows") or section.get("preview_rows") or ())
+            if isinstance(row, dict)
+        ]
+        inherited = _inherited_note(section)
+        suffix = f"；{inherited}" if inherited else ""
+        # 只有一两条记录时，用户要的是答案本身，不是“请去工作台看”。
+        if 0 < len(preview) <= 3:
+            detail = "；".join(
+                "，".join(f"{key} {value}" for key, value in row.items())
+                for row in preview
+            )
+            if total_count is not None and int(total_count) > len(preview):
+                return (
+                    f"{prefix}共 {int(total_count)} 条，当前展示前 {len(preview)} 条："
+                    f"{detail}；完整明细请在结果工作台查看{suffix}。"
+                )
+            return f"{prefix}{detail}{suffix}"
         if total_count is not None:
             return (
                 f"{prefix}共 {int(total_count)} 条，当前展示前 {rows_fetched} 条，"
-                "完整明细请在结果工作台查看。"
+                f"完整明细请在结果工作台查看{suffix}。"
             )
-        return f"{prefix}返回 {rows_fetched} 条，明细已生成，请在结果工作台查看。"
-    if view in {"distribution", "trend", "top_groups"}:
         return (
-            f"{prefix}查询完成，共 {rows_fetched} 行，"
-            "详细结果已生成，请在结果工作台查看。"
+            f"{prefix}返回 {rows_fetched} 条，明细已生成，"
+            f"请在结果工作台查看{suffix}。"
         )
+    if view in {"distribution", "trend", "top_groups"}:
+        filled = [str(item) for item in (section.get("enum_filled_groups") or ())]
+        result_rows = [
+            row
+            for row in (section.get("rows") or section.get("preview_rows") or ())
+            if isinstance(row, dict)
+        ]
+        shown = len(result_rows) or rows_fetched
+        digest = _grouped_digest(result_rows)
+        text = f"{prefix}查询完成，共 {shown} 行"
+        if digest:
+            text = f"{text}；按排序前列：{digest}"
+        notes = [
+            _inherited_note(section),
+            str(section.get("coverage_note") or ""),
+            (
+                "范围内没有" + "、".join(filled) + "的记录，已按 0 计入"
+                if filled
+                else ""
+            ),
+            _empty_metric_note(result_rows),
+            "完整表格请在结果工作台查看",
+        ]
+        suffix = "；".join(item for item in notes if item)
+        return f"{text}；{suffix}" if suffix else text
     return str(section.get("answer") or "").strip()
+
+
+def _grouped_digest(
+    rows: list[dict[str, Any]],
+    limit: int = 3,
+) -> str:
+    """分组结果先给一行确定性的摘要，别只留一句“请去工作台看”。
+
+    行数几十上百时，用户需要的是“哪几个分组最突出”。SQL 已经按指标排好序，
+    这里只做展示，不重新计算，也不改变任何数值。
+    """
+    lines = [
+        "，".join(f"{key} {value}" for key, value in row.items())
+        for row in rows[:limit]
+    ]
+    return "；".join(item for item in lines if item)
+
+
+def _inherited_note(section: dict[str, Any]) -> str:
+    """依赖查询沿用了上一节点的条件时，回答里必须写明，不能让用户猜。"""
+    inherited = "、".join(
+        f"{item.get('label') or ''} {item.get('value') or ''}".strip()
+        for item in (section.get("inherited_filters") or ())
+        if isinstance(item, dict)
+    )
+    if not inherited:
+        return ""
+    return f"本次结果沿用了上一节点筛选出的条件：{inherited}"
+
+
+def _empty_metric_note(rows: list[dict[str, Any]]) -> str:
+    """分组里出现空值要如实说明，不能含混成 0。"""
+    for row in rows:
+        if any(value in (None, "") for value in row.values()):
+            return "有个别分组没有有效数值（不是 0），结果里保留为空"
+    return ""
+
+
+def _inherited_filter_columns(
+    spec: Any,
+    registry: CapabilityRegistry | None,
+) -> list[dict[str, str]]:
+    """依赖查询把上一节点的结果变成了过滤条件，这些条件必须在结果里看得见。
+
+    否则用户看到“K0+000~K0+500 共 304 处”，却不知道这是哪条路的数据。
+    """
+    columns: list[dict[str, str]] = []
+    for item in spec.filters:
+        if str(getattr(item, "source", "")) != "previous_result":
+            continue
+        field = str(item.field).rsplit(".", 1)[-1]
+        label = field
+        if registry is not None:
+            field_meta = registry.snapshot.fields.get(spec.subject, {}).get(field)
+            if field_meta is not None and field_meta.label:
+                label = str(field_meta.label)
+        value = item.display_value or item.storage_value
+        if isinstance(value, (list, tuple)):
+            value = "、".join(str(entry) for entry in value)
+        columns.append({"field": field, "label": str(label), "value": str(value)})
+    return columns
 
 
 def assemble_answer(
@@ -383,10 +491,13 @@ def assemble_answer(
             text_sections = conclusions
     texts: list[str] = []
     for section in text_sections:
+        # 分析模式下数据节点没有结论可写时，也不能把明细行原样倒出来；
+        # 数据节点统一走数据回答规则（只给摘要并指路结果工作台）。
         text = (
-            _data_answer_text(section)
-            if response_mode == "data"
-            else str(section.get("answer") or "").strip()
+            str(section.get("answer") or "").strip()
+            if response_mode != "data"
+            and str(section.get("type") or "") == "post_calc"
+            else _data_answer_text(section)
         )
         if text and text not in texts:
             texts.append(text)
@@ -439,6 +550,46 @@ def _scope_key(spec: Any) -> tuple[Any, ...]:
         ),
         tuple(spec.dimensions),
     )
+
+
+def _dependency_needs_dictionary(field: str, spec: Any) -> bool:
+    """依赖传值是否需要先过字典解析。
+
+    上游结果行给的是展示视图里的值（路线中文名、枚举中文标签），而过滤条件
+    要的是存储值（路线 id、枚举 code）。显示值和存储值不能互相替代，所以
+    route_name 和已登记枚举字段必须回到字段字典解析；时间、桩号分段等其他
+    字段保持原样传递。
+    """
+    name = str(field).rsplit(".", 1)[-1]
+    if name in {"route_name", "routes_id"}:
+        return True
+    registry = CapabilityRegistry.load(
+        str(getattr(spec, "kind", "mysql") or "mysql")
+    )
+    location = _enum_location(
+        registry,
+        str(getattr(spec, "subject", "") or ""),
+        name,
+    )
+    return location in registry.snapshot.enums
+
+
+def _resolve_dependency_binding(binding: Any, values: list[Any], spec: Any) -> Any:
+    try:
+        return resolve_binding_value(
+            str(binding.to_field),
+            "in",
+            list(values),
+            str(getattr(spec, "question", "") or ""),
+            str(getattr(spec, "kind", "mysql") or "mysql"),
+            subject=str(getattr(spec, "subject", "") or ""),
+        )
+    except (QueryPlanError, QuerySpecError, QuerySpecAmbiguity) as exc:
+        raise UnsupportedQuerySpec(
+            "上一步结果里的取值“"
+            + "、".join(str(item) for item in values)
+            + f"”无法解析成可执行值（{binding.to_field}）：{exc}"
+        ) from exc
 
 
 def _materialize_inputs(
@@ -502,14 +653,27 @@ def _materialize_inputs(
             if binding.op == "in" and len(values) == 1
             else binding.op
         )
+        storage_value: Any = (
+            values if bound_op in {"in", "between"} else values[0]
+        )
+        display_value = str(values[0])
+        resolver_name = f"node:{binding.from_node}:{binding.from_field}"
+        if _dependency_needs_dictionary(binding.to_field, spec):
+            resolved = _resolve_dependency_binding(binding, values, spec)
+            storage_value = resolved.storage_value
+            bound_op = resolved.op
+            display_value = resolved.display_value
+            resolver_name = (
+                f"{resolved.resolver}:node:{binding.from_node}:{binding.from_field}"
+            )
         filters.append(
             ValueBinding(
                 field=binding.to_field,
                 op=bound_op,
-                storage_value=values if bound_op in {"in", "between"} else values[0],
-                display_value=str(values[0]),
+                storage_value=storage_value,
+                display_value=display_value,
                 source="previous_result",
-                resolver=f"node:{binding.from_node}:{binding.from_field}",
+                resolver=resolver_name,
                 raw_text=binding.from_node,
             )
         )
@@ -527,6 +691,87 @@ def _numeric_value(observation: Any) -> int | None:
             except (TypeError, ValueError):
                 continue
     return None
+
+
+# 这些枚举取值的意思是“没区分/全部”，不是真实的一类，补 0 行只会添噪音。
+_UNSPECIFIED_ENUM_LABELS = frozenset(
+    {"全部", "全部/未区分", "全部/未知", "未区分", "未知", "未填写", "未识别"}
+)
+
+
+def _completed_enum_rows(
+    spec: Any,
+    observation: Any,
+    registry: CapabilityRegistry | None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """按枚举维度分组、且只统计数量时，把枚举里没出现的取值补成 0 行。
+
+    结果行回答“这次命中了哪些取值”，枚举回答“这个字段有哪些合法取值”，
+    两者是不同的视图。用户问“上行、下行各多少处”时，缺的一侧必须是
+    显式的 0，而不是让人自己去推断是不是漏查了。只补数量，不补平均值。
+    """
+    rows = list(observation.result_rows or observation.preview_rows)
+    metrics = tuple(str(item).lower() for item in spec.metrics)
+    if (
+        registry is None
+        or not rows
+        or not isinstance(rows[0], dict)
+        or spec.view not in {"distribution", "top_groups"}
+        or len(spec.dimensions) != 1
+        or not metrics
+        # 只有可加指标缺值才等于 0；平均值、最大最小值、占比缺值不是 0。
+        or any(
+            not (item == "count" or item.startswith(("total_", "sum_")))
+            for item in metrics
+        )
+    ):
+        return rows, []
+    dimension_id = str(spec.dimensions[0]).rsplit(".", 1)[-1]
+    field = registry.snapshot.fields.get(spec.subject, {}).get(dimension_id)
+    if field is None or not field.physical_table or not field.physical_column:
+        return rows, []
+    enum = registry.snapshot.enums.get(
+        (field.physical_table, field.physical_column)
+    )
+    if enum is None:
+        return rows, []
+    column = result_field_map(spec, tuple(rows[0])).get(dimension_id)
+    if not column:
+        return rows, []
+    wanted: list[str] | None = None
+    for item in spec.filters:
+        if str(item.field).rsplit(".", 1)[-1] != dimension_id:
+            continue
+        value = item.storage_value
+        wanted = [
+            str(entry)
+            for entry in (
+                value if isinstance(value, (list, tuple)) else [value]
+            )
+        ]
+    present = {str(row.get(column) or "").strip() for row in rows}
+    filled: list[str] = []
+    for value in enum.values.values():
+        label = str(value.display or value.label or "").strip()
+        if wanted is not None and not (
+            {value.code, value.label, value.display} & set(wanted)
+        ):
+            continue
+        if (
+            not label
+            or label in present
+            or label in _UNSPECIFIED_ENUM_LABELS
+            or str(value.label or "").strip() in _UNSPECIFIED_ENUM_LABELS
+        ):
+            continue
+        filled.append(label)
+        rows.append(
+            {
+                **{key: 0 for key in rows[0]},
+                column: label,
+            }
+        )
+    return rows, filled
 
 
 def _observation_payload(
@@ -550,18 +795,21 @@ def _observation_payload(
             ),
         ]
     logical_fields = list(dict.fromkeys(str(field) for field in logical_fields))
-    field_labels = {
-        str(field): str(label)
-        for field, label in zip(logical_fields, observation.columns)
-    }
+    field_labels = result_field_map(spec, observation.columns)
     group_labels: dict[str, Any] = {}
     for item in spec.filters:
-        if str(item.field).rsplit(".", 1)[-1] == "problem_type_name":
+        filter_field = str(item.field).rsplit(".", 1)[-1]
+        if filter_field == "problem_type_name":
             group_labels["病害类型"] = item.display_value
-        elif str(item.field).rsplit(".", 1)[-1] == "up_or_down":
+        elif filter_field == "up_or_down":
             group_labels["上下行方向"] = item.display_value
+        elif str(getattr(item, "source", "")) == "previous_result":
+            # 上一节点传下来的条件也是这次结果的一部分，不能丢。
+            label = field_labels.get(filter_field) or filter_field
+            group_labels[str(label)] = item.display_value
     return {
         "question": question,
+        "view": spec.view,
         "spec": {
             "subject": spec.subject,
             "view": spec.view,
@@ -688,6 +936,7 @@ def _execute_plan(
     plan: QueryPlan,
     decision: UserDecision,
     candidate_set: CandidateSet | None = None,
+    registry: CapabilityRegistry | None = None,
 ) -> AnswerPackage:
     candidate_by_node: dict[str, TemplateCandidate] = {}
     for candidate in (candidate_set.candidates if candidate_set else ()):
@@ -698,6 +947,7 @@ def _execute_plan(
     accepted_specs: dict[str, Any] = {}
     unavailable_dependencies: dict[str, str] = {}
     answers_by_id: dict[str, str] = {}
+    empty_scope_nodes: set[str] = set()
     count_by_scope: dict[tuple[Any, ...], int] = {}
     for node in plan.nodes:
         missing_dependencies = [
@@ -715,6 +965,13 @@ def _execute_plan(
                 f"依赖步骤 {', '.join(missing_dependencies)} 未通过，"
                 "已停止执行这一步。"
             )
+            details = "；".join(
+                str(answers_by_id[dependency]).strip()
+                for dependency in missing_dependencies
+                if str(answers_by_id.get(dependency) or "").strip()
+            )
+            if details:
+                reason = f"{reason}原因：{details}"
             sections.append(
                 {
                     **_section_identity(node),
@@ -757,19 +1014,26 @@ def _execute_plan(
                 continue
         if node.node_type == "post_calc":
             upstream = {
-                dependency: _observation_payload(
-                    accepted_observations[dependency],
-                    spec=accepted_specs.get(dependency),
-                    question=next(
-                        (
-                            candidate_node.spec.question
-                            for candidate_node in plan.nodes
-                            if candidate_node.id == dependency
+                dependency: {
+                    **_observation_payload(
+                        accepted_observations[dependency],
+                        spec=accepted_specs.get(dependency),
+                        question=next(
+                            (
+                                candidate_node.spec.question
+                                for candidate_node in plan.nodes
+                                if candidate_node.id == dependency
+                            ),
+                            "",
                         ),
-                        "",
+                        answer=answers_by_id.get(dependency, ""),
                     ),
-                    answer=answers_by_id.get(dependency, ""),
-                )
+                    **(
+                        {"empty_scope": True}
+                        if dependency in empty_scope_nodes
+                        else {}
+                    ),
+                }
                 for dependency in node.depends_on
             }
             payload = _default_post_calc_executor(
@@ -796,14 +1060,27 @@ def _execute_plan(
                     or failure.get("reason")
                     or "后置计算没有返回可用结果"
                 )
+                failure_code = str(
+                    failure.get("failure_code") or "post_calc_empty"
+                )
+                unsupported_calculation = failure_code in {
+                    "calculation_zero_denominator",
+                    "calculation_type_mismatch",
+                }
                 sections.append(
                     {
                         **_section_identity(node),
-                        "answer": reason,
-                        "status": "repairable",
-                        "failure_code": str(
-                            failure.get("failure_code") or "post_calc_empty"
+                        "answer": (
+                            f"{reason}；该指标无法可靠计算，已停止。"
+                            if unsupported_calculation
+                            else reason
                         ),
+                        "status": (
+                            "unsupported"
+                            if unsupported_calculation
+                            else "repairable"
+                        ),
+                        "failure_code": failure_code,
                         "failure": failure,
                         "calculation": (
                             (failure.get("evidence") or {}).get("calculation")
@@ -902,19 +1179,25 @@ def _execute_plan(
                 question=effective_spec.question or plan.question,
             ),
         )
+        coverage_note = time_window_coverage(
+            effective_spec,
+            list(observation.result_rows or observation.preview_rows),
+        )
         incomplete_trend = (
-            effective_spec.view == "trend"
-            and bool(
-                _time_window_coverage(
-                    effective_spec,
-                    list(observation.result_rows or observation.preview_rows),
-                )
-            )
+            effective_spec.view == "trend" and bool(coverage_note)
         )
         if incomplete_trend:
             answer = (
-                _answer_text(effective_spec, observation)
-                + "；时间序列不完整，无法可靠判断完整时间窗口的趋势。"
+                _answer_text(
+                    effective_spec,
+                    observation,
+                    coverage_note="",
+                )
+                + "；"
+                + (
+                    coverage_note
+                    or "时间序列不完整，无法可靠判断完整时间窗口的趋势。"
+                )
             )
             unavailable_dependencies[node.id] = answer
             sections.append(
@@ -934,6 +1217,7 @@ def _execute_plan(
                     "rows_fetched": observation.rows_fetched,
                     "total_count": observation.total_count,
                     "truncated": observation.truncated,
+                    "coverage_note": coverage_note,
                 }
             )
             continue
@@ -942,19 +1226,69 @@ def _execute_plan(
             and observation.total_count is None
         ):
             inherited_total = count_by_scope.get(_scope_key(effective_spec))
-            if inherited_total is not None:
+            if (
+                inherited_total is not None
+                and inherited_total >= observation.rows_fetched
+            ):
                 observation = replace(
                     observation,
                     total_count=inherited_total,
                     truncated=inherited_total > observation.rows_fetched,
                 )
-        report = verify_result(effective_spec, compiled, observation)
+        scoped_empty = (
+            observation.rows_fetched == 0
+            and bool(effective_spec.filters)
+        )
+        scope_facts = (
+            empty_scope_facts(effective_spec)
+            if scoped_empty
+            else ScopeFacts()
+        )
+        if scoped_empty and scope_facts.verdict == OUTSIDE:
+            answer = (
+                "该查询范围内没有匹配记录，并且它超出这份台账的真实数据覆盖："
+                f"{scope_facts.detail}。因此这一问无法给出数值。"
+            )
+            answers_by_id[node.id] = answer
+            unavailable_dependencies[node.id] = answer
+            sections.append(
+                {
+                    **_section_identity(node),
+                    "answer": answer,
+                    "status": "unsupported",
+                    "failure_code": "out_of_coverage",
+                    "sql": compiled.sql,
+                    "engine": compiled.engine,
+                    "shape": effective_spec.view,
+                    "columns": list(observation.columns),
+                    "preview_rows": [],
+                    "rows": [],
+                    "rows_fetched": 0,
+                    "coverage_detail": scope_facts.detail,
+                }
+            )
+            continue
+        scoped_empty = scoped_empty and scope_facts.verdict == INSIDE
+        report = verify_result(
+            effective_spec,
+            compiled,
+            observation,
+            scope_has_records=scoped_empty,
+        )
+        display_rows, enum_filled = _completed_enum_rows(
+            effective_spec,
+            observation,
+            registry,
+        )
         _trace_node_result(node, compiled, observation, report)
         if report.status != "accepted":
             failure_code = (
                 report.issues[0].code
                 if report.issues
                 else "verification_failed"
+            )
+            answers_by_id[node.id] = "；".join(
+                issue.message for issue in report.issues
             )
             sections.append(
                 {
@@ -981,7 +1315,27 @@ def _execute_plan(
                 }
             )
             continue
-        answer = _answer_text(effective_spec, observation)
+        if scoped_empty:
+            answer = (
+                "该查询范围内没有匹配记录（0 条）；"
+                "已核对该范围在库里有数据，属于“范围内确实没有记录”，"
+                "不是数据缺失。"
+            )
+            empty_scope_nodes.add(node.id)
+        else:
+            answer = _answer_text(
+                effective_spec,
+                (
+                    replace(
+                        observation,
+                        preview_rows=tuple(display_rows),
+                        result_rows=tuple(display_rows),
+                    )
+                    if enum_filled
+                    else observation
+                ),
+                coverage_note=coverage_note,
+            )
         accepted_observations[node.id] = observation
         accepted_specs[node.id] = effective_spec
         answers_by_id[node.id] = answer
@@ -998,11 +1352,27 @@ def _execute_plan(
                 "engine": compiled.engine,
                 "shape": effective_spec.view,
                 "columns": list(observation.columns),
-                "preview_rows": list(observation.preview_rows),
-                "rows": list(observation.result_rows or observation.preview_rows),
+                "preview_rows": (
+                    display_rows
+                    if enum_filled
+                    else list(observation.preview_rows)
+                ),
+                "rows": (
+                    display_rows
+                    if enum_filled
+                    else list(
+                        observation.result_rows or observation.preview_rows
+                    )
+                ),
                 "rows_fetched": observation.rows_fetched,
                 "total_count": observation.total_count,
                 "truncated": observation.truncated,
+                "coverage_note": coverage_note,
+                "enum_filled_groups": enum_filled,
+                "inherited_filters": _inherited_filter_columns(
+                    effective_spec,
+                    registry,
+                ),
             }
         )
     answer = assemble_answer(sections, response_mode=plan.response_mode)
@@ -1010,7 +1380,12 @@ def _execute_plan(
     return replace(answer, review_gate=gate.to_dict()) if gate else answer
 
 
-def _answer_text(spec: Any, observation: Any) -> str:
+def _answer_text(
+    spec: Any,
+    observation: Any,
+    *,
+    coverage_note: str | None = None,
+) -> str:
     if spec.view in {"detail", "list", "top_records"}:
         preview = list(observation.preview_rows)
         text = "；".join(
@@ -1024,8 +1399,11 @@ def _answer_text(spec: Any, observation: Any) -> str:
                 f"当前展示前 {observation.rows_fetched} 条"
             )
             text = prefix + (f"；{text}" if text else "")
-        elif not text:
-            text = f"明细返回 {observation.rows_fetched} 条"
+        else:
+            text = (
+                f"明细返回 {observation.rows_fetched} 条"
+                + (f"；{text}" if text else "")
+            )
         return text
     result_rows = list(observation.result_rows or observation.preview_rows)
     hidden_rows = len(result_rows) > 50
@@ -1095,93 +1473,21 @@ def _answer_text(spec: Any, observation: Any) -> str:
             return (
                 f"共 {observation.rows_fetched} 行，当前展示前 10 行；{text}"
             )
-        coverage = _time_window_coverage(spec, result_rows)
+        coverage = (
+            time_window_coverage(spec, result_rows)
+            if coverage_note is None
+            else coverage_note
+        )
         if coverage:
             text = f"{text}；{coverage}"
         return text
-    return f"查询返回 {observation.rows_fetched} 行"
-
-
-def _year_month(value: Any) -> tuple[int, int] | None:
-    text = str(value or "").strip().replace("年", "-").replace("月", "")
-    parts = text.split("-")
-    if len(parts) < 2:
-        return None
-    try:
-        return int(parts[0]), int(parts[1])
-    except ValueError:
-        return None
-
-
-def _time_window_coverage(spec: Any, rows: list[dict[str, Any]]) -> str:
-    month_dimension = any(
-        str(field).rsplit(".", 1)[-1]
-        in {"month", "collection_time_month", "create_time_month"}
-        for field in spec.dimensions
+    coverage = (
+        time_window_coverage(spec, result_rows)
+        if coverage_note is None
+        else coverage_note
     )
-    if spec.view != "trend" and not (spec.view == "distribution" and month_dimension):
-        return ""
-    start: datetime | None = None
-    end: datetime | None = None
-    window_value: tuple[Any, Any] | None = None
-    for item in spec.filters:
-        if item.field not in {"collection_time", "create_time"}:
-            continue
-        try:
-            if item.op == "between" and isinstance(
-                item.storage_value,
-                (list, tuple),
-            ) and len(item.storage_value) == 2:
-                start = datetime.fromisoformat(str(item.storage_value[0]))
-                end = datetime.fromisoformat(str(item.storage_value[1]))
-                window_value = (item.storage_value[0], item.storage_value[1])
-            elif item.op in {">", ">="}:
-                start = datetime.fromisoformat(str(item.storage_value))
-            elif item.op in {"<", "<="}:
-                end = datetime.fromisoformat(str(item.storage_value))
-                if item.op == "<":
-                    end -= timedelta(microseconds=1)
-        except ValueError:
-            continue
-    if start is None or end is None or start > end:
-        return ""
-    expected: list[str] = []
-    year, month = start.year, start.month
-    while (year, month) <= (end.year, end.month):
-        expected.append(f"{year:04d}-{month:02d}")
-        month += 1
-        if month == 13:
-            year += 1
-            month = 1
-    actual = {
-        f"{year:04d}-{month:02d}"
-        for row in rows
-        for value in row.values()
-        if (parsed := _year_month(value)) is not None
-        for year, month in (parsed,)
-    }
-    missing = [item for item in expected if item not in actual]
-    if spec.view == "distribution":
-        if not missing:
-            return ""
-        return "查询范围内以下月份没有匹配记录：" + "、".join(missing)
-    if actual and missing:
-        start_text = (
-            window_value[0]
-            if window_value is not None
-            else start.strftime("%Y-%m-%d %H:%M:%S")
-        )
-        end_text = (
-            window_value[1]
-            if window_value is not None
-            else end.strftime("%Y-%m-%d %H:%M:%S")
-        )
-        return (
-            f"查询窗口 {start_text} 至 {end_text}；"
-            f"结果返回月份为 {'、'.join(sorted(actual))}；"
-            "未出现的月份表示查询范围内没有匹配记录。"
-        )
-    return ""
+    text = f"查询返回 {observation.rows_fetched} 行"
+    return f"{text}；{coverage}" if coverage else text
 
 
 def start_single_turn(
@@ -1256,15 +1562,22 @@ def start_single_turn(
             ),
         )
     except QuerySpecError as exc:
+        detail = str(exc)
+        hint = (
+            "这是查询计划内部的视图名不合法，不代表数据里查不到；"
+            "请换一种说法再问，或切换模型重试。"
+            if "不支持的查询视图" in detail
+            else "请换一种说法再问，或切换模型重试。"
+        )
         return TurnStart(
             plan=QueryPlan(question=question, nodes=()),
             answer=AnswerPackage(
-                f"无法可靠规划该查询：{exc}",
+                f"无法可靠规划该查询：{detail}。{hint}",
                 (
                     {
                         "status": "unsupported",
                         "failure_code": "query_plan_not_executable",
-                        "answer": str(exc),
+                        "answer": f"{detail}。{hint}",
                     },
                 ),
             ),
@@ -1283,16 +1596,126 @@ def start_single_turn(
         combined = combined.merge(resolve_templates(node.spec, schema, providers))
     if combined.candidates:
         ticket = issue_confirmation(plan, combined, schema.snapshot)
-        _PENDING[ticket.token] = _PendingTurn(plan, combined, schema)
+        _PENDING[ticket.token] = _PendingTurn(plan, combined, schema, registry)
         return TurnStart(
             plan=plan,
             candidate_set=combined,
             confirmation_ticket=ticket,
         )
-    return TurnStart(
-        plan=plan,
-        answer=_execute_plan(plan, UserDecision(token="")),
+    answer = _execute_plan(plan, UserDecision(token=""), None, registry)
+    answer = _repair_failed_post_calc(
+        plan,
+        answer,
+        question,
+        kind,
+        schema,
+        reach,
+        registry,
+        providers,
     )
+    return TurnStart(plan=plan, answer=answer)
+
+
+def _post_calc_failure_feedback(answer: Any) -> str:
+    """把失败的计算节点整理成规划器能直接用的结构化证据。"""
+    failures = []
+    for section in getattr(answer, "sections", ()) or ():
+        if not isinstance(section, dict):
+            continue
+        if str(section.get("type") or "") != "post_calc":
+            continue
+        if str(section.get("status") or "accepted") == "accepted":
+            continue
+        failures.append(
+            {
+                "node_id": section.get("node_id"),
+                "question": section.get("question"),
+                "failure_code": section.get("failure_code") or "post_calc_empty",
+                "reason": str(section.get("answer") or "")[:400],
+                "depends_on": list(section.get("depends_on") or ()),
+            }
+        )
+    if not failures:
+        return ""
+    return json.dumps(
+        {
+            "stage": "post_calc",
+            "instruction": (
+                "上一个计划的数据步骤都已经执行成功，只有计算步骤失败。"
+                "请只修改失败的计算节点（换用合适的计算工具或指标），"
+                "数据节点的筛选范围、时间范围、路线、病害类型必须逐字段保持不变。"
+            ),
+            "failures": failures,
+        },
+        ensure_ascii=False,
+    )
+
+
+def _data_scope_signature(plan: Any) -> dict[str, str]:
+    return {
+        str(node.id): scope_hash(node.spec)
+        for node in getattr(plan, "nodes", ())
+        if node.node_type == "query_data"
+    }
+
+
+def _repair_failed_post_calc(
+    plan: Any,
+    answer: Any,
+    question: str,
+    kind: str,
+    schema: Any,
+    reach: Any,
+    registry: CapabilityRegistry | None,
+    providers: Any,
+) -> Any:
+    """计算节点失败时，把失败证据反馈给规划器重排一次。
+
+    只修计算步骤，数据步骤必须完全不漂移；重排后仍有失败就保留原始回答，
+    不会用“改到 100%”掩盖问题，也不会无限重试。
+    """
+    feedback = _post_calc_failure_feedback(answer)
+    if not feedback:
+        return answer
+    try:
+        repaired = analyze_single_turn(
+            question,
+            kind,
+            schema,
+            reach,
+            audit=True,
+            registry=registry,
+            planning_feedback=feedback,
+        )
+    except Exception as exc:  # noqa: BLE001 - 重排失败就保留原回答
+        console_json(
+            "[query][post_calc_repair] ",
+            {
+                "outcome": "plan_failed",
+                "error": f"{type(exc).__name__}: {exc}"[:200],
+            },
+        )
+        return answer
+    if _data_scope_signature(repaired) != _data_scope_signature(plan):
+        return answer
+    for node in repaired.nodes:
+        if node.node_type != "query_data":
+            continue
+        if resolve_templates(node.spec, schema, providers).candidates:
+            return answer
+    repaired_answer = _execute_plan(
+        repaired,
+        UserDecision(token=""),
+        None,
+        registry,
+    )
+    if any(
+        isinstance(section, dict)
+        and str(section.get("status") or "accepted") != "accepted"
+        for section in getattr(repaired_answer, "sections", ()) or ()
+    ):
+        return answer
+    return repaired_answer
 
 
 def confirm_single_turn(
@@ -1305,7 +1728,12 @@ def confirm_single_turn(
         raise ValueError("confirmation ticket is missing or expired")
     decision = consume_confirmation(ticket_token, choices, overrides)
     _PENDING.pop(ticket_token, None)
-    return _execute_plan(pending.plan, decision, pending.candidates)
+    return _execute_plan(
+        pending.plan,
+        decision,
+        pending.candidates,
+        pending.registry,
+    )
 
 
 def pending_confirmation(ticket_token: str) -> TurnStart | None:

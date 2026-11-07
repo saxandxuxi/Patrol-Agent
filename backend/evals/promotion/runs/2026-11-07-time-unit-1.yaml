@@ -1,0 +1,129 @@
+version: 1
+exam_id: time-unit-20261107-01
+generated_at: "2026-11-07T10:30:00+08:00"
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20261111
+code_fingerprint: content:9f5114de380e189c4d710f3cbade11fe69e46daf8b57956676d90b87fa2196fe
+fresh_case_ids:
+  - time_day_total_1102
+  - time_day_route_distribution_1102
+  - time_route_two_patrol_difference
+  - time_year_disease_total
+  - time_quarter_disease_distribution_2026
+  - time_month_disease_distribution_2026
+  - time_day_trend_1027_1104
+  - time_week_trend_oct_early_nov
+  - time_route_month_trend_hengmingzhu
+  - time_route_month_trend_changzhi
+  - time_month_disease_type_baotou
+  - time_month_oil_by_route
+  - time_day_patrol_tasks_october
+  - time_month_patrol_tasks_jun_nov
+  - time_week_no_data_august
+old_case_ids:
+  - fresh_time_monthly_trend_multi_route
+  - fresh_lane_disease_unsupported
+  - fresh_task_completion_rate_ranking
+  - fresh_disease_direction_type_diff
+  - fresh_time_trend_area
+cases:
+  - id: time_day_total_1102
+    category: 时间/日
+    question: 2026年11月2日当天，全路网一共检出了多少处病害？
+    focus: 检查单日半开时间区间、全库计数和日期粒度是否执行正确。
+    source: fresh
+  - id: time_day_route_distribution_1102
+    category: 时间/日/路线
+    question: 2026年11月2日巡检覆盖了哪些路线？每条路线分别检出多少处病害？
+    focus: 检查同一单日窗口内的路线分组分布，不能遗漏或少算当天记录。
+    source: fresh
+  - id: time_route_two_patrol_difference
+    category: 时间/巡检批次对比
+    question: 长沙－芷江高速公路在2026年10月27日和10月31日检出的病害数量分别是多少？10月31日比10月27日增加或减少了多少处？
+    focus: 检查两个明确日期的同路线查询、差值计算和比较方向。
+    source: fresh
+  - id: time_year_disease_total
+    category: 时间/年
+    question: 按年份统计当前数据库中所有未删除病害的数量，并列出每年的总数。
+    focus: 检查年份分组维度、年份标签和全库范围。
+    source: fresh
+  - id: time_quarter_disease_distribution_2026
+    category: 时间/季度
+    question: 2026年各季度分别检出了多少处病害？
+    focus: 检查年度范围与季度分组，空白季度要说明没有数据而不能伪造。
+    source: fresh
+  - id: time_month_disease_distribution_2026
+    category: 时间/月
+    question: 2026年各月份分别检出了多少处病害？
+    focus: 检查十二个月分组、缺失月份表达和总数一致性。
+    source: fresh
+  - id: time_day_trend_1027_1104
+    category: 时间/日趋势
+    question: 2026年10月27日至2026年11月4日，按天统计全路网每天的病害数量变化。
+    focus: 检查日期序列、趋势消费节点、峰值和覆盖不足说明。
+    source: fresh
+  - id: time_week_trend_oct_early_nov
+    category: 时间/周趋势
+    question: 2026年10月1日至2026年11月4日，按周统计全路网病害数量，并指出数量最高的一周。
+    focus: 检查 ISO 周分组、周序列和极值分析，不能把无数据周当成业务上绝对为零。
+    source: fresh
+  - id: time_route_month_trend_hengmingzhu
+    category: 时间/路线/月
+    question: 宝安中心--恒明珠在2026年10月和11月分别检出了多少处病害？两个月相比是增加还是减少？
+    focus: 检查指定路线逐月趋势、两个月份的比较和变化方向。
+    source: fresh
+  - id: time_route_month_trend_changzhi
+    category: 时间/路线/月
+    question: 长沙－芷江高速公路2026年10月和11月的病害数量及总面积分别是多少？请比较变化。
+    focus: 检查路线逐月多指标趋势，数量和面积必须分别呈现。
+    source: fresh
+  - id: time_month_disease_type_baotou
+    category: 时间/病害类型
+    question: 包头-茂名在2026年10月按病害类型统计数量，列出各类型的病害处数。
+    focus: 检查时间过滤与病害类型分组两维组合。
+    source: fresh
+  - id: time_month_oil_by_route
+    category: 时间/病害类型/路线
+    question: 2026年10月，泛油病害在哪些路线出现？各路线分别有多少处？
+    focus: 检查月份、病害类型和路线分组三个范围是否同时保留。
+    source: fresh
+  - id: time_day_patrol_tasks_october
+    category: 时间/巡检任务/日
+    question: 2026年10月每天分别执行了多少次巡检任务？
+    focus: 检查巡检任务的时间字段、日粒度和任务计数。
+    source: fresh
+  - id: time_month_patrol_tasks_jun_nov
+    category: 时间/巡检任务/月
+    question: 从2026年6月到2026年11月，各月份的巡检任务次数分别是多少？总共多少次？
+    focus: 检查巡检任务逐月统计和总量计算，缺失月份要明确。
+    source: fresh
+  - id: time_week_no_data_august
+    category: 时间/能力边界
+    question: 2026年8月按周统计全路网病害数量，并判断8月内病害数量是否在上升。
+    focus: 检查无数据时间段能否明确说明覆盖不足，而不是编造零趋势或上升下降结论。
+    source: fresh
+  - id: fresh_time_monthly_trend_multi_route
+    category: 时间
+    question: 展示S20外环高速和G60沪昆高速在过去六个月中，每月病害总数的变化趋势对比。
+    focus: 验证系统能否同时处理多条路线的时间序列数据，并按月粒度聚合病害数量以生成趋势对比。
+    source: old
+  - id: fresh_lane_disease_unsupported
+    category: 不支持能力
+    question: 请列出G4京港澳高速K100至K120路段第三车道的具体病害分布明细。
+    focus: 系统需明确告知当前车道分布数据未更新，无法提供指定车道的病害查询服务，并说明数据缺失情况。
+    source: old
+  - id: fresh_task_completion_rate_ranking
+    category: 巡检任务
+    question: 对各管养片区上个月的巡检任务完成率进行排名，完成率最低的片区是哪个？
+    focus: 验证系统能否计算任务完成率（实际/计划），并按片区进行排序找出最小值。
+    source: old
+  - id: fresh_disease_direction_type_diff
+    category: 病害/方向
+    question: 在包头-茂名高速上，上行方向和下行方向的“横向裂缝”病害数量差异有多大？哪一侧更多？
+    focus: 考察按路线和方向分组，统计特定病害类型的数量，并计算两侧差值及判断大小关系。
+    source: old
+  - id: fresh_time_trend_area
+    category: 趋势
+    question: 展示S20外环高速在过去六个月中，每月病害总面积的变化趋势图。
+    focus: 按月度时间维度聚合指定路段的病害面积数据，并以趋势形式呈现变化情况。
+    source: old

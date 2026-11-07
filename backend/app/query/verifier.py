@@ -37,6 +37,8 @@ def verify_deterministic(
     spec: QuerySpec,
     compiled: CompiledQuery,
     observation: ExecutionObservation,
+    *,
+    scope_has_records: bool = False,
 ) -> tuple[VerificationIssue, ...]:
     issues: list[VerificationIssue] = []
     if not observation.ok:
@@ -61,7 +63,14 @@ def verify_deterministic(
             "detail",
         }
     )
-    if observation.rows_fetched == 0 and not bounded_empty:
+    # 台账里这个范围本来就有数据（覆盖已核对过），只是这次窗口内没有记录：
+    # 那是“0 条”这个事实，不是数据缺失，不能拦住依赖它的步骤。
+    scoped_empty = (
+        observation.rows_fetched == 0
+        and bool(spec.filters)
+        and scope_has_records
+    )
+    if observation.rows_fetched == 0 and not (bounded_empty or scoped_empty):
         issues.append(
             VerificationIssue(
                 code="empty_result",
@@ -152,10 +161,19 @@ def verify_deterministic(
             for value in row.values()
         )
         if observation.rows_fetched > 0 and not numeric:
+            null_like = any(
+                str(value or "").strip().upper() in {"", "NULL", "NONE"}
+                for row in observation.preview_rows[:10]
+                for value in row.values()
+            )
             issues.append(
                 VerificationIssue(
                     code="missing_numeric_metric",
-                    message="查询结果缺少可解析的数值指标",
+                    message=(
+                        "查询结果里这个指标全部为空（该范围内没有可统计的数值）"
+                        if null_like
+                        else "查询结果缺少可解析的数值指标"
+                    ),
                     node_id=spec.id,
                     stage="fact",
                 )
@@ -183,8 +201,15 @@ def verify_result(
     observation: ExecutionObservation,
     semantic_checker: SemanticChecker | None = None,
     presentation_checker: PresentationChecker | None = None,
+    *,
+    scope_has_records: bool = False,
 ) -> VerificationReport:
-    deterministic = verify_deterministic(spec, compiled, observation)
+    deterministic = verify_deterministic(
+        spec,
+        compiled,
+        observation,
+        scope_has_records=scope_has_records,
+    )
     if deterministic:
         return VerificationReport(
             status="repairable",

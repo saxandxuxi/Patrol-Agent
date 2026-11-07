@@ -1,0 +1,129 @@
+version: 1
+exam_id: disease-type-unit-20261107-03
+generated_at: '2026-11-07T16:11:14.819699+08:00'
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20270107
+code_fingerprint: content:fb3b22ddc164c42ba003d11e4e832fba230ef71bd07d29511b71a28aea0a23f5
+fresh_case_ids:
+- type3_hengmingzhu_types
+- type3_changsha_ring_main
+- type3_xuchang_guangzhou_types
+- type3_updown_type_counts
+- type3_baotou_updown_diff
+- type3_lane_first_types
+- type3_area_under_one_sqm
+- type3_longitudinal_over_three
+- type3_transverse_avg_length
+- type3_network_area_top_type
+- type3_q3_types
+- type3_rarest_types
+- type3_fanyou_vs_tiaozhuang
+- type3_route_level_types
+- type3_recent_two_weeks
+old_case_ids:
+- oil_severity_route
+- time_day_patrol_tasks_october
+- fresh_task_device_recent_detail
+- type_changzhi_last_month_types
+- time_week_range_1023_1031
+cases:
+- id: type3_hengmingzhu_types
+  category: 病害类型/路段各类病害
+  question: 宝安中心--恒明珠这条路上都有哪些病害类型？各多少处？
+  focus: 检查另一条路线的类型清单。
+  source: fresh
+- id: type3_changsha_ring_main
+  category: 病害类型/路段主要病害
+  question: 长沙绕城高速的病害以哪几类为主？各多少处？
+  focus: 检查主要病害类型判断。
+  source: fresh
+- id: type3_xuchang_guangzhou_types
+  category: 病害类型/路段各类病害
+  question: 许昌-广州这条路上检出的病害类型有哪些？
+  focus: 检查类型清单完整性。
+  source: fresh
+- id: type3_updown_type_counts
+  category: 病害类型/上下行差异
+  question: 全路网上行和下行各检出多少种病害类型？哪一侧类型更多？
+  focus: 检查计数去重与对比。
+  source: fresh
+- id: type3_baotou_updown_diff
+  category: 病害类型/上下行差异
+  question: 包头-茂名高速公路上下行的病害类型构成有没有差别？
+  focus: 检查上下行构成对比。
+  source: fresh
+- id: type3_lane_first_types
+  category: 病害类型/车道
+  question: 第一车道的病害数量和类型分别是多少？
+  focus: 检查车道能力缺失时是否明确说明。
+  source: fresh
+- id: type3_area_under_one_sqm
+  category: 病害类型/尺寸阈值
+  question: 面积不到 1 平方米的病害有多少处？主要是什么类型？
+  focus: 检查面积阈值与类型分布。
+  source: fresh
+- id: type3_longitudinal_over_three
+  category: 病害类型/尺寸阈值
+  question: 长度超过 3 米的纵向裂缝有多少处？总长度是多少米？
+  focus: 检查阈值过滤与长度汇总。
+  source: fresh
+- id: type3_transverse_avg_length
+  category: 病害类型/尺寸阈值
+  question: 横向裂缝的平均长度是多少米？
+  focus: 检查单指标平均值。
+  source: fresh
+- id: type3_network_area_top_type
+  category: 病害类型/面积规模
+  question: 全库范围内，哪类病害的总面积排第一？
+  focus: 检查总面积Top1。
+  source: fresh
+- id: type3_q3_types
+  category: 病害类型/时间范围
+  question: 第三季度（7 月到 9 月）检出的病害类型都有哪些？各多少处？
+  focus: 检查季度范围下的类型分布。
+  source: fresh
+- id: type3_rarest_types
+  category: 病害类型/极值排序
+  question: 全库病害里数量最少的病害类型有哪些？
+  focus: 检查升序极值是否带排序。
+  source: fresh
+- id: type3_fanyou_vs_tiaozhuang
+  category: 病害类型/多类型对比
+  question: 全库的泛油和条状修补各有多少处？
+  focus: 检查点名类型对比。
+  source: fresh
+- id: type3_route_level_types
+  category: 病害类型/道路等级
+  question: 国道和省道上的病害类型有什么不同？
+  focus: 检查按行政等级对比类型。
+  source: fresh
+- id: type3_recent_two_weeks
+  category: 病害类型/时间范围
+  question: 最近两周检出的病害类型有哪些？各多少处？
+  focus: 检查相对时间与类型分布。
+  source: fresh
+- id: oil_severity_route
+  category: 历史题
+  question: 哪个道路的泛油问题更严重？
+  focus: ''
+  source: old
+- id: time_day_patrol_tasks_october
+  category: 时间/巡检任务/日
+  question: 2026年10月每天分别执行了多少次巡检任务？
+  focus: 检查巡检任务的时间字段、日粒度和任务计数。
+  source: old
+- id: fresh_task_device_recent_detail
+  category: 设备/巡检任务
+  question: 编号为DEV-7712的设备在最近一次执行的巡检任务中，共检出了多少处病害？主要分布在哪些路线？
+  focus: 考察关联设备ID与最近一次任务记录，统计该次任务的病害总数及涉及路线列表的能力。
+  source: old
+- id: type_changzhi_last_month_types
+  category: 病害类型/时间
+  question: 上个月，长沙－芷江高速公路上检出了哪些病害类型？各多少处？
+  focus: 检查时间范围与单路线病害类型分布。
+  source: old
+- id: time_week_range_1023_1031
+  category: 时间/周
+  question: 2026年10月23日至10月31日，各周检出的病害数量分别是多少？
+  focus: 检查周粒度、时间范围和周覆盖说明。
+  source: old

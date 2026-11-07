@@ -10,6 +10,11 @@ from .models import ExamCase, ExamCaseResult, ExamManifest, ExamReport
 Runner = Callable[[ExamCase], dict[str, Any]]
 Judge = Callable[[ExamCase, dict[str, Any], str], dict[str, Any]]
 
+# 运行期产物不算代码：它们由应用运行时写入（自动模板缓存等），
+# 留在指纹里会让同一套题在跑完之后被判成“代码已变化”。
+RUNTIME_ARTIFACT_NAMES = frozenset({"auto_templates.json"})
+RUNTIME_ARTIFACT_SUFFIXES = frozenset({".log", ".cache"})
+
 
 class StaleExamError(RuntimeError):
     pass
@@ -31,7 +36,11 @@ def code_fingerprint(root: Path | None = None) -> str:
         for path in sorted(item for item in base.rglob("*") if item.is_file()):
             if "runs" in path.parts or "__pycache__" in path.parts:
                 continue
+            if path.name in RUNTIME_ARTIFACT_NAMES:
+                continue
             if path.suffix.lower() in {".pyc", ".pyo"}:
+                continue
+            if path.suffix.lower() in RUNTIME_ARTIFACT_SUFFIXES:
                 continue
             relative = path.relative_to(root).as_posix()
             digest.update(relative.encode("utf-8"))

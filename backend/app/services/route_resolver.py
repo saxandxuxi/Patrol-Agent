@@ -58,7 +58,8 @@ def _resolve_route(route_text: str) -> dict[str, Any]:
     if not rows:
         # 用前两个字模糊找相近路线（"宝安大道龙华段" → 含"宝安"的两条路），
         # 比丢一句"可用路线示例"有用得多。
-        probe = route_text.strip()[:2]
+        probe = _clean_route_name(route_text)[:2]
+        safe_probe = probe.replace("'", "''")
         similar: list[str] = []
         if probe:
             similar = [
@@ -66,7 +67,7 @@ def _resolve_route(route_text: str) -> dict[str, Any]:
                 for item in db_manager.query(
                     "mysql",
                     "SELECT DISTINCT short_name, full_name FROM basic_facilities_routes "
-                    f"WHERE del_flag = 0 AND (short_name LIKE '%{probe}%' OR full_name LIKE '%{probe}%') "
+                    f"WHERE del_flag = 0 AND (short_name LIKE '%{safe_probe}%' OR full_name LIKE '%{safe_probe}%') "
                     "LIMIT 5",
                 )["rows"]
                 if item.get("short_name") or item.get("full_name")

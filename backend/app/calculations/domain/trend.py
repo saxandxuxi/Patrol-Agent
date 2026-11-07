@@ -41,7 +41,16 @@ def render_series_calculation(
         direction = "整体上升"
     else:
         direction = "有升有降"
-    return f"{direction}。序列为：{points}。相邻变化为：{changes}。"
+    undefined_points = [
+        str(item) for item in (result.evidence.get("undefined_points") or ())
+    ]
+    note = (
+        f"（{'、'.join(undefined_points)} 的上一批次为 0，"
+        "这些点无法用百分比表示变化）"
+        if undefined_points
+        else ""
+    )
+    return f"{direction}。序列为：{points}。相邻变化为：{changes}。{note}"
 
 
 def format_change(value: Any) -> str:

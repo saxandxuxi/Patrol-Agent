@@ -1,0 +1,194 @@
+{
+  "exam_id": "time-unit-20261107-01",
+  "code_fingerprint": "content:9f5114de380e189c4d710f3cbade11fe69e46daf8b57956676d90b87fa2196fe",
+  "passed_fresh": 11,
+  "total_fresh": 15,
+  "passed_old": 4,
+  "total_old": 5,
+  "passed_total": 15,
+  "total": 20,
+  "promoted": false,
+  "promotion_reason": "未晋级：新题 11/15，旧题 4/5，总计 15/20",
+  "results": [
+    {
+      "id": "time_day_total_1102",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了用户问题中的时间范围（2026年11月2日当天）和统计对象（全路网病害数量）。SQL查询使用了正确的半开时间区间 [2026-11-02, 2026-11-03) 进行过滤，并执行了 COUNT(*) 统计。最终回答明确给出了总数 1433 处，并在提供明细样本时说明了命中总数为 1433 条，当前展示前 500 条且已截断，符合明细被截断时的呈现规范。",
+      "answer": "共 1433处；“q2. 列出2026年11月2日当天（collection_time >= 2026-11-02 且 <”共 1433 条，当前展示前 500 条，完整明细请在结果工作台查看。"
+    },
+    {
+      "id": "time_day_route_distribution_1102",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了时间范围（2026-11-02全天）和分组维度（路线）。SQL逻辑正确，按route_name分组统计病害数量。查询结果显示仅有一条路线“包头-茂名”在当日有巡检记录并检出1433处病害。回答明确列出了覆盖的路线及对应的病害数量，且说明了结果行数（共1行），未发生截断或遗漏，完整回答了用户关于“哪些路线”和“多少处病害”的两个子问题。",
+      "answer": "“q1. 统计2026年11月2日（>=2026-11-02 AND <2026-11-03）按route”查询完成，共 1 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "time_route_two_patrol_difference",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了用户问题中的路线（长沙－芷江高速公路）和两个具体日期（2026-10-27, 2026-10-31）。SQL查询分别针对这两个日期进行了病害数量统计，结果分别为3909处和7977处。随后通过计算节点正确得出了差值4068处（7977 - 3909），并明确指出了是增加。所有实体、时间、指标和结论均覆盖且逻辑正确。",
+      "answer": "数量变化 = 4068（7977 - 3909）。"
+    },
+    {
+      "id": "time_year_disease_total",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确拒绝执行，指出过滤字段 del_flag 来源为 model_inference 且未经过字典或业务规则解析，属于具体的数据能力/口径缺失说明，符合 correct_unsupported 判定规则。",
+      "answer": "无法可靠规划该查询：过滤值 del_flag 来源为 model_inference，但没有经过字典、业务规则或受控解析"
+    },
+    {
+      "id": "time_quarter_disease_distribution_2026",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "presentation_error",
+      "failure_layer": "presentation",
+      "reason": "用户明确要求'空白季度要说明没有数据而不能伪造'。SQL查询结果显示仅有Q2、Q3、Q4三个季度的数据，缺失Q1。最终回答仅列出了有数据的季度，未明确说明Q1季度无数据（即检出0处或无记录），违反了考察重点中关于处理空白维度的强制性要求。",
+      "answer": "“q1. 按季度分组，统计2026年（>=2026-01-01 且 <2027-01-01）检出的病害数量”查询完成，共 3 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "time_month_disease_distribution_2026",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确执行了按月份分组的查询，覆盖了2026年全年范围。SQL逻辑正确（GROUP BY DATE_FORMAT），结果展示了有数据的4个月份的具体数值，并明确列出了8个无数据月份的缺失情况，符合考察重点中关于‘缺失月份表达’的要求。虽然未显式计算总数，但提供了所有分项数据且明确说明了空值月份，构成了完整的分布回答。",
+      "answer": "“q1. 按 collection_time 的月份分组，统计 2026-01-01 至 2027-01-”查询完成，共 4 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "time_day_trend_1027_1104",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "compiler",
+      "reason": "用户要求按天统计病害数量变化，但系统生成的SQL错误地使用了`DATE_FORMAT(collection_time, '%Y-%m')`进行按月分组，导致返回的是月度汇总数据而非日度数据。系统在最终回答中正确识别了这一粒度不匹配的问题，明确说明了现有证据仅为月度数据，无法支持日级别的趋势、峰值和谷值分析，并指出了需要细化时间粒度。根据规则，当系统明确说明数据能力或查询结果无法满足用户需求的具体原因（此处为SQL逻辑错误导致的粒度缺失，且系统未强行给出错误结论）时，判为correct_unsupported。虽然根本原因是SQL编写错误（compiler层），但系统的自我纠错和拒绝猜测的行为符合correct_unsupported的判定标准。",
+      "answer": "基于现有证据，无法按“天”分析依赖节点的时间序列变化趋势及极值。\n\n依据方面，上游计算结果仅提供了按月聚合的数据：2026年10月病害数量为18,542，2026年11月为14,105。虽然数据显示从10月到11月总量呈下降趋势，且10月为当前证据中的最大值（18,542），11月为最小值（14,105），但这些是月度汇总值，并非每日的时间序列数据。\n\n局限性在于，用户明确要求分析“按天”的变化趋势并指出日级别的极值，但提供的证据中`row_count`仅为2，且维度为“月份”，缺少具体的日期字段和每日对应的病害数量。因此，无法识别具体哪一天出现峰值或谷值，也无法描述日间的波动情况。要完成此分析，需要重新调用计算工具，将时间粒度细化至“天”，并获取2026-10-27至2026-11-04期间每一天的具体病害数量。"
+    },
+    {
+      "id": "time_week_trend_oct_early_nov",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了时间范围（2026-10-01至2026-11-04），使用 ISO 周格式（%x-%v）进行分组，统计了全路网病害数量。SQL 逻辑正确，结果返回了该时间段内实际有数据的3个周（W43, W44, W45），并正确指出数量最高的周为 W44。回答中明确说明了仅基于有数据的三周进行分析，符合‘不能把无数据周当成业务上绝对为零’的考察重点，未对缺失数据的周进行猜测或强行补零，结论由数据直接支持。",
+      "answer": "“q1. 在2026-10-01至2026-11-04期间，按周统计全路网病害数量”查询完成，共 3 行，详细结果已生成，请在结果工作台查看。；病害数量最高的一周是 2026-W44。\n\n判断依据直接引用了按周统计的病害数量指标。在提供的证据中，2026-W44 的病害数量为 18677，显著高于 2026-W45 的 14105 和 2026-W43 的 405。紧凑证据中的聚合指标也明确显示，“数量”字段的最大值（max）为 18677.0，对应的分组对象正是 2026-W44，这进一步确认了该周在统计区间内的峰值地位。\n\n需要说明的是，本次分析仅基于给定的三周数据（2026-W43 至 W45），结论局限于此时间窗口。此外，“病害数量”作为代理指标反映的是发现或上报的频次，未结合病害严重程度、面积或路线长度进行加权，因此不能直接等同于道路健康状况的最差时期或养护压力的绝对峰值。若需更全面的评估，建议补充病害等级分布及对应里程数据。"
+    },
+    {
+      "id": "time_route_month_trend_hengmingzhu",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "系统正确执行了两次查询，分别获取了2026年10月（131处）和11月（0处）的病害数量。最终回答基于这两个数值计算了变化率并指出了减少的趋势，完全覆盖了用户关于数量、月份对比和变化方向的要求。SQL逻辑正确，结果非空且支持结论。",
+      "answer": "环比变化率 = -100.00（(0 - 131) / 131 * 100）。"
+    },
+    {
+      "id": "time_route_month_trend_changzhi",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "verification",
+      "reason": "最终回答未能正确呈现用户要求的两个月份的具体指标及比较结论。虽然底层 SQL 查询（q1_oct, q1_nov）成功获取了数据（10月：数量11886，面积224534.94；11月：数量1883，面积81362.27），但后处理节点 pc1 计算逻辑错误，输出结果为 '序列为：11886=0' 且变化百分比为 null。最终回答仅显示 '有升有降。序列为：11886=0。相邻变化为：。'，既未列出11月的数据，也未给出具体的数值对比或正确的变化趋势描述（实际数量和面积均大幅下降），属于系统执行层面的后处理失败导致回答无效。",
+      "answer": "有升有降。序列为：11886=0。相邻变化为：。"
+    },
+    {
+      "id": "time_month_disease_type_baotou",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了用户问题中的路线（包头-茂名）和时间范围（2026年10月），SQL 中使用了正确的路由ID过滤和 collection_time 的区间过滤（>= '2026-10-01' AND < '2026-11-01'）。查询按 problem_type_name 分组统计了数量，返回了17种病害类型的具体处数。最终回答完整列出了所有结果，且明确说明了共17行，未截断，完全覆盖了用户要求的实体、时间、分组维度和指标。",
+      "answer": "“q1. 在 route_name='包头-茂名' 且 collection_time 在 2026-10”查询完成，共 17 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "time_month_oil_by_route",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了时间（2026年10月）、病害类型（泛油）和分组维度（路线）。SQL 逻辑正确，使用了 collection_time 范围过滤和 problem_type_name 过滤，并按 route_name 分组计数。最终回答列出了所有命中的路线及其对应的病害数量，完整覆盖了用户问题的所有要求。",
+      "answer": "“q1. 统计2026年10月（collection_time >= 2026-10-01 且 < 202”查询完成，共 6 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "time_day_patrol_tasks_october",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "wrong_dimension",
+      "failure_layer": "compiler",
+      "reason": "用户要求统计'每天'的巡检任务次数，即按'日期'（日粒度）分组。但生成的 SQL 使用了 `GROUP BY patrol.create_time`，其中 `create_time` 是精确到秒的时间戳。这导致结果按每次任务的具体发生时间分组，每行数量均为1，未能聚合到'天'的维度。正确的做法应使用日期函数（如 DATE(create_time)）进行分组。",
+      "answer": "“q1. 按天统计2026年10月（>=2026-10-01 且 <2026-11-01）的巡检任务数量，”查询完成，共 41 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "time_month_patrol_tasks_jun_nov",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了时间范围（2026年6月至11月），并执行了按月分组的统计。SQL逻辑正确（GROUP BY DATE_FORMAT）。结果明确列出了有数据的月份（6月83次，7月62次，10月41次，11月20次），并明确指出缺失月份（8月、9月）没有匹配记录，符合考察重点中'缺失月份要明确'的要求。总量计算正确（83+62+41+20=206），与单独查询的总数一致。回答完整覆盖了用户问题的所有要素。",
+      "answer": "“q1. 按月份分组统计2026-06-01至2026-12-01期间ai_maintain_patrol”查询完成，共 4 行，详细结果已生成，请在结果工作台查看。；共 206次。"
+    },
+    {
+      "id": "time_week_no_data_august",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "execution",
+      "reason": "系统执行失败。最终回答为错误信息 '序列标签与数值数量不一致或为空'，且 verification 状态为 'repairable'。根据规则，当存在 error 非空、最终回答为空或任一 section 为 repairable/blocked 时，属于系统执行失败，不得判为 correct_unsupported。虽然数据可能确实缺失（2026年8月无数据），但系统未能正确识别并给出明确的‘无数据/能力边界’说明，而是抛出了计算错误。",
+      "answer": "序列标签与数值数量不一致或为空。"
+    },
+    {
+      "id": "fresh_time_monthly_trend_multi_route",
+      "source": "old",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "execution",
+      "reason": "DatabaseError: ERROR 1064 (42000) at line 1: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near '%' OR full_name LIKE '%['%') LIMIT 5' at line 1",
+      "answer": ""
+    },
+    {
+      "id": "fresh_lane_disease_unsupported",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户要求查询指定车道（第三车道）的病害明细。业务能力文档明确说明“区分车道的病害数量查询及数量统计（目前系统未更新车道分布）”以及“指定车道病害类型与数量（暂未更新）”。系统最终回答明确指出“当前数据能力不支持：业务能力文档声明车道分布尚未更新”，符合考察重点中要求的“明确告知当前车道分布数据未更新，无法提供指定车道的病害查询服务，并说明数据缺失情况”。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：业务能力文档声明车道分布尚未更新，不能把 lane_index 当作可靠统计依据"
+    },
+    {
+      "id": "fresh_task_completion_rate_ranking",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确声明当前数据能力不支持，具体原因为'只有管养单位 ID，缺少可验证的单位名称和台账关联'。根据规则，当最终回答明确说明业务能力或数据确实缺失且原因具体时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联"
+    },
+    {
+      "id": "fresh_disease_direction_type_diff",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统检测到用户提供的路线名称“包头-茂名高速”在数据库中不存在，并明确指出了名字相近的候选路线“包头-茂名”，要求用户确认。根据规则，当问题本身缺少必要的业务定义（如确切的实体名称）且系统明确要求补充口径且没有猜测时，判为 correct_unsupported。",
+      "answer": "该查询无法执行：没有找到路线“包头-茂名高速”。名字相近的路线有：包头-茂名，请确认是哪一条。"
+    },
+    {
+      "id": "fresh_time_trend_area",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明数据库中不存在名为“S20外环高速”的路线实体，并提供了相近路线列表供用户确认。根据规则，当数据库确实缺少数据能力且系统明确说明具体缺失原因并停止猜测时，判为 correct_unsupported。",
+      "answer": "该查询无法执行：没有找到路线“S20外环高速”。名字相近的路线有：新化文田-东安井头圩、龙山石牌(省界)-凤凰茶田(省界)、慈利-安化县渠江、双峰洪山殿-嘉禾县城、望城乌山-湘潭茶恩寺，请确认是哪一条。"
+    }
+  ]
+}

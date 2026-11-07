@@ -1,0 +1,129 @@
+version: 1
+exam_id: disease-time-unit-20261107-02
+generated_at: '2026-11-07T11:57:31.352268+08:00'
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20261117
+code_fingerprint: content:e29b23f2a9e8d7fae0bcfd13f1918b6776521a3d55c6bd0bcd6e1c05979ed54c
+fresh_case_ids:
+- disease_month_pothole_count
+- disease_quarter_net_crack_monthly
+- disease_recent_four_pothole_change
+- disease_recent_three_lateral_crack_trend
+- disease_recent_six_two_types_change
+- disease_xixiang_two_visit_gap
+- disease_hengmingzhu_two_visit_type_growth
+- disease_xixiang_cross_month_week_composition
+- disease_october_oil_by_route
+- disease_three_month_lateral_crack_routes
+- disease_q4_pothole_route_distribution
+- disease_nov_daily_total
+- disease_ytd_peak_month
+- disease_last_week_vs_this_week
+- disease_oct_20_22_daily
+old_case_ids:
+- fresh_disease_hotspot_pile_segment
+- disease_changzhi_two_types_two_dates
+- fresh_task_completion_rate_ranking
+- fresh_maintenance_density_rank
+- fresh_maintenance_plan_actual_gap
+cases:
+- id: disease_month_pothole_count
+  category: 病害/时间/本月
+  question: 本月坑槽一共检出了多少处？
+  focus: 检查相对本月范围与指定病害类型的计数。
+  source: fresh
+- id: disease_quarter_net_crack_monthly
+  category: 病害/时间/季度
+  question: 本季度网裂检出多少处？按月份拆开看，哪个月最多？
+  focus: 检查季度范围、病害实体族解析、月度拆分与峰值判断。
+  source: fresh
+- id: disease_recent_four_pothole_change
+  category: 病害/时间/巡查批次
+  question: 最近4次巡查里，坑槽的数量有没有明显变化？
+  focus: 检查最近巡查批次窗口、坑槽数量序列与变化结论。
+  source: fresh
+- id: disease_recent_three_lateral_crack_trend
+  category: 病害/时间/巡查批次
+  question: 最近三次巡查，横向裂缝是涨还是跌？
+  focus: 检查最近三次巡查批次与横向裂缝数量的升降判断。
+  source: fresh
+- id: disease_recent_six_two_types_change
+  category: 病害/时间/巡查批次
+  question: 最近六次巡查里，坑槽和纵向裂缝谁的变化更大？
+  focus: 检查同一批次窗口下两种病害的序列对比。
+  source: fresh
+- id: disease_xixiang_two_visit_gap
+  category: 病害/路段/两次巡查
+  question: 宝安大道西乡段10月23日和10月26日这两次巡查，病害数量差多少？
+  focus: 检查同路段两个明确日期的数量与差值。
+  source: fresh
+- id: disease_hengmingzhu_two_visit_type_growth
+  category: 病害/路段/两次巡查
+  question: 宝安中心--恒明珠10月26日和11月4日两次巡查，哪种病害增加最多？
+  focus: 检查同路段两个日期的病害类型对比与增长率最高项。
+  source: fresh
+- id: disease_xixiang_cross_month_week_composition
+  category: 病害/路段/跨月周
+  question: 宝安大道西乡段9月28日到10月4日，病害类型构成有什么变化？
+  focus: 检查跨月连续时间段保留与按天/类型构成变化。
+  source: fresh
+- id: disease_october_oil_by_route
+  category: 病害/时间/路线
+  question: 10月1日到10月31日，泛油在各条路上分别新增了多少处？
+  focus: 检查整月时间段、指定病害与路线分布。
+  source: fresh
+- id: disease_three_month_lateral_crack_routes
+  category: 病害/时间/路线
+  question: 最近三个月，横向裂缝主要出现在哪些路上？各多少处？
+  focus: 检查相对三个月范围、横向裂缝与路线分布。
+  source: fresh
+- id: disease_q4_pothole_route_distribution
+  category: 病害/时间/路线
+  question: 第四季度以来，坑槽在不同路线上的分布是什么样？
+  focus: 检查季度范围、坑槽与路线分布表达。
+  source: fresh
+- id: disease_nov_daily_total
+  category: 病害/时间/日粒度
+  question: 11月1日到11月4日，每天检出的病害总数分别是多少？
+  focus: 检查日粒度分组与逐日总数。
+  source: fresh
+- id: disease_ytd_peak_month
+  category: 病害/时间/年
+  question: 今年以来，病害数量最多的月份是哪个月？
+  focus: 检查年度范围、逐月统计与峰值月份判断。
+  source: fresh
+- id: disease_last_week_vs_this_week
+  category: 病害/时间/周
+  question: 上周和这周的病害检出量比一比，是多了还是少了？
+  focus: 检查自然周范围与两周对比结论。
+  source: fresh
+- id: disease_oct_20_22_daily
+  category: 病害/时间/日粒度
+  question: 10月20日到10月22日，各天的病害检出情况怎么样？
+  focus: 检查无数据时间段必须如实说明，不能编造趋势。
+  source: fresh
+- id: fresh_disease_hotspot_pile_segment
+  category: 病害/分段查询
+  question: 在G60沪昆高速K100至K150区间内，哪一公里的路段病害数量最多？请给出具体桩号区间和数量。
+  focus: 考察在指定大区间内，按固定长度（1公里）分段统计病害数量，并找出最大值所在分段的能力。
+  source: old
+- id: disease_changzhi_two_types_two_dates
+  category: 病害/两次巡检/多类型
+  question: 长沙－芷江高速10月27日和10月31日两次检出中，坑槽和泛油分别变化多少？
+  focus: 检查两个日期、两种病害类型和多组差值比较。
+  source: old
+- id: fresh_task_completion_rate_ranking
+  category: 巡检任务
+  question: 对各管养片区上个月的巡检任务完成率进行排名，完成率最低的片区是哪个？
+  focus: 验证系统能否计算任务完成率（实际/计划），并按片区进行排序找出最小值。
+  source: old
+- id: fresh_maintenance_density_rank
+  category: 管养
+  question: 按照病害密度从高到低排序，列出所有管养片区的路况评估结果。
+  focus: 计算各片区的病害密度（病害处数/管养里程），并按降序排列展示片区名称及密度值。
+  source: old
+- id: fresh_maintenance_plan_actual_gap
+  category: 管养/任务
+  question: 第二管养片区本季度的计划巡检里程与实际完成里程分别是多少？未完成的比例是多少？
+  focus: 考察按管养单位和时间范围（季度）提取计划与实际里程数据，并计算未完成比例的能力。
+  source: old

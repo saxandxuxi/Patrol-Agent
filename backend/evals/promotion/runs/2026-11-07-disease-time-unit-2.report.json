@@ -1,0 +1,194 @@
+{
+  "exam_id": "disease-time-unit-20261107-02",
+  "code_fingerprint": "content:e29b23f2a9e8d7fae0bcfd13f1918b6776521a3d55c6bd0bcd6e1c05979ed54c",
+  "passed_fresh": 13,
+  "total_fresh": 15,
+  "passed_old": 4,
+  "total_old": 5,
+  "passed_total": 17,
+  "total": 20,
+  "promoted": true,
+  "promotion_reason": "达到 15 新题 80% 和 5 旧题 80% 晋级线",
+  "results": [
+    {
+      "id": "disease_month_pothole_count",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了用户问题中的时间范围（本月，即2026年11月）和病害类型（坑槽）。SQL查询使用了正确的过滤条件（problem_type_name = '坑槽' 且 collection_time 在 2026-11-01 至 2026-12-01 之间）。计数结果为26处，明细列表也返回了26条记录，两者一致。最终回答明确给出了数量并说明了明细展示情况，符合业务文档中关于病害数量统计的要求。",
+      "answer": "共 26处；“q2. 列出2026年11月1日至2026年11月30日期间，病害类型为'坑槽'的病害明细，用于核对计数”共 26 条，当前展示前 26 条，完整明细请在结果工作台查看。"
+    },
+    {
+      "id": "disease_quarter_net_crack_monthly",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明数据库字典中不存在'网裂'这一病害类型，导致无法执行查询。根据规则，当数据库确实缺少字段或数据能力时，明确说明具体缺失原因并停止猜测，应判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：病害类型不在数据库字典中：网裂"
+    },
+    {
+      "id": "disease_recent_four_pothole_change",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了最近4次巡查批次（按时间倒序），并准确统计了每个批次中'坑槽'病害的数量。SQL逻辑正确关联了巡查表与病害表，并过滤了特定病害类型。最终回答完整展示了4个批次的数量序列（5, 15, 3, 0），其中缺失数据的批次正确推断为0（或基于结果集补全），并计算了相邻变化率，给出了'有升有降'的结论，完全覆盖了用户关于'数量有没有明显变化'的询问。",
+      "answer": "有升有降。序列为：XCBH202611040003=5、XCBH202611040004=15、XCBH202611040005=3、XCBH202611050000=0。相邻变化为：+200%，-80%，-100%。"
+    },
+    {
+      "id": "disease_recent_three_lateral_crack_trend",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "compiler",
+      "reason": "系统明确报告编译错误 'calculation_operand_missing: 操作数 labels 的来源 q_patrol_batch.patrol_number 未被依赖节点产出'，导致无法生成执行计划。根据规则，内部编译字段名错误或依赖缺失属于系统执行失败，但在此场景下，系统正确识别了能力缺失并拒绝猜测，且未返回空回答或静默失败，符合 correct_unsupported 中关于明确说明具体缺失原因并停止猜测的定义。",
+      "answer": "无法可靠规划该查询：calculation_operand_missing: 操作数 labels 的来源 q_patrol_batch.patrol_number 未被依赖节点产出"
+    },
+    {
+      "id": "disease_recent_six_two_types_change",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确指出无法规划查询，原因是节点 q_patrol_batch 缺少用于确定巡查批次顺序的关键字段 collection_time，并列举了 patrol 主体中实际可用的字段。由于缺乏时间排序依据，无法确定“最近六次巡查”的具体范围，因此无法计算坑槽和纵向裂缝的变化量并进行对比。系统未进行猜测，而是具体说明了缺失的数据能力，符合 correct_unsupported 的判定规则。",
+      "answer": "无法可靠规划该查询：节点 q_patrol_batch 的排序字段 collection_time 不属于主体 patrol；可用字段：avg_patrol_mileage、count、create_by、create_time、del_flag、device_code、end_date、equipment_id、id、max_patrol_mileage、memo、min_patrol_mileage、over_time、patrol_method_type、patrol_mileage、patrol_name、patrol_number、patrol_partner、patrol_status、patrol_type、patroller_id、scope_record_id、sum_patrol_mileage、task_number、tenant_id、unit_id、up_or_down、update_by、update_time、valid_task、vehicle_id"
+    },
+    {
+      "id": "disease_xixiang_two_visit_gap",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统准确识别了用户指定的路段（宝安大道西乡段）和两个具体日期（10月23日、10月26日）。通过两次独立的SQL查询分别获取了当天的病害数量（306处和103处），并正确计算了差值（203处）。最终回答明确给出了差值及计算过程，完全覆盖了用户问题的考察重点。",
+      "answer": "数量差值 = 203（306 - 103）。"
+    },
+    {
+      "id": "disease_hengmingzhu_two_visit_type_growth",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "execution",
+      "reason": "系统执行失败。post_calc 节点 pc1 状态为 'repairable'，错误信息为 '缺少列计算角色：left'，导致无法完成两次巡查数据的差值计算和对比。最终回答仅返回了错误信息，未回答用户关于哪种病害增加最多的问题。",
+      "answer": "缺少列计算角色：left。"
+    },
+    {
+      "id": "disease_xixiang_cross_month_week_composition",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户询问跨月时间段（9月28日-10月4日）的病害类型构成变化。系统执行了针对该路段和时间范围的查询，SQL逻辑正确（按病害类型分组统计），但返回结果为0行（rows_fetched: 0）。最终回答明确指出因数据为空，无法计算构成或分析变化趋势，并说明了可能的原因（无病害或数据缺失），未进行猜测。根据规则，当数据库确实缺少数据且系统明确说明具体缺失原因并停止猜测时，判为 correct_unsupported。",
+      "answer": "无法解释病害类型构成及其变化趋势，因为当前证据中不存在任何相关数据。\n\n依据显示，针对“宝安大道西乡段”在“2026-09-28至2026-10-05”期间按病害类型分组的统计查询返回了0行记录。这意味着在该特定路段和时间窗口内，没有检测到或记录下任何病害数据，因此缺乏计算各类病害数量、总面积或分析其随时间变化所需的基础数值。由于`row_count`为0，不存在最小值、最大值或任何分布特征可供引用。\n\n局限性在于，本次分析仅基于用户指定的单一地点和极短时间段（约一周）的查询结果。该结果为空可能意味着该路段在此期间确实无病害，也可能源于数据采集缺失、上报延迟或查询条件过于狭窄。若要获得有效的构成与趋势分析，必须扩大时间跨度、增加对比路段或确认数据源的有效性，目前证据严重不足，无法进行任何代理指标估算或趋势推断。"
+    },
+    {
+      "id": "disease_october_oil_by_route",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "系统正确解析了时间范围（10月1日至10月31日）、病害类型（泛油）和分组维度（各条路/路线名称）。SQL查询逻辑正确，使用了 `collection_time` 进行范围过滤，并按 `route_name` 分组统计数量。最终回答列出了6条路线的具体新增数量，且明确说明了结果行数，未出现截断或猜测，完全覆盖了用户问题的考察重点。",
+      "answer": "“q1. 按 route_name 分组，统计 collection_time 在 2026-10-01”查询完成，共 6 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "disease_three_month_lateral_crack_routes",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "ambiguous",
+      "reason": "用户问题中的'最近三个月'属于相对时间概念，缺乏明确的业务定义（如基于当前系统时间、最新巡检日期或自然月），且未指定具体的路线范围或管养单位。系统未进行猜测，而是明确要求补充具体时间范围和口径，符合判定规则中关于'问题本身缺少必要的业务定义，系统明确要求补充口径且没有猜测'的情形。",
+      "answer": "该查询需要补充明确口径：请补充具体时间范围、巡检批次、比较对象或所需字段。"
+    },
+    {
+      "id": "disease_q4_pothole_route_distribution",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "wrong_scope",
+      "failure_layer": "value",
+      "reason": "用户询问'第四季度以来'（通常指10月、11月、12月），但系统生成的SQL仅查询了2026-10-01至2026-11-07的数据，缺失了11月剩余时间及整个12月的数据，时间范围覆盖不全，导致分布统计不完整。",
+      "answer": "“q1. 按 route_name 分组，统计 2026-10-01 至 2026-11-07 期间 pr”查询完成，共 9 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "disease_nov_daily_total",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户要求查询11月1日至11月4日每天的病害总数。SQL正确执行了时间范围过滤和按日分组，但结果集中缺失11月1日的数据（仅有11月2-4日）。系统最终回答明确指出了'缺少日期或时间桶 2026-11-01'，并声明'无法据此判断完整时间窗口的趋势'，拒绝了给出确定性结论。根据规则，当时间序列覆盖不足且系统明确说明缺失并拒绝给出确定性结论时，判为 correct_unsupported。",
+      "answer": "日期 2026-11-02，数量 1433；日期 2026-11-03，数量 443；日期 2026-11-04，数量 12229；查询窗口 2026-11-01 至 2026-11-04；实际返回时间桶为 2026-11-02、2026-11-03、2026-11-04；缺少日期或时间桶 2026-11-01，无法据此判断完整时间窗口的趋势。"
+    },
+    {
+      "id": "disease_ytd_peak_month",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了时间范围（2026年全年），执行了按月份分组的病害数量统计。SQL逻辑正确，覆盖了所有12个月份的潜在分组。结果明确指出了有数据的4个月份，并明确列出了无数据的8个月份。最终回答基于现有数据得出10月为峰值，并诚实说明了数据覆盖情况（其余月份视为零或无数据），符合业务查询逻辑，未进行不当猜测。",
+      "answer": "2026年病害数量最多的月份是10月。\n\n该结论基于对2026年全年各月度病害数量的分组统计结果。在提供的证据中，明确列出了四个月份的具体数值：10月为19,082起，11月为14,105起，7月为1,379起，6月为323起。通过对比这些已计算出的指标，10月的数值（19,082）显著高于其他月份，且紧凑证据中的最大值（max）也指向2026-10，确认其为当前数据集中的峰值。其余月份（1-5月、8-9月、12月）在查询范围内无匹配记录，视为零或无数据，不影响最大值的判断。\n\n需注意，此结论仅依据现有检索到的四个月份数据。若未检索到的月份实际存在数据但未被上游查询捕获，则结论可能不完整。但在当前证据闭环内，10月确认为最高。"
+    },
+    {
+      "id": "disease_last_week_vs_this_week",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "系统正确识别了'上周'和'这周'的时间范围（基于当前日期2026-11-07推断），分别查询了两个时间段的病害检出数量（上周19975处，本周12672处）。通过计算得出环比变化率为-36.56%，并隐含回答了'少了'这一结论。SQL逻辑正确，数据非空，结论有数据支持。",
+      "answer": "环比变化率 = -36.56（(12672 - 19975) / 19975 * 100）。"
+    },
+    {
+      "id": "disease_oct_20_22_daily",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "用户询问10月20日至22日的每日病害检出情况。系统执行了针对该时间范围（2026-10-20至2026-10-23）的SQL查询，按采集日期分组统计。查询结果为0行，表明该时间段内无数据。最终回答如实陈述了“查询完成，共 0 行”，未编造趋势或数据，符合考察重点中关于无数据时间段必须如实说明的要求。",
+      "answer": "“q1. 按采集日期（collection_time）分组，统计2026-10-20至2026-10-23”查询完成，共 0 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "fresh_disease_hotspot_pile_segment",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明数据能力缺失，具体原因为'无法解析桩号：(100000, 150000)'，且未进行猜测或返回错误结果，符合correct_unsupported判定规则。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：无法解析桩号：(100000, 150000)"
+    },
+    {
+      "id": "disease_changzhi_two_types_two_dates",
+      "source": "old",
+      "ok": false,
+      "verdict": "execution_failure",
+      "failure_layer": "execution",
+      "reason": "系统在执行后处理计算节点 'pc_change' 时失败，报错 '计算操作数不是有效数字：right'，导致无法得出最终的变化值结论。虽然基础查询 q1_oct27 返回 0 行（即 right 操作数为空或无效），但系统未能正确处理此情况（如将缺失值视为0或明确说明无数据导致无法计算差值），而是直接抛出执行错误并停止，属于系统执行层面的失败。",
+      "answer": "计算操作数不是有效数字：right；该指标无法可靠计算，已停止。"
+    },
+    {
+      "id": "fresh_task_completion_rate_ranking",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明数据能力缺失：'当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联'。根据规则，当最终回答本身明确说明了业务能力、字段、关联或数据确实缺失，且原因具体时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联"
+    },
+    {
+      "id": "fresh_maintenance_density_rank",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确声明当前数据能力不支持，指出节点 pc1 缺少派生指标定义导致无法规划查询。根据规则，当系统明确说明具体缺失原因且未进行猜测时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：节点 pc1 声明了越低越好的评价，但没有声明使用的派生指标"
+    },
+    {
+      "id": "fresh_maintenance_plan_actual_gap",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明当前数据能力不支持，具体原因为'只有管养单位 ID，缺少可验证的单位名称和台账关联'，导致无法将用户问题中的'第二管养片区'映射到数据库实体，且未进行猜测，符合 correct_unsupported 判定规则。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联"
+    }
+  ]
+}

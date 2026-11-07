@@ -1,0 +1,129 @@
+version: 1
+exam_id: disease-asset-quantity-unit-20261107-01
+generated_at: '2026-11-07T13:41:41.948263+08:00'
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20261205
+code_fingerprint: content:74c5d0e5723cd5af6225873b9ba0fce6c9d90ee3f202f6bfbde164886e1744b7
+fresh_case_ids:
+- asset_qty_patrol_11040004
+- asset_qty_patrol_11040003_scale
+- asset_qty_two_patrol_batches_1104
+- asset_qty_patrol_route_split_1031
+- asset_dir_changzhi_updown
+- asset_dir_xixiang_updown
+- asset_dir_network_metrics
+- asset_surface_type_count
+- asset_admin_level_count
+- asset_admin_level_scale
+- asset_road_grade_count
+- asset_lane_distribution
+- asset_lane_second_pothole
+- asset_scale_changzhi_metrics
+- asset_scale_network_totals
+old_case_ids:
+- device_counts_nov_2026
+- time_day_trend_1027_1104
+- fresh_task_completion_rate_ranking
+- new_trend_district_monthly
+- disease_baotou_last_month_total
+cases:
+- id: asset_qty_patrol_11040004
+  category: 资产/病害数量/巡查批次
+  question: 巡查编号 XCBH202611040004 这一次巡查一共检出多少处病害？
+  focus: 检查按巡查编号统计单次巡查的病害数量。
+  source: fresh
+- id: asset_qty_patrol_11040003_scale
+  category: 资产/病害数量与规模/巡查批次
+  question: XCBH202611040003 这次巡查检出的病害，数量和总面积分别是多少？
+  focus: 检查单次巡查的数量与面积两个指标。
+  source: fresh
+- id: asset_qty_two_patrol_batches_1104
+  category: 资产/病害数量/巡查批次对比
+  question: 11月4日的两个巡查批次 XCBH202611040003 和 XCBH202611040004，各自检出了多少处病害？
+  focus: 检查同一日期两个巡查批次的分别统计。
+  source: fresh
+- id: asset_qty_patrol_route_split_1031
+  category: 资产/病害数量/路线分布
+  question: XCBH202610310000 这次巡查的病害都分布在哪些路上？每条路分别多少处？
+  focus: 检查巡查批次与路线交叉分组。
+  source: fresh
+- id: asset_dir_changzhi_updown
+  category: 资产/上下行/病害数量
+  question: 长沙－芷江高速公路的病害，上行和下行分别有多少处？
+  focus: 检查单条路线的上下行数量分组。
+  source: fresh
+- id: asset_dir_xixiang_updown
+  category: 资产/上下行/病害数量
+  question: 宝安大道西乡段的病害都出现在哪个方向？上行、下行各多少处？
+  focus: 检查路线上下行数量分组与方向结论。
+  source: fresh
+- id: asset_dir_network_metrics
+  category: 资产/上下行/数量与面积
+  question: 全路网病害按上下行分组，数量和总面积各是多少？
+  focus: 检查全库上下行的多指标分组。
+  source: fresh
+- id: asset_surface_type_count
+  category: 资产/路面类型/病害数量
+  question: 按路面类型统计一下全库的病害数量，哪类路面病害最多？
+  focus: 检查路面类型维度分组与最大值结论。
+  source: fresh
+- id: asset_admin_level_count
+  category: 资产/行政等级/病害数量
+  question: 国道和省道上的病害数量分别是多少？
+  focus: 检查行政等级过滤与数量对比。
+  source: fresh
+- id: asset_admin_level_scale
+  category: 资产/行政等级/数量与面积
+  question: 按行政等级分组，统计病害数量和总面积。
+  focus: 检查行政等级分组下的多指标统计。
+  source: fresh
+- id: asset_road_grade_count
+  category: 资产/道路等级/病害数量
+  question: 按公路技术等级统计病害数量，各个等级的路上各有多少处？
+  focus: 检查公路技术等级维度是否具备分组能力。
+  source: fresh
+- id: asset_lane_distribution
+  category: 资产/车道/病害数量
+  question: 按车道统计病害数量分布，哪个车道的病害最多？
+  focus: 检查车道维度能力边界与明确说明。
+  source: fresh
+- id: asset_lane_second_pothole
+  category: 资产/车道/病害类型
+  question: 第二车道上有多少处坑槽病害？
+  focus: 检查按车道过滤病害类型的支持情况。
+  source: fresh
+- id: asset_scale_changzhi_metrics
+  category: 资产/病害规模/路线
+  question: 长沙－芷江高速公路的病害总数、总面积和平均单处面积分别是多少？
+  focus: 检查单条路线的数量、面积与平均面积三指标。
+  source: fresh
+- id: asset_scale_network_totals
+  category: 资产/病害规模/全库
+  question: 当前全库的病害一共多少处？总面积和平均单处面积是多少？
+  focus: 检查全库数量与面积规模统计。
+  source: fresh
+- id: device_counts_nov_2026
+  category: 历史题
+  question: 2026 年 11 月，巡检设备分别完成了多少次巡检？
+  focus: ''
+  source: old
+- id: time_day_trend_1027_1104
+  category: 时间/日趋势
+  question: 2026年10月27日至2026年11月4日，按天统计全路网每天的病害数量变化。
+  focus: 检查日期序列、趋势消费节点、峰值和覆盖不足说明。
+  source: old
+- id: fresh_task_completion_rate_ranking
+  category: 巡检任务
+  question: 对各管养片区上个月的巡检任务完成率进行排名，完成率最低的片区是哪个？
+  focus: 验证系统能否计算任务完成率（实际/计划），并按片区进行排序找出最小值。
+  source: old
+- id: new_trend_district_monthly
+  category: 趋势
+  question: 分析第一管养片区在今年上半年（1月至6月），每月病害总面积的变化情况，判断整体路况是在恶化还是改善。
+  focus: 考察系统按月度时间序列统计特定管养片区的病害面积指标，并基于数据走势给出定性判断的能力。
+  source: old
+- id: disease_baotou_last_month_total
+  category: 病害/时间/路线
+  question: 包头-茂名这条路上个月检出了多少处病害？
+  focus: 检查路线与上月范围的数量统计。
+  source: old

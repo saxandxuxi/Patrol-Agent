@@ -10,7 +10,7 @@ from app.query.contracts import (
     immutable_scope_hash,
 )
 from app.query.review import ReviewEvidence, ReviewNodeEvidence, serialize_query_spec
-from app.query.review_repair import repair_review_evidence
+from app.query.review_repair import _field_reach_from_ground, repair_review_evidence
 
 
 def spec(
@@ -182,6 +182,27 @@ class ReviewRepairTests(unittest.TestCase):
 
         self.assertEqual(result.stopped_reason, "repair_unsupported")
         self.assertIn("不支持", result.answer.text)
+
+    def test_grounding_dict_becomes_field_reach_set(self):
+        """用户点“答错了”后重新规划要用 FieldReachSet，
+        直接拿 field_grounding 的命中字典会在取 .hits 时崩。"""
+
+        reach = _field_reach_from_ground(
+            {
+                "columns": [
+                    {
+                        "table": "ai_problem",
+                        "column": "area",
+                        "hits": ["列名命中：面积"],
+                        "score": 5.0,
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(reach.hits[0].table, "ai_problem")
+        self.assertEqual(reach.hits[0].column, "area")
+        self.assertEqual(_field_reach_from_ground(None).hits, ())
 
 
 if __name__ == "__main__":

@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..services.resource_loader import load_capability_file
+from .capability_registry import CapabilityRegistry
 from .spec_mdl import UnsupportedQuerySpec
 
 
-def validate_capabilities(spec: Any) -> None:
-    fields = (load_capability_file("templates.yaml", {}) or {}).get("fields") or {}
-    if not isinstance(fields, dict):
-        return
+def validate_capabilities(
+    spec: Any,
+    registry: CapabilityRegistry | None = None,
+) -> None:
+    registry = registry or CapabilityRegistry.load()
     logical_table = {
         "disease": "disease",
         "patrol": "patrol",
@@ -22,10 +23,12 @@ def validate_capabilities(spec: Any) -> None:
         *[str(item.field).rsplit(".", 1)[-1] for item in spec.filters],
     }
     for field in sorted(referenced):
-        metadata = fields.get(f"{logical_table}.{field}")
-        if not isinstance(metadata, dict):
+        capability = registry.snapshot.fields.get(logical_table, {}).get(field)
+        if capability is None:
             continue
-        status = str(metadata.get("status") or "")
+        status = str(capability.status or "")
         if status in {"unavailable", "lookup_required"}:
-            reason = str(metadata.get("reason") or "字段能力不可用")
+            reason = str(
+                capability.unavailable_reason or "字段能力不可用"
+            )
             raise UnsupportedQuerySpec(reason)

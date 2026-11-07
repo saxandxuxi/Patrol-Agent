@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..services.llm import LLMError, test_connection
+from ..services import model_catalog
 from ..store import delete_model_config, list_model_configs, save_model_config
 
 
@@ -21,6 +22,16 @@ class ModelPayload(BaseModel):
 @router.get("")
 def get_models() -> list[dict]:
     return list_model_configs()
+
+
+@router.get("/catalog")
+def get_model_catalog() -> dict:
+    return model_catalog.snapshot(auto_refresh=True)
+
+
+@router.post("/catalog/refresh")
+def refresh_model_catalog() -> dict:
+    return model_catalog.refresh_now()
 
 
 @router.post("")

@@ -29,6 +29,23 @@ metrics:
       label: 有效病害总长度
       unit: 米
       allowed_views: [count, distribution, top_groups, trend]
+    # 长度指标只认语义字段 effective_disease_length：原始列 disease_length
+    # 大面积为空（坑槽 44 条全为空），自动生成的 avg_/max_/min_ 会算出 NULL。
+    avg_disease_length:
+      expression: AVG({alias}.effective_disease_length)
+      label: 平均病害长度
+      unit: 米
+      allowed_views: [count, distribution, top_groups, trend]
+    max_disease_length:
+      expression: MAX({alias}.effective_disease_length)
+      label: 最长病害长度
+      unit: 米
+      allowed_views: [count, distribution, top_groups, trend]
+    min_disease_length:
+      expression: MIN({alias}.effective_disease_length)
+      label: 最短病害长度
+      unit: 米
+      allowed_views: [count, distribution, top_groups, trend]
     route_length_km:
       expression: "{route}.route_length_km"
       label: 路线长度

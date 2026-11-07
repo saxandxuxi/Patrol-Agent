@@ -59,27 +59,24 @@ def calculate_series(
         else "percentage_change"
     )
     rows: list[dict[str, Any]] = []
+    undefined_points: list[str] = []
     for index, (label, value) in enumerate(zip(labels, parsed)):
         result_value: Decimal | None = None
         if index:
             previous = parsed[index - 1]
             if operation == "subtract":
                 result_value = value - previous
+            elif previous == 0:
+                undefined_points.append(str(label))
             else:
-                if previous == 0:
-                    return base.failure(
-                        "calculation_zero_denominator",
-                        "百分比变化的上一批次为 0",
-                        label=str(label),
-                        index=index,
-                    )
                 result_value = (
                     (value - previous) / previous * Decimal("100")
                 )
-            result_value = quantize(
-                result_value,
-                precision,
-            )
+            if result_value is not None:
+                result_value = quantize(
+                    result_value,
+                    precision,
+                )
         rows.append(
             {
                 "label": label,
@@ -101,5 +98,6 @@ def calculate_series(
         evidence={
             "precision": precision,
             "point_count": len(rows),
+            "undefined_points": tuple(undefined_points),
         },
     )

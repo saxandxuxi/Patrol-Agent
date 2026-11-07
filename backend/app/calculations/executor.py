@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from decimal import Decimal
 from typing import Any
 
 from .columns import calculate_columns
@@ -8,7 +9,7 @@ from .domain.analysis import analyze_evidence
 from .domain.rendering import render_calculation
 from .evidence import compact_table_evidence, row_with_group_labels
 from .models import CalculationOperand, CalculationRequest
-from .numbers import numeric_value
+from .numbers import as_decimal, numeric_value
 from .registry import default_calculation_registry
 from .scalar import calculate_scalar
 from .serialization import json_value, result_payload
@@ -22,9 +23,48 @@ def dependency_map(
     return {str(key): value for key, value in (results or {}).items()}
 
 
+def _field_tokens(value: Any) -> set[str]:
+    text = "".join(str(value or "").split()).lower()
+    if not text:
+        return set()
+    tail = text.rsplit(".", 1)[-1]
+    return {text, tail} if tail != text else {text}
+
+
 def field_label(dependency: dict[str, Any], field: str) -> str:
     labels = dependency.get("field_labels") or {}
-    return str(labels.get(field) or field)
+    mapped = labels.get(field)
+    if mapped:
+        return str(mapped)
+    wanted = _field_tokens(field)
+    if wanted:
+        for key, column in labels.items():
+            if column and _field_tokens(key) & wanted:
+                return str(column)
+        for column in labels.values():
+            if column and _field_tokens(column) & wanted:
+                return str(column)
+    return str(field)
+
+
+ROW_VIEWS = frozenset(
+    {
+        "distribution",
+        "trend",
+        "list",
+        "detail",
+        "top_groups",
+        "bucket_compare",
+    }
+)
+
+
+def _declared_view(source: dict[str, Any]) -> str:
+    view = str(source.get("view") or "")
+    if view:
+        return view
+    spec = source.get("spec")
+    return str(spec.get("view") or "") if isinstance(spec, dict) else ""
 
 
 def request_from_task(task: dict[str, Any]) -> CalculationRequest | None:
@@ -144,24 +184,44 @@ def execute_calculation(
             )
         )
     elif request.tool == "calculate_columns":
+        source_operands = [
+            item for item in request.operands if item.source
+        ]
         source_nodes = {
             str(item.source.get("node") or "")
-            for item in request.operands
-            if item.source
+            for item in source_operands
         }
-        if len(source_nodes) != 1:
+        source_results = {
+            node_id: results.get(node_id)
+            for node_id in source_nodes
+        }
+        row_nodes = {
+            node_id
+            for node_id, source in source_results.items()
+            if source is not None
+            and (
+                _declared_view(source) in ROW_VIEWS
+                or len(source.get("rows") or []) > 1
+            )
+        }
+        if len(row_nodes) != 1:
             return calculation_failure(
                 calculate_columns(
                     request.operation, [], {}, ""
                 ).failure(
                     "calculation_operand_missing",
-                    "列计算的所有操作数必须来自同一个上游节点",
-                    source_nodes=sorted(source_nodes),
+                    (
+                        "列计算必须且只能有一个多行来源节点；"
+                        f"当前来源为 {sorted(row_nodes) or '空'}。"
+                        "两个多行节点做逐组对比请改用 calculate_series，"
+                        "labels 取分组键字段，values 取另一节点的数值字段。"
+                    ),
+                    source_nodes=sorted(row_nodes),
                 ),
                 task,
                 request,
             )
-        source_node = next(iter(source_nodes))
+        source_node = next(iter(row_nodes))
         source = results.get(source_node)
         if source is None:
             return calculation_failure(
@@ -179,14 +239,52 @@ def execute_calculation(
             for row in source.get("rows") or []
             if isinstance(row, dict)
         ]
-        operands = {
-            item.name: field_label(
-                source,
-                str(item.source.get("field") or ""),
+        operands: dict[str, str] = {}
+        constants: dict[str, Any] = {}
+        numerator_column = ""
+        for item in source_operands:
+            node_id = str(item.source.get("node") or "")
+            field = str(item.source.get("field") or "")
+            if node_id == source_node:
+                column = field_label(source, field)
+                operands[item.name] = column
+                if item.name == "numerator":
+                    numerator_column = column
+                continue
+            upstream = results.get(node_id)
+            if upstream is None:
+                return calculation_failure(
+                    calculate_columns(
+                        request.operation, [], {}, ""
+                    ).failure(
+                        "calculation_operand_missing",
+                        f"缺少常量来源节点 {node_id}",
+                    ),
+                    task,
+                    request,
+                )
+            constants[item.name] = numeric_value(
+                upstream,
+                field_label(upstream, field),
             )
-            for item in request.operands
-            if item.source
-        }
+        if request.operation == "percentage_share" and numerator_column:
+            has_total_operand = any(
+                item.name == "total" for item in request.operands
+            )
+            # 分母要么指向同一列（自己算总和），要么模型压根没给：
+            # 这一列的合计能确定算出来，就不该把整步让给“缺少计算分母”。
+            if (
+                operands.get("total") == numerator_column
+                or not has_total_operand
+            ):
+                total = Decimal("0")
+                for row in rows:
+                    value = as_decimal(row.get(numerator_column))
+                    if value is not None:
+                        total += value
+                constants["total"] = total
+                constants.setdefault("total_source", "sum_of_groups")
+                operands.setdefault("total", numerator_column)
         output_name = request.output.name if request.output else ""
         output_label = (
             request.output.label
@@ -210,6 +308,7 @@ def execute_calculation(
                     else "error"
                 )
             ),
+            constants=constants,
         )
     elif request.tool == "calculate_series":
         result = _calculate_series_request(request, results)
@@ -330,10 +429,26 @@ def _calculate_series_request(
         values_source,
         str(values_operand.source.get("field") or ""),
     )
-    labels = [
-        str(row.get(label_field) or "")
+    label_rows = [
+        row
         for row in labels_source.get("rows") or []
         if isinstance(row, dict)
+    ]
+    label_keys = {
+        str(key) for row in label_rows for key in row
+    }
+    if label_rows and label_field not in label_keys:
+        return calculate_series(
+            request.operation, [], []
+        ).failure(
+            "calculation_operand_missing",
+            f"标签字段 {label_field} 不在上游结果中",
+            requested_field=str(labels_operand.source.get("field") or ""),
+            available_columns=sorted(label_keys),
+        )
+    labels = [
+        str(row.get(label_field) or "")
+        for row in label_rows
     ]
     order_items = (
         labels_source.get("spec", {}).get("order_by") or []
@@ -346,23 +461,43 @@ def _calculate_series_request(
         if isinstance(item, dict)
     ):
         labels.reverse()
-    common_key = (
-        label_field
-        if labels_source is values_source and label_field != value_field
-        else next(
-            (
-                field_label(values_source, field)
-                for field in (values_source.get("field_labels") or {})
-                if field_label(values_source, field)
-                in {
-                    field_label(labels_source, item)
-                    for item in (labels_source.get("field_labels") or {})
-                }
-                and field_label(values_source, field) != value_field
-            ),
-            "",
-        )
+    requested_key = str(labels_operand.source.get("field") or "")
+    value_keys = {
+        str(key)
+        for row in values_source.get("rows") or []
+        if isinstance(row, dict)
+        for key in row
+    }
+    resolved_key = (
+        field_label(values_source, requested_key)
+        if requested_key
+        else ""
     )
+    common_key = (
+        resolved_key
+        if resolved_key
+        and resolved_key in value_keys
+        and resolved_key != value_field
+        else ""
+    )
+    if not common_key:
+        common_key = (
+            label_field
+            if labels_source is values_source and label_field != value_field
+            else next(
+                (
+                    field_label(values_source, field)
+                    for field in (values_source.get("field_labels") or {})
+                    if field_label(values_source, field)
+                    in {
+                        field_label(labels_source, item)
+                        for item in (labels_source.get("field_labels") or {})
+                    }
+                    and field_label(values_source, field) != value_field
+                ),
+                "",
+            )
+        )
     if not common_key:
         return calculate_series(
             request.operation, [], []

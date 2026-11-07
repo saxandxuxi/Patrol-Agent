@@ -1,0 +1,129 @@
+version: 1
+exam_id: disease-time-unit-20261107-04
+generated_at: '2026-11-07T12:40:13.451513+08:00'
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20261129
+code_fingerprint: content:7fd598b125d43671c74ab411c1273be8da248de7d350e9ac58cef3f21c370d61
+fresh_case_ids:
+- disease_oil_every_day_nov_first_five
+- disease_type_by_day_oct_last_week
+- disease_lateral_crack_this_month_weekly
+- disease_q4_to_date_route_total
+- disease_xixiang_three_visits_count
+- disease_two_types_last_month
+- disease_baotou_two_dates_composition
+- disease_monthly_area_this_year
+- disease_recent_five_net_crack_growth
+- disease_last_seven_days_total
+- disease_october_top_route
+- disease_changzhi_oct_nov_compare
+- disease_week_oct19_daily
+- disease_q3_vs_q4_composition
+- disease_hengmingzhu_last_month_types
+old_case_ids:
+- disease_baotou_last_month_total
+- fresh_treatment_priority_suggestion
+- time_day_type_filter_1102_lateral
+- fresh_disease_type_route_hotspot
+- disease_strip_repair_across_routes_window
+cases:
+- id: disease_oil_every_day_nov_first_five
+  category: 病害/时间/日粒度
+  question: 11月1日到11月5日，泛油每天各检出多少处？
+  focus: 检查日粒度分组与逐日数量。
+  source: fresh
+- id: disease_type_by_day_oct_last_week
+  category: 病害/时间/日粒度
+  question: 10月27日到10月31日，每天检出的病害类型分别是哪些？
+  focus: 检查日粒度与病害类型交叉分组。
+  source: fresh
+- id: disease_lateral_crack_this_month_weekly
+  category: 病害/时间/周粒度
+  question: 本月横向裂缝每周的检出量是多少？
+  focus: 检查本月范围内的周粒度分组。
+  source: fresh
+- id: disease_q4_to_date_route_total
+  category: 病害/时间/季度
+  question: 第四季度到现在，各条路的病害总数分别是多少？
+  focus: 检查命名季度范围与路线分布。
+  source: fresh
+- id: disease_xixiang_three_visits_count
+  category: 病害/时间/巡查批次
+  question: 宝安大道西乡段最近三次巡查，每次检出的病害数量分别是多少？
+  focus: 检查路线、最近三次巡查批次与各自数量。
+  source: fresh
+- id: disease_two_types_last_month
+  category: 病害/时间/类型
+  question: 上个月，坑槽和网裂各检出多少处？
+  focus: 检查上月范围与两种病害的数量对比。
+  source: fresh
+- id: disease_baotou_two_dates_composition
+  category: 病害/路段/两次巡查
+  question: 包头-茂名10月23日和10月27日，病害类型构成有什么不同？
+  focus: 检查同路线两个明确日期的类型构成对比。
+  source: fresh
+- id: disease_monthly_area_this_year
+  category: 病害/时间/月粒度
+  question: 今年每个月病害的总面积有什么变化？
+  focus: 检查年度范围、逐月面积指标与变化判断。
+  source: fresh
+- id: disease_recent_five_net_crack_growth
+  category: 病害/时间/巡查批次
+  question: 最近五次巡查，网裂的数量是不是在增加？
+  focus: 检查最近五次巡查批次与网裂数量升降判断。
+  source: fresh
+- id: disease_last_seven_days_total
+  category: 病害/时间/相对日
+  question: 最近7天一共检出多少处病害？
+  focus: 检查相对最近 7 天窗口与总数。
+  source: fresh
+- id: disease_october_top_route
+  category: 病害/时间/路线
+  question: 10月份病害最多的路线是哪条，有多少处？
+  focus: 检查整月范围、路线分布与最高项。
+  source: fresh
+- id: disease_changzhi_oct_nov_compare
+  category: 病害/时间/月比较
+  question: 长沙－芷江高速公路10月和11月的病害数量各是多少？
+  focus: 检查同一路线两个明确月份的数量对比。
+  source: fresh
+- id: disease_week_oct19_daily
+  category: 病害/时间/周粒度
+  question: 10月19日到10月25日这一周，每天检出多少处病害？
+  focus: 检查一周内日粒度分组与逐日总量。
+  source: fresh
+- id: disease_q3_vs_q4_composition
+  category: 病害/时间/季度比较
+  question: 第三季度和第四季度到现在，病害类型构成有什么变化？
+  focus: 检查两个季度范围的类型构成对比。
+  source: fresh
+- id: disease_hengmingzhu_last_month_types
+  category: 病害/路段/月
+  question: 宝安中心--恒明珠上个月检出过哪些病害类型？各多少处？
+  focus: 检查路线、上月范围与病害类型分布。
+  source: fresh
+- id: disease_baotou_last_month_total
+  category: 病害/时间/路线
+  question: 包头-茂名这条路上个月检出了多少处病害？
+  focus: 检查路线与上月范围的数量统计。
+  source: old
+- id: fresh_treatment_priority_suggestion
+  category: 趋势
+  question: 分析过去四次巡检中，哪些路段的裂缝类病害数量呈现连续上升趋势？
+  focus: 验证系统能否识别时间序列上的单调递增趋势，并定位到具体路段和病害类型。
+  source: old
+- id: time_day_type_filter_1102_lateral
+  category: 时间/病害类型
+  question: 2026年11月2日检出多少处横向裂缝？
+  focus: 检查单日范围、指定病害类型和计数。
+  source: old
+- id: fresh_disease_type_route_hotspot
+  category: 病害
+  question: 在G4京港澳高速上，哪种类型的病害出现频率最高？请给出该病害类型的具体数量以及它在整条路线上的主要分布桩号区间。
+  focus: 验证系统能否针对特定路线识别Top1病害类型，并提供该类型的总量及空间分布概况。
+  source: old
+- id: disease_strip_repair_across_routes_window
+  category: 病害/时间/跨路线
+  question: 10月20日到11月4日，条状修补在不同道路上的新增数量怎么分布？
+  focus: 检查明确时间范围、指定病害类型和跨路线分布。
+  source: old

@@ -1,0 +1,226 @@
+version: "1"
+
+# 本文件只生成 trusted=false 的候选证据。代码不得直接据此决定语义或 SQL。
+keyword_rules:
+  trend_hint:
+    any: [趋势, 增加, 减少, 上升, 下降, 变化, 环比, 同比]
+    candidate_type: view_hint
+    candidate_value: trend
+  list_hint:
+    any: [列出, 明细, 清单, 哪些, 哪几个, 具体记录]
+    candidate_type: view_hint
+    candidate_value: list
+  aggregate_hint:
+    any: [总数, 总量, 总记录数, 总数量, 总面积, 平均, 最大值, 最小值, 占比, 比例, 密度, 多少, 数量, 面积, 长度, 次数, 处数]
+    candidate_type: view_hint
+    candidate_value: aggregate
+  comparison_cue:
+    any: [对比, 相比, 变化, 差异, 差多少, 多了, 少了, 分别]
+    candidate_type: comparison_hint
+    candidate_value: compare
+  unknown_type:
+    any: [认不出来, 认不出, 识别不出, 识别不了, 无法识别, 未识别, 未知类型, 类型未知, 没有识别, 没识别]
+    candidate_type: semantic_value
+    candidate_field: unknown_type
+    candidate_value: "true"
+
+field_aliases:
+  week_start_date: week
+  week_start: week
+  week_number: week
+  week_label: week
+  month_start_date: collection_time_month
+  month_start: collection_time_month
+  collection_month: collection_time_month
+  year_start_date: collection_time_year
+  quarter_start_date: collection_time_quarter
+  collection_time_day: day
+  create_time_day: day
+  collection_time_month: month
+  create_time_month: month
+
+regex_rules:
+  - id: named_period
+    pattern: "(?:本|这|当)(?:个)?(?:年度|年|季度|季|月)|(?:上|下)(?:个)?(?:年度|年|季度|季|月)|第[一二三四1-4]季度|今年|去年"
+    candidate_type: time_period
+    candidate_field: collection_time
+    reason: "“本季度/今年/第几季度”是一整个自然周期，必须保留整段（含暂时没有数据的月份），不能截到当天。"
+    repeat_matches: true
+  - id: date_range
+    pattern: "(?:\\d{4}年)?\\d{1,2}月\\d{1,2}日\\s*(?:到|至|~|—|－|-)\\s*(?:\\d{4}年)?\\d{1,2}月\\d{1,2}日"
+    candidate_type: time_range
+    candidate_field: collection_time
+    reason: "用户原话里的连续时间段（A 到 B）必须整段保留；只有用“和、与、跟”并列的日期才算两次独立对照，二者不能互相替代。"
+  - id: explicit_date
+    pattern: "(?:\\d{4}年)?\\d{1,2}月\\d{1,2}日"
+    candidate_type: time_value
+    candidate_field: collection_time
+    reason: "用户原话中的明确日期候选，是否用于单日过滤或两次对比由 LLM 判断。"
+    repeat_matches: true
+  - id: trend_granularity_day
+    pattern: "(?:按(?:天|日)|每(?:一)?天|每日|逐日|逐天|各天|日趋势|日粒度)"
+    candidate_type: time_granularity
+    candidate_field: day
+    requires_field: true
+    reason: "用户要求按天统计时，趋势或分组维度必须落到日粒度。"
+  - id: trend_granularity_week
+    pattern: "(?:按周|每周|逐周|各周|周趋势|周粒度|哪一周)"
+    candidate_type: time_granularity
+    candidate_field: week
+    requires_field: true
+    reason: "用户要求按周统计时，趋势或分组维度必须落到周粒度。"
+  - id: trend_granularity_month
+    pattern: "(?:按月|每月|逐月|月度(?:趋势)?|各月|每个月|各月份)"
+    candidate_type: time_granularity
+    candidate_field: month
+    requires_field: true
+    reason: "用户要求按月统计时，趋势或分组维度必须落到月粒度。"
+  - id: trend_granularity_quarter
+    pattern: "(?:按季度|按季|各季度|每季度|逐季)"
+    candidate_type: time_granularity
+    candidate_field: collection_time_quarter
+    requires_field: true
+    reason: "用户要求按季度统计时，分组维度必须使用季度字段。"
+  - id: trend_granularity_year
+    pattern: "(?:按年|各年|每年|逐年|年度趋势)"
+    candidate_type: time_granularity
+    candidate_field: collection_time_year
+    requires_field: true
+    reason: "用户要求按年统计时，分组维度必须使用年份字段。"
+  - id: group_by_confidence
+    pattern: "(?:按|各|每(?:条|个)?)[^，。；]{0,8}置信度|置信度(?:区间)?分布"
+    candidate_type: group_by
+    candidate_field: confidence
+    candidate_value: confidence
+  - id: group_by_disease_type
+    pattern: "(?:按|各|每(?:种|个)?|不同)[^，。；]{0,12}病害类型|病害类型(?:分布|分组)|类型分布|每种病害"
+    candidate_type: group_by
+    candidate_field: problem_type_name
+    candidate_value: problem_type_name
+  - id: group_by_route
+    pattern: "(?:按|各|每(?:条|个)?|不同)[^，。；]{0,12}(?:路线|道路|线路)|(?:路线|道路|线路)(?:分布|分组)"
+    candidate_type: group_by
+    candidate_field: route_name
+    candidate_value: route_name
+  - id: group_by_admin_level
+    pattern: "(?:按|各|每(?:个)?|不同)[^，。；]{0,8}(?:行政等级|行政级别|道路等级|路线等级)|(?:行政等级|行政级别|道路等级|路线等级)(?:分布|分组)"
+    candidate_type: group_by
+    candidate_field: route_level
+    candidate_value: route_level
+    requires_field: true
+    reason: "“行政等级/行政级别/道路等级”在病害主体下的分组字段是 route_level（国道/省道/县道/乡道/村道），需要关联路线台账。"
+  - id: group_by_month
+    pattern: "(?:按|各|每(?:个|月)?)[^，。；]{0,8}月|各月|按月"
+    candidate_type: group_by
+    candidate_field: collection_time_month
+    candidate_value: month
+  - id: group_by_quarter
+    pattern: "(?:按|各|每(?:个)?)[^，。；]{0,8}季|按季|各季度"
+    candidate_type: group_by
+    candidate_field: collection_time_quarter
+    candidate_value: quarter
+  - id: group_by_device
+    pattern: "(?:按|各|每(?:台|个)?)[^，。；]{0,8}设备|设备分布"
+    candidate_type: group_by
+    candidate_field: equipment_id
+    candidate_value: equipment_id
+  - id: group_by_direction
+    pattern: "(?:按|各)[^，。；]{0,8}(?:上下行|方向)|方向分布"
+    candidate_type: group_by
+    candidate_field: up_or_down
+    candidate_value: up_or_down
+  - id: group_by_patrol_status
+    pattern: "(?:按|各)[^，。；]{0,8}(?:巡查状态|任务状态)|状态分布"
+    candidate_type: group_by
+    candidate_field: patrol_status
+    candidate_value: patrol_status
+  - id: damage_severity
+    pattern: "(?:损坏程度|病害等级|严重(?:程度|等级|病害)?)"
+    candidate_type: semantic_field
+    candidate_field: history_damage_interval
+    candidate_value: damage_severity
+    discouraged_fields: [damage_type]
+    requires_field: true
+    reason: "巡检库的损坏程度/严重等级物理字段是 history_damage_interval；damage_type 是历史遗留列名，不是病害类型。"
+  - id: lane_ordinal
+    pattern: "(第[一二三四五六七八九十两0-9]+车道)"
+    group: 1
+    candidate_type: field_value
+    candidate_field: lane_index
+    requires_field: true
+    value_transform: chinese_integer
+    reason: "中文序数 + 车道是车道字段的候选值，仍需结合字段能力校验。"
+  - id: lane_general
+    pattern: "(?:第?[一二三四五六七八九十两0-9]+车道|按车道|各车道|车道分布)"
+    candidate_type: semantic_field
+    candidate_field: lane_index
+    candidate_value: lane_index
+    requires_field: true
+  - id: time_day
+    pattern: "(?:\\d{4}年)?\\d{1,2}月\\d{1,2}日|今天|昨天|当日|按日|每(?:一)?天|每日|逐天|各天"
+    candidate_type: time_expression
+    candidate_field: collection_time_day
+    candidate_value: day
+  - id: time_week
+    pattern: "(?:最近|过去)?\\d+周|本周|上周|每周|按周|周趋势|第\\d+周"
+    candidate_type: time_expression
+    candidate_field: week
+    candidate_value: week
+  - id: time_month
+    pattern: "\\d{4}年\\d{1,2}月|本月|上月|每月|按月|各月|月份"
+    candidate_type: time_expression
+    candidate_field: collection_time_month
+    candidate_value: month
+  - id: time_quarter
+    pattern: "第?[一二三四1-4]季度|\\d{4}[-年]?Q[1-4]|按季|各季度"
+    candidate_type: time_expression
+    candidate_field: collection_time_quarter
+    candidate_value: quarter
+  - id: time_year
+    pattern: "\\d{4}年|今年|去年|年度|按年|各年|每年"
+    candidate_type: time_expression
+    candidate_field: collection_time_year
+    candidate_value: year
+  - id: route_code
+    pattern: "[GS]\\d{1,3}[^，。；\\s]{1,20}(?:高速公路|高速)"
+    candidate_type: business_entity
+    candidate_field: route_name
+    reason: "路线编号+高速名称是路线实体候选。"
+  - id: device_code
+    pattern: "DEV-\\d+"
+    candidate_type: business_identifier
+    candidate_field: device_code
+    reason: "符合已登记的设备编号形状。"
+  - id: task_number
+    pattern: "(?:XCBH|XJJL)\\d{8,}"
+    candidate_type: business_identifier
+    candidate_field: task_number
+    reason: "符合巡查/巡检任务编号形状。"
+  - id: pile_interval
+    pattern: "K?\\d+(?:\\+\\d+)?\\s*(?:至|到|~|-)\\s*K?\\d+(?:\\+\\d+)?"
+    candidate_type: field_range
+    candidate_field: pile_number
+    reason: "桩号区间候选，数值边界应由受控桩号解析器换算后再进入 SQL。"
+
+metric_rules:
+  metric_count:
+    pattern: "(?:多少|数量|总数|总量|处数|次数|条数|计数)"
+    metric: count
+  metric_average:
+    pattern: "平均"
+    metric: average_area
+  metric_total_area:
+    pattern: "(?:总面积|面积总和)"
+    metric: total_area
+  metric_area:
+    pattern: "面积"
+    metric: area
+  metric_length:
+    pattern: "长度"
+    metric: length
+  metric_density:
+    pattern: "密度"
+    metric: density
+  metric_ratio:
+    pattern: "(?:占比|比例|百分比)"
+    metric: ratio

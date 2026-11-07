@@ -1,0 +1,194 @@
+{
+  "exam_id": "disease-type-unit-20261107-03",
+  "code_fingerprint": "content:fb3b22ddc164c42ba003d11e4e832fba230ef71bd07d29511b71a28aea0a23f5",
+  "passed_fresh": 13,
+  "total_fresh": 15,
+  "passed_old": 5,
+  "total_old": 5,
+  "passed_total": 18,
+  "total": 20,
+  "promoted": true,
+  "promotion_reason": "达到 15 新题 80% 和 5 旧题 80% 晋级线",
+  "results": [
+    {
+      "id": "type3_hengmingzhu_types",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了路线'宝安中心--恒明珠'，并按病害类型分组统计了数量。SQL逻辑正确（JOIN route表过滤），结果包含14种病害类型及其具体数量，且明确说明共14行、未截断，完整覆盖了用户关于'都有哪些病害类型'和'各多少处'的询问。",
+      "answer": "“q1. 按病害类型(problem_type_name)分组，统计路线名称(route_name)为'宝”查询完成，共 14 行；按排序前列：病害类型 纵向裂缝，数量 274；病害类型 标牌绿化遮挡，数量 165；病害类型 标线缺损，数量 86；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "type3_changsha_ring_main",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了用户意图，针对'长沙绕城高速'这一实体，统计了各'病害类型'的数量。SQL逻辑正确（按路线ID过滤，按病害类型分组计数并降序排列）。最终回答明确指出了主要病害类型为'条状修补'（206处）、'绿化缺失'（43处）和'抛洒物'（43处），并提供了完整的分布列表。结果非空，且回答了'哪几类为主'及'各多少处'两个核心问题。",
+      "answer": "“q1. 统计长沙绕城高速各病害类型的数量分布，按数量降序排列”查询完成，共 23 行；按排序前列：病害类型 条状修补，数量 206；病害类型 绿化缺失，数量 43；病害类型 抛洒物，数量 43；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "type3_xuchang_guangzhou_types",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "partial",
+      "failure_layer": "verification",
+      "reason": "用户要求列出'许昌-广州'路上检出的所有病害类型以检查清单完整性。系统执行SQL仅返回1种病害类型（防眩板缺损），且total_count为null，无法证明这是该路线下的全部病害类型还是仅命中了部分数据。在缺乏总数验证或明确说明数据确实只有这一类的情况下，直接给出单一结果无法满足'检查类型清单完整性'的考察重点，存在漏报风险，属于部分回答。",
+      "answer": "“q1. 在路线名称为'许昌-广州'的条件下，按病害类型中文名(problem_type_name)分组，”病害类型 防眩板缺损。"
+    },
+    {
+      "id": "type3_updown_type_counts",
+      "source": "fresh",
+      "ok": false,
+      "verdict": "wrong_metric",
+      "failure_layer": "value",
+      "reason": "用户询问的是'多少种病害类型'（即不同病害类型的去重计数，COUNT(DISTINCT problem_type_name)），但系统执行的SQL是'SELECT COUNT(*) ... WHERE up_or_down = ...'，统计的是病害记录的总条数（实例数量），而非类型的种类数。SQL中虽然定义了problem_type_name字段但未在聚合中使用DISTINCT，导致将21413处病害记录误报为21413种类型，严重偏离业务含义。",
+      "answer": "类型数量差值 = 7979（21413 - 13434）。"
+    },
+    {
+      "id": "type3_baotou_updown_diff",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统识别到用户输入的路线名称“包头-茂名高速公路”在数据库中不存在，并提供了相近的候选项“包头-茂名”，明确拒绝猜测具体路线，符合“如果问题本身缺少必要的业务定义...可以判为 correct_unsupported”的规则。",
+      "answer": "该查询无法执行：没有找到路线“包头-茂名高速公路”。名字相近的路线有：包头-茂名，请确认是哪一条。"
+    },
+    {
+      "id": "type3_lane_first_types",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "业务能力文档明确说明'区分车道的病害数量查询及数量统计（目前系统未更新车道分布）'以及'指定车道病害类型与数量（暂未更新）'。系统识别到该能力缺失，在最终回答中明确说明了'当前数据能力不支持：业务能力文档声明车道分布尚未更新'，且没有进行猜测或返回错误结果，符合判定规则中关于能力缺失时明确说明并停止猜测的要求。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：业务能力文档声明车道分布尚未更新，不能把 lane_index 当作可靠统计依据。请换一种说法再问，或切换模型重试。"
+    },
+    {
+      "id": "type3_area_under_one_sqm",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确执行了两个查询：首先统计面积小于1平方米的病害总数为27888处；其次按病害类型分组统计分布，指出主要类型为条状修补（21433处）。SQL逻辑正确使用了 area < 1 过滤条件，结果非空且与最终回答一致，完整覆盖了用户关于数量和主要类型的提问。",
+      "answer": "共 27888处；“q2. 按病害类型分组，统计面积小于1平方米的病害数量分布，找出主要类型”查询完成，共 10 行；按排序前列：病害类型 条状修补，数量 21433；病害类型 横向裂缝，数量 1401；病害类型 纵向裂缝，数量 1136；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "type3_longitudinal_over_three",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了用户意图，针对'纵向裂缝'且'长度超过3米'的条件进行了过滤。SQL中使用了 problem_type_name = '纵向裂缝' 和 effective_disease_length > 3 进行筛选，并计算了 COUNT(*) 和 SUM(effective_disease_length)。最终回答明确给出了数量（473处）和总长度（2264.49米），单位正确，逻辑与问题要求完全一致。",
+      "answer": "数量 473处；有效病害总长度 2264.4900000000米。"
+    },
+    {
+      "id": "type3_transverse_avg_length",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确指出当前数据能力不支持对病害查询使用通用 'avg' 指标，并列举了可用指标（如 avg_disease_length）。由于缺乏直接计算‘横向裂缝平均长度’的原子指标或聚合能力，且系统未进行猜测，符合 correct_unsupported 判定规则。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：disease 查询不支持指标：avg；可用指标：count、total_area、average_area、sum_effective_disease_length、route_length_km、avg_area、avg_area_height、avg_area_width、avg_disease_length、avg_lane_count、avg_lane_index、avg_luge_length、avg_meter_total、avg_pile_distance、avg_pile_meter、avg_section_version、max_area、max_area_height、max_area_width、max_disease_length、max_lane_count、max_lane_index、max_luge_length、max_meter_total。请换一种说法再问，或切换模型重试。"
+    },
+    {
+      "id": "type3_network_area_top_type",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "用户询问全库范围内总面积排第一的病害类型。系统执行了按 problem_type_name 分组统计 area 总和并降序取 Top 1 的 SQL。SQL 逻辑正确（过滤 del_flag=0，处理 NULL，SUM(area)），结果返回“标牌绿化遮挡”且面积为 564938.98。最终回答明确给出了病害类型和面积，覆盖了用户问题的核心考察点（总面积Top1）。",
+      "answer": "“q1. 按病害类型（problem_type_name）分组，统计各类型的总面积（total_area）”查询完成，共 1 行；按排序前列：病害类型 标牌绿化遮挡，总面积 564938.98；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "type3_q3_types",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了时间范围（2026年7月1日至9月30日），按病害类型分组统计了数量。SQL逻辑正确，结果包含9种病害类型及其具体数量，且明确说明共9行、未截断，完整回答了用户关于‘都有哪些’及‘各多少处’的问题。",
+      "answer": "“q1. 按 problem_type_name 分组，统计2026-07-01至2026-09-30期间”查询完成，共 9 行；按排序前列：病害类型 纵向裂缝，数量 501；病害类型 标牌绿化遮挡，数量 277；病害类型 块状修补，数量 160；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "type3_rarest_types",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确理解了'数量最少的病害类型'这一极值查询需求。SQL使用了GROUP BY problem_type_name和COUNT(*)，并按COUNT(*) ASC排序，LIMIT 10获取了数量最少的10种类型。最终回答列出了具体的病害类型及其数量（如冒浆1处），并说明了完整表格需在工作台查看，符合明细截断时的展示规范。考察重点'升序极值是否带排序'已满足。",
+      "answer": "“q1. 按病害类型中文名(problem_type_name)分组，统计每种类型的病害数量(count)”查询完成，共 10 行；按排序前列：病害类型 冒浆，数量 1；病害类型 错台，数量 2；病害类型 接缝料损坏，数量 3；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "type3_fanyou_vs_tiaozhuang",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "用户询问全库中'泛油'和'条状修补'的病害处数。系统分别执行了两条SQL查询，针对problem_type为'泛油'和'条状修补'的记录进行COUNT统计。SQL逻辑正确（关联ai_problem和ai_problem_base，过滤del_flag=0），结果非空（泛油95处，条状修补25270处）。最终回答明确给出了两种病害的具体处数，完全覆盖了用户问题中的实体和指标要求。",
+      "answer": "病害类型 泛油处；处数 95处；总面积 309.94㎡；平均面积 3.2625㎡；最大面积 97.91㎡；病害类型 条状修补处；处数 25270处；总面积 17965.83㎡；平均面积 0.7110㎡；最大面积 21.58㎡。"
+    },
+    {
+      "id": "type3_route_level_types",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确执行了两次查询，分别统计了国道（level='0'）和省道（level='1'）的病害类型分布。SQL逻辑正确，关联了路线表并过滤了行政等级。最终回答基于查询结果，准确指出了两者共有的主要病害（条状修补）以及显著差异（国道以纵向裂缝为主，省道以横向裂缝为主，且省道存在特有的冒浆记录）。回答还主动说明了未计算密度的局限性，符合业务查询规范。",
+      "answer": "“q1. 统计国道上各病害类型的数量分布，按 problem_type_name 分组”查询完成，共 36 行；按排序前列：病害类型 条状修补，数量 5611；病害类型 纵向裂缝，数量 968；病害类型 防眩板缺损，数量 616；完整表格请在结果工作台查看；“q2. 统计省道上各病害类型的数量分布，按 problem_type_name 分组”查询完成，共 36 行；按排序前列：病害类型 条状修补，数量 19659；病害类型 横向裂缝，数量 1084；病害类型 防眩板缺损，数量 692；完整表格请在结果工作台查看；国道与省道的病害分布均呈现高度集中特征，“条状修补”在两者中均为占比最高的病害类型。\n\n依据证据，国道上“条状修补”数量为5611，远超第二位的“纵向裂缝”（968）；省道上“条状修补”数量为19659，同样远高于第二位的“横向裂缝”（1084）。这表明路面修补类问题是两条道路等级共同的主要养护焦点。\n\n在分布差异上，存在部分特有或显著不同的类型。省道出现了国道证据中未列出的“冒浆”（数量1），可视为省道在此数据集中的特有记录。此外，虽然两者都有裂缝类病害，但国道以“纵向裂缝”（968）为主，而省道以“横向裂缝”（1084）为主，且省道横向裂缝数量高于其纵向裂缝（309），这与国道的排序相反，显示出受力或结构响应的潜在差异。\n\n局限性在于：本次分析仅基于病害数量的绝对值对比，未结合路线长度计算病害密度，因此无法排除因里程差异导致的总量偏差；“健康状况”无正式公式，此处仅以高频病害类型作为代理指标进行描述。"
+    },
+    {
+      "id": "type3_recent_two_weeks",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了'最近两周'的时间范围（2026-10-24至2026-11-07），并按病害类型进行了分组统计。SQL逻辑正确，结果包含36种病害类型及其数量，且最终回答明确说明了命中总数（36行）并展示了主要数据，符合用户关于'有哪些类型'及'各多少处'的查询需求。",
+      "answer": "“q1. 按病害类型中文名(problem_type_name)分组，统计2026-10-24至2026-”查询完成，共 36 行；按排序前列：病害类型 条状修补，数量 25254；病害类型 横向裂缝，数量 1322；病害类型 防眩板缺损，数量 1308；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "oil_severity_route",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确指出'历史损坏程度字段当前全部为空'，导致无法按严重程度筛选或分组来回答'哪个道路的泛油问题更严重'。根据规则，当数据库确实缺少数据能力且明确说明具体缺失原因时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：历史损坏程度字段当前全部为空，无法按严重程度筛选或分组。请换一种说法再问，或切换模型重试。"
+    },
+    {
+      "id": "time_day_patrol_tasks_october",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了用户关于'2026年10月每天巡检任务次数'的查询意图。SQL使用了正确的日期范围过滤（>=2026-10-01 且 <2026-11-01）和按天分组（GROUP BY DATE(create_time)）。最终回答列出了有数据的7天的具体数量，并明确指出了其余24天没有匹配记录（数量为0），完整覆盖了该月份的所有天数，符合'每天分别执行了多少次'的要求，且未进行错误猜测。",
+      "answer": "“q1. 按天统计2026年10月（>=2026-10-01 且 <2026-11-01）的巡检任务数量，”查询完成，共 7 行；按排序前列：日期 2026-10-23，数量 14；日期 2026-10-26，数量 4；日期 2026-10-27，数量 6；查询范围内以下时间桶没有匹配记录：2026-10-01、2026-10-02、2026-10-03、2026-10-04、2026-10-05、2026-10-06、2026-10-07、2026-10-08、2026-10-09、2026-10-10、2026-10-11、2026-10-12、2026-10-13、2026-10-14、2026-10-15、2026-10-16、2026-10-17、2026-10-18、2026-10-19、2026-10-20、2026-10-21、2026-10-22、2026-10-24、2026-10-25；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "fresh_task_device_recent_detail",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统尝试查询设备DEV-7712的最近一次巡检任务，SQL执行返回0条记录，表明数据库中不存在该设备的巡检任务数据。由于无法获取patrol_id，后续依赖该ID统计病害数量和分布的子查询被正确阻断并标记为unsupported。最终回答如实反映了数据缺失情况，未进行猜测，符合‘数据库确实缺少数据能力时明确说明’的规则。",
+      "answer": "“q_patrol_latest. 查找设备DEV-7712执行的最近一次巡检任务的patrol_id”返回 0 条，明细已生成，请在结果工作台查看。；无法安全执行依赖查询：输入依赖 q_patrol_latest.patrol_id 没有可传递的值。"
+    },
+    {
+      "id": "type_changzhi_last_month_types",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了路线（长沙－芷江高速公路）和时间范围（上个月，解析为2026年10月），并按病害类型分组统计了数量。SQL逻辑正确，结果非空且完整展示了所有25种病害类型及其数量，未发生截断。最终回答清晰列出了主要病害及数量，并提示完整表格可在结果工作台查看，符合用户关于‘哪些病害类型’和‘各多少处’的查询需求。",
+      "answer": "“q1. 按 problem_type_name 分组，统计2026年10月1日至2026年10月31日期”查询完成，共 25 行；按排序前列：病害类型 条状修补，数量 9733；病害类型 抛洒物，数量 468；病害类型 防眩板缺损，数量 449；完整表格请在结果工作台查看。"
+    },
+    {
+      "id": "time_week_range_1023_1031",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了时间范围（2026-10-23至2026-10-31），并按周粒度进行了分组统计。SQL使用了正确的日期格式化函数生成周标识，结果返回了两个跨越该时间段的周（W43和W44）及其对应的病害数量。最终回答清晰列出了各周的统计数据，符合用户关于‘各周检出的病害数量’的查询需求，且未出现截断或数据缺失导致的推断错误。",
+      "answer": "“q1. 在2026-10-23至2026-10-31期间，按周分组统计病害数量”查询完成，共 2 行；按排序前列：周 2026-W43，数量 405；周 2026-W44，数量 18677；完整表格请在结果工作台查看。"
+    }
+  ]
+}

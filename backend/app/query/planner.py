@@ -25,7 +25,12 @@ def build_query_plan(
         if spec.id in seen:
             raise QuerySpecError(f"查询节点 id 重复：{spec.id}")
         seen.add(spec.id)
-        issues = validate_query_spec(spec, schema, OutputProjection(fields=()))
+        issues = validate_query_spec(
+            spec,
+            schema,
+            OutputProjection(fields=()),
+            node_type=types_by_node.get(spec.id, "query_data"),
+        )
         if issues:
             raise QuerySpecError("；".join(item.message for item in issues))
         nodes.append(

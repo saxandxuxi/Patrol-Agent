@@ -93,6 +93,29 @@ class ValueAnalysisTests(unittest.TestCase):
         self.assertEqual(value.display_value, "长沙－芷江高速公路")
         self.assertEqual(value.resolver, "route_dictionary")
 
+    @patch("app.query.values.route_resolver._resolve_route")
+    def test_multiple_routes_resolve_each_value(self, resolve_route):
+        resolve_route.side_effect = lambda text: {
+            "id": f"id-{text}",
+            "short_name": text,
+        }
+
+        value = resolve_value(
+            "route_name",
+            "in",
+            ["S20外环高速", "G60沪昆高速"],
+            "展示两条高速的月度病害趋势",
+            "mysql",
+        )
+
+        self.assertEqual(
+            value.storage_value,
+            ["S20外环高速", "G60沪昆高速"],
+        )
+        self.assertEqual(value.display_value, "S20外环高速、G60沪昆高速")
+        self.assertEqual(value.op, "in")
+        self.assertEqual(resolve_route.call_count, 2)
+
     def test_damage_type_resolution_preserves_display_and_source(self):
         value = resolve_value(
             "problem_type_name",

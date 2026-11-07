@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import re
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -166,6 +167,21 @@ def _eligibility_issues(
     return issues
 
 
+def _bound_sql_issues(spec: QuerySpec, sql: str) -> list[str]:
+    issues: list[str] = []
+    for binding in spec.filters:
+        field = str(binding.field).rsplit(".", 1)[-1]
+        if field not in {"create_time", "collection_time"}:
+            continue
+        if re.search(
+            rf"(?:\b[A-Za-z_]\w*\.)?`?{re.escape(field)}`?\b",
+            sql,
+            re.IGNORECASE,
+        ) is None:
+            issues.append(f"missing_bound_column:{field}")
+    return issues
+
+
 def resolve_templates(
     spec: QuerySpec,
     schema: PhysicalSchemaView,
@@ -201,6 +217,12 @@ def resolve_templates(
                 if not sql:
                     rejections.append(
                         f"preset:{contract.id}:unbound:{reason or 'unknown'}"
+                    )
+                    continue
+                sql_issues = _bound_sql_issues(spec, sql)
+                if sql_issues:
+                    rejections.append(
+                        f"preset:{contract.id}:" + ";".join(sql_issues)
                     )
                     continue
             token = uuid.uuid4().hex

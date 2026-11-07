@@ -4419,7 +4419,16 @@ def _maybe_single_turn_compiler(
                 "你选择的查询口径已经对不上，请重新发送问题后再选择。系统没有擅自改用其他口径。",
             )
         choices = {picked.node_id: picked.candidate_id}
-        overrides = {picked.node_id: dict(slot_values or {})}
+        for candidate in pending.candidate_set.candidates:
+            choices.setdefault(candidate.node_id, candidate.candidate_id)
+        overrides = {
+            node_id: (
+                dict(slot_values or {})
+                if node_id == picked.node_id
+                else {}
+            )
+            for node_id in choices
+        }
         try:
             answer = single_turn_service.confirm_single_turn(
                 choose_token,

@@ -52,6 +52,8 @@ field_overrides:
         lng:
           label: 经度
       ai_problem:
+        luge_name:
+          label: 路格里程区段
         problem_url:
           label: 病害图片
         preview_url:

@@ -11,3 +11,18 @@ enums:
         label: 上行
       "2":
         label: 下行
+  basic_facilities_routes.level:
+    table: basic_facilities_routes
+    column: level
+    label: 行政等级
+    values:
+      "0":
+        label: 国道
+      "1":
+        label: 省道
+      "2":
+        label: 县道
+      "3":
+        label: 乡道
+      "4":
+        label: 村道

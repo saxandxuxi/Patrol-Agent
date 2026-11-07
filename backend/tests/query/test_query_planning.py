@@ -2,12 +2,742 @@ import unittest
 from unittest.mock import patch
 
 from app.query.analysis import analyze_single_turn
-from app.query.contracts import QuerySpecError, ValueBinding
+from app.query.capability_registry import CapabilityRegistry
+from app.query.contracts import (
+    QuerySpecError,
+    QuerySpecUnsupported,
+    ValueBinding,
+)
 from app.query.fields import FieldReachSet, PhysicalSchemaView
 from app.services.plan_contract import build_step_contract
 
 
 class QueryPlanningTests(unittest.TestCase):
+    @patch("app.query.analysis.chat_json")
+    def test_day_trend_requires_calendar_day_dimension(self, chat_json):
+        invalid = {
+            "final_goal": "按天统计病害趋势",
+            "intent_family": "trend",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "按天统计病害数量",
+                    "subject": "disease",
+                    "view": "trend",
+                    "metrics": ["count"],
+                    "dimensions": ["collection_time"],
+                    "filters": [],
+                    "output_projection": ["collection_time", "count"],
+                    "order_by": [{"field": "collection_time", "direction": "asc"}],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        corrected = {
+            **invalid,
+            "views": [
+                {
+                    **invalid["views"][0],
+                    "dimensions": ["day"],
+                    "output_projection": ["day", "count"],
+                    "order_by": [{"field": "day", "direction": "asc"}],
+                }
+            ],
+        }
+        chat_json.side_effect = [invalid, corrected]
+
+        plan = analyze_single_turn(
+            "按天统计2026年10月27日至11月4日的病害趋势",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+            registry=CapabilityRegistry.load(),
+        )
+
+        self.assertEqual(chat_json.call_count, 2)
+        self.assertEqual(plan.nodes[0].spec.dimensions, ("day",))
+
+    @patch("app.query.analysis.chat_json")
+    def test_trend_granularity_field_is_not_required_on_post_calc(self, chat_json):
+        chat_json.return_value = {
+            "final_goal": "按周统计病害趋势",
+            "intent_family": "trend",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "按周统计病害数量",
+                    "subject": "disease",
+                    "view": "trend",
+                    "metrics": ["count"],
+                    "dimensions": ["week"],
+                    "filters": [],
+                    "output_projection": ["week", "count"],
+                    "order_by": [{"field": "week", "direction": "asc"}],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "p1",
+                    "action": "post_calc",
+                    "question": "分析周趋势",
+                    "subject": "disease",
+                    "view": "trend",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["analysis_only"],
+                    "depends_on": ["q1"],
+                    "inputs": [],
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "2026年8月按周统计病害数量",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+            registry=CapabilityRegistry.load(),
+        )
+
+        self.assertEqual(len(plan.nodes), 2)
+        self.assertEqual(plan.nodes[0].spec.dimensions, ("week",))
+
+    @patch("app.query.analysis.chat_json")
+    def test_two_period_comparison_expands_all_declared_metrics(self, chat_json):
+        chat_json.return_value = {
+            "final_goal": "比较两个周期的数量和面积",
+            "intent_family": "analysis",
+            "views": [
+                {
+                    "id": "oct",
+                    "action": "query_data",
+                    "question": "统计10月数量和总面积",
+                    "subject": "disease",
+                    "view": "count",
+                    "metrics": ["count", "total_area"],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "nov",
+                    "action": "query_data",
+                    "question": "统计11月数量和总面积",
+                    "subject": "disease",
+                    "view": "count",
+                    "metrics": ["count", "total_area"],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "compare_count",
+                    "action": "post_calc",
+                    "question": "比较数量变化",
+                    "subject": "disease",
+                    "view": "data",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["multi_metric_comparison"],
+                    "depends_on": ["oct", "nov"],
+                    "inputs": [],
+                    "calculation": {
+                        "tool": "calculate_scalar",
+                        "operation": "percentage_change",
+                        "operands": [
+                            {
+                                "name": "old",
+                                "source": {"node": "oct", "field": "count"},
+                            },
+                            {
+                                "name": "new",
+                                "source": {"node": "nov", "field": "count"},
+                            },
+                        ],
+                        "output": {
+                            "name": "count_change_pct",
+                            "label": "数量变化百分比",
+                            "unit": "%",
+                        },
+                    },
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "长沙－芷江高速公路2026年10月和11月的病害数量及总面积分别是多少？请比较变化。",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+            registry=CapabilityRegistry.load(),
+        )
+
+        post_calcs = [
+            node for node in plan.nodes if node.node_type == "post_calc"
+        ]
+        self.assertEqual(len(post_calcs), 2)
+        sources = {
+            operand.source["field"]
+            for node in post_calcs
+            for operand in node.spec.calculation.operands
+            if operand.source
+        }
+        self.assertEqual(sources, {"count", "total_area"})
+
+    @patch("app.query.analysis.chat_json")
+    def test_list_view_with_metrics_without_dimensions_is_aggregate(
+        self,
+        chat_json,
+    ):
+        chat_json.return_value = {
+            "final_goal": "统计单月数量和面积",
+            "intent_family": "count",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "统计10月数量和总面积",
+                    "subject": "disease",
+                    "view": "list",
+                    "metrics": ["count", "total_area"],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "2026年10月检出多少处病害、总面积是多少",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+        )
+
+        self.assertEqual(plan.nodes[0].spec.view, "count")
+
+    @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
+    @patch("app.query.analysis.chat_json")
+    def test_invalid_total_post_calc_is_dropped_when_total_node_exists(
+        self,
+        chat_json,
+        _audit,
+    ):
+        chat_json.return_value = {
+            "final_goal": "逐月任务和总数",
+            "intent_family": "analysis",
+            "views": [
+                {
+                    "id": "months",
+                    "action": "query_data",
+                    "question": "逐月任务数",
+                    "subject": "patrol",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["month"],
+                    "filters": [],
+                    "output_projection": ["month", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "total",
+                    "action": "query_data",
+                    "question": "总任务数",
+                    "subject": "patrol",
+                    "view": "count",
+                    "metrics": ["count"],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "bad_total",
+                    "action": "post_calc",
+                    "question": "计算总数",
+                    "subject": "patrol",
+                    "view": "count",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": ["months"],
+                    "inputs": [],
+                    "calculation": {
+                        "tool": "calculate_scalar",
+                        "operation": "add",
+                        "operands": [
+                            {
+                                "name": "values",
+                                "source": {
+                                    "node": "months",
+                                    "field": "count",
+                                },
+                            }
+                        ],
+                    },
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "2026年6月到11月各月巡检任务数和总次数",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+            registry=CapabilityRegistry.load(),
+            subject="patrol",
+        )
+
+        self.assertEqual(
+            [node.id for node in plan.nodes],
+            ["months", "total"],
+        )
+
+    @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
+    @patch("app.query.analysis.chat_json")
+    def test_invalid_total_post_calc_is_replaced_with_count_aggregate(
+        self,
+        chat_json,
+        _audit,
+    ):
+        chat_json.return_value = {
+            "final_goal": "逐月任务和总数",
+            "intent_family": "analysis",
+            "views": [
+                {
+                    "id": "months",
+                    "action": "query_data",
+                    "question": "逐月任务数",
+                    "subject": "patrol",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["month"],
+                    "filters": [],
+                    "output_projection": ["month", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "bad_total",
+                    "action": "post_calc",
+                    "question": "计算总数",
+                    "subject": "patrol",
+                    "view": "count",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [],
+                    "depends_on": ["months"],
+                    "inputs": [],
+                    "calculation": {
+                        "tool": "calculate_scalar",
+                        "operation": "add",
+                        "operands": [
+                            {
+                                "name": "left",
+                                "source": {
+                                    "node": "months",
+                                    "field": "count",
+                                },
+                            }
+                        ],
+                    },
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "2026年6月到11月各月巡检任务数和总次数",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+            registry=CapabilityRegistry.load(),
+            subject="patrol",
+        )
+
+        self.assertEqual(len(plan.nodes), 2)
+        self.assertEqual(plan.nodes[-1].spec.view, "count")
+        self.assertEqual(plan.nodes[-1].spec.metrics, ("count",))
+        self.assertEqual(
+            plan.nodes[-1].spec.filters,
+            plan.nodes[0].spec.filters,
+        )
+
+    @patch("app.query.analysis.chat_json")
+    def test_two_explicit_dates_require_separate_data_nodes(self, chat_json):
+        invalid = {
+            "final_goal": "两个日期的病害变化",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "统计10月23日至10月26日的病害",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["day"],
+                    "filters": [
+                        {
+                            "field": "collection_time",
+                            "op": ">=",
+                            "raw_value": "2026-10-23",
+                        },
+                        {
+                            "field": "collection_time",
+                            "op": "<",
+                            "raw_value": "2026-10-27",
+                        },
+                    ],
+                    "output_projection": ["day", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        corrected = {
+            "final_goal": "两个日期的病害变化",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    **invalid["views"][0],
+                    "id": "q1",
+                    "question": "统计10月23日病害",
+                    "filters": [
+                        {
+                            "field": "collection_time",
+                            "op": ">=",
+                            "raw_value": "2026-10-23",
+                        },
+                        {
+                            "field": "collection_time",
+                            "op": "<",
+                            "raw_value": "2026-10-24",
+                        },
+                    ],
+                },
+                {
+                    **invalid["views"][0],
+                    "id": "q2",
+                    "question": "统计10月26日病害",
+                    "filters": [
+                        {
+                            "field": "collection_time",
+                            "op": ">=",
+                            "raw_value": "2026-10-26",
+                        },
+                        {
+                            "field": "collection_time",
+                            "op": "<",
+                            "raw_value": "2026-10-27",
+                        },
+                    ],
+                },
+            ],
+        }
+        chat_json.side_effect = [invalid, corrected]
+
+        plan = analyze_single_turn(
+            "10月23日和10月26日这两次巡查，病害类型变化大不大？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+            registry=CapabilityRegistry.load(),
+        )
+
+        self.assertEqual(chat_json.call_count, 2)
+        self.assertEqual(len(plan.nodes), 2)
+
+    @patch("app.query.analysis.chat_json")
+    def test_unavailable_severity_field_cannot_fall_back_to_all_diseases(
+        self,
+        chat_json,
+    ):
+        chat_json.return_value = {
+            "final_goal": "严重病害最多的路线",
+            "intent_family": "top_groups",
+            "unknown_terms": ["严重"],
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "按路线统计全部病害数量",
+                    "subject": "disease",
+                    "view": "top_groups",
+                    "metrics": ["count"],
+                    "dimensions": ["route_name"],
+                    "filters": [],
+                    "output_projection": ["route_name", "count"],
+                    "order_by": [{"field": "count", "direction": "desc"}],
+                    "limit": 5,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(
+            QuerySpecUnsupported,
+            "全部为空",
+        ):
+            analyze_single_turn(
+                "找出严重等级病害最多的前5条路线",
+                "mysql",
+                PhysicalSchemaView(columns=frozenset()),
+                FieldReachSet(),
+                subject="disease",
+                registry=CapabilityRegistry.load(),
+            )
+
+    @patch("app.query.analysis.chat_json")
+    def test_severity_evidence_rejects_legacy_damage_type_field(
+        self,
+        chat_json,
+    ):
+        invalid = {
+            "final_goal": "严重病害最多的路线",
+            "intent_family": "top_groups",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "按路线统计严重病害数量",
+                    "subject": "disease",
+                    "view": "top_groups",
+                    "metrics": ["count"],
+                    "dimensions": ["damage_type"],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [{"field": "count", "direction": "desc"}],
+                    "limit": 5,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        corrected = {
+            **invalid,
+            "views": [
+                {
+                    **invalid["views"][0],
+                    "dimensions": ["history_damage_interval"],
+                }
+            ],
+        }
+        chat_json.side_effect = [invalid, corrected]
+
+        plan = analyze_single_turn(
+            "按严重等级统计病害数量",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+        )
+
+        self.assertEqual(chat_json.call_count, 2)
+        self.assertIn(
+            "history_damage_interval",
+            plan.nodes[0].spec.dimensions,
+        )
+        self.assertNotIn("damage_type", plan.nodes[0].spec.dimensions)
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_trend_data_node_gets_structural_post_calc(self, chat_json, _resolve):
+        chat_json.return_value = {
+            "final_goal": "按周统计病害趋势",
+            "intent_family": "trend",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "按周分组统计病害数量",
+                    "subject": "disease",
+                    "view": "trend",
+                    "metrics": ["count"],
+                    "dimensions": ["week"],
+                    "filters": [],
+                    "output_projection": ["week", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                }
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "展示过去8周每周病害数量变化趋势",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+
+        self.assertEqual(len(plan.nodes), 2)
+        self.assertEqual(plan.nodes[1].node_type, "post_calc")
+        self.assertEqual(plan.nodes[1].depends_on, ("q1",))
+        self.assertIn(
+            "analysis_only",
+            plan.nodes[1].spec.required_assertions,
+        )
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_trend_intent_with_distribution_node_gets_post_calc(
+        self,
+        chat_json,
+        _resolve,
+    ):
+        chat_json.return_value = {
+            "final_goal": "按周统计病害趋势",
+            "intent_family": "trend",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "按周分组统计病害数量",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["week"],
+                    "filters": [],
+                    "output_projection": ["week", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                }
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "展示过去8周每周病害数量变化趋势",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+
+        self.assertEqual(plan.nodes[-1].node_type, "post_calc")
+        self.assertEqual(plan.nodes[-1].spec.view, "trend")
+        self.assertEqual(plan.nodes[-1].depends_on, ("q1",))
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_existing_analysis_post_calc_is_canonicalized_to_trend(
+        self,
+        chat_json,
+        _resolve,
+    ):
+        chat_json.return_value = {
+            "final_goal": "按周统计病害趋势",
+            "intent_family": "trend",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "按周分组统计病害数量",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["week"],
+                    "filters": [],
+                    "output_projection": ["week", "count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                },
+                {
+                    "id": "p1",
+                    "action": "post_calc",
+                    "question": "分析周趋势",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": [
+                        "analysis_only",
+                        "preserve_user_scope",
+                    ],
+                    "depends_on": ["q1"],
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "展示过去8周每周病害数量变化趋势",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+
+        self.assertEqual(len(plan.nodes), 2)
+        self.assertEqual(plan.nodes[1].spec.view, "trend")
+
     @patch("app.query.analysis.chat_json")
     def test_auxiliary_subject_is_allowed_when_final_subject_matches(
         self,
@@ -138,7 +868,7 @@ class QueryPlanningTests(unittest.TestCase):
             subject="disease",
         )
 
-        self.assertEqual(chat_json.call_count, 2)
+        self.assertEqual(chat_json.call_count, 1)
         self.assertEqual(plan.nodes[-1].node_type, "post_calc")
         self.assertEqual(plan.response_mode, "analysis")
 

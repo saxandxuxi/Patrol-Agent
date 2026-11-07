@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..services import dictionary
+from ..semantic_aids import pile_meter as parse_pile_meter
 from .contracts import QuerySpec
 
 
@@ -48,6 +49,8 @@ _FIELD_ALIASES = {
     "device_id": "equipment_id",
     "device": "equipment_id",
     "equipment": "equipment_id",
+    "damage_severity": "history_damage_interval",
+    "severity": "history_damage_interval",
     "pile_number_segment": "pile_segment_500m",
     "pile_number_segment_500m": "pile_segment_500m",
     "pile_segment": "pile_segment_500m",
@@ -72,14 +75,10 @@ def _pile_segment_expression(meters: int) -> str:
 
 
 def _pile_meter(value: Any) -> int:
-    text = str(value or "").strip().upper().replace("K", "")
-    if "+" not in text:
+    parsed = parse_pile_meter(value)
+    if parsed is None:
         raise UnsupportedQuerySpec(f"无法解析桩号：{value}")
-    kilometer, meter = text.split("+", 1)
-    try:
-        return int(kilometer) * 1000 + int(meter)
-    except ValueError as exc:
-        raise UnsupportedQuerySpec(f"无法解析桩号：{value}") from exc
+    return parsed
 
 
 def _disease_filter(
@@ -125,6 +124,7 @@ def _disease_filter(
         "problem_base_id": "disease.problem_base_id",
         "patrol_id": "disease.patrol_id",
         "confidence": "disease.confidence",
+        "history_damage_interval": "disease.history_damage_interval",
         "device_code": "disease.device_code",
         "lane_index": "disease.lane_index",
         "unit_id": "disease.unit_id",
@@ -139,7 +139,11 @@ def _disease_filter(
         return
     expression = expressions.get(normalized)
     if not expression:
-        raise UnsupportedQuerySpec(f"病害查询不支持过滤字段：{field}")
+        raise UnsupportedQuerySpec(
+            f"病害查询不支持过滤字段：{field}；"
+            "可用过滤字段：route_name、pile_number、"
+            + "、".join(sorted(expressions))
+        )
     if normalized == "task_number":
         joins.add("disease_patrol")
     elif normalized == "order_number":
@@ -300,6 +304,20 @@ def _disease_dimension(
         )
     if normalized in {"collection_time_month", "month"}:
         return "DATE_FORMAT(disease.collection_time, '%Y-%m')", "月份"
+    if normalized == "week":
+        return (
+            "CONCAT(DATE_FORMAT(disease.collection_time, '%x'), "
+            "'-W', DATE_FORMAT(disease.collection_time, '%v'))",
+            "周",
+        )
+    if normalized == "collection_time_year":
+        return "DATE_FORMAT(disease.collection_time, '%Y')", "年份"
+    if normalized == "collection_time_quarter":
+        return (
+            "CONCAT(YEAR(disease.collection_time), '-Q', "
+            "QUARTER(disease.collection_time))",
+            "季度",
+        )
     if normalized in {"collection_time_day", "day"}:
         return "DATE(disease.collection_time)", "日期"
     if normalized == "patrol_number":
@@ -320,6 +338,11 @@ def _disease_dimension(
         return "disease.lane_index", "车道"
     if normalized == "device_code":
         return "disease.device_code", "巡检设备编号"
+    if normalized == "history_damage_interval":
+        return (
+            "COALESCE(NULLIF(disease.history_damage_interval, ''), '未填写')",
+            "损坏程度",
+        )
     raise UnsupportedQuerySpec(f"病害查询不支持分组字段：{field}")
 
 
@@ -435,6 +458,10 @@ def _disease_output(field: str) -> tuple[str, str] | None:
         "road_surface_type": ("disease.road_surface_type", "路面类型"),
         "unit_id": ("disease.unit_id", "管养单位ID"),
         "device_code": ("disease.device_code", "巡检设备编号"),
+        "history_damage_interval": (
+            "disease.history_damage_interval",
+            "损坏程度",
+        ),
     }
     return mapping.get(normalized)
 
@@ -491,8 +518,9 @@ def compile_spec_mdl(spec: QuerySpec) -> str | None:
     from .capability_registry import CapabilityRegistry
     from .shape_contracts import validate_shape_contract
 
-    validate_capabilities(spec)
-    shape_issues = validate_shape_contract(spec, CapabilityRegistry.load())
+    registry = CapabilityRegistry.load()
+    validate_capabilities(spec, registry)
+    shape_issues = validate_shape_contract(spec, registry)
     if shape_issues:
         raise UnsupportedQuerySpec(
             "；".join(issue.reason for issue in shape_issues)

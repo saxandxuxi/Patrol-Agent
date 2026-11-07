@@ -1,0 +1,129 @@
+version: 1
+exam_id: disease-type-unit-20261107-01
+generated_at: '2026-11-07T15:17:03.121657+08:00'
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20270105
+code_fingerprint: content:74ac75b45e187427f80f824320943b448e71d03fd574f3629225071f62abd595
+fresh_case_ids:
+- type_route_pingjiang_types
+- type_route_changzhi_main_type
+- type_xixiang_updown_main
+- type_baotou_updown_types
+- type_network_crack_updown_diff
+- type_lane_second_main
+- type_crack_length_over_two
+- type_pothole_length_under_one
+- type_area_over_hundred
+- type_total_area_share
+- type_patrol_batch_distribution
+- type_changzhi_last_month_types
+- type_unknown_route_distribution
+- type_two_routes_pothole_compare
+- type_xixiang_crack_segments
+old_case_ids:
+- time_route_month_trend_changzhi
+- time_route_two_patrol_difference_1030_1102
+- fresh_disease_expansion_speed
+- time_month_no_data_2025
+- route_metrics
+cases:
+- id: type_route_pingjiang_types
+  category: 病害类型/路段各类病害
+  question: 平江－洞口高速公路检出的病害类型有哪些？各多少处？
+  focus: 检查单路线下的病害类型分布。
+  source: fresh
+- id: type_route_changzhi_main_type
+  category: 病害类型/路段主要病害
+  question: 长沙－芷江高速公路上最多的病害类型是哪一种？有多少处？
+  focus: 检查单路线的主要病害识别与数量。
+  source: fresh
+- id: type_xixiang_updown_main
+  category: 病害类型/上下行主要病害
+  question: 宝安大道西乡段上行和下行分别以哪种病害为主？
+  focus: 检查上下行两侧的主要病害。
+  source: fresh
+- id: type_baotou_updown_types
+  category: 病害类型/上下行分布
+  question: 包头-茂名高速公路上行和下行各检出哪些病害类型？数量分别是多少？
+  focus: 检查上下行病害类型分布差异。
+  source: fresh
+- id: type_network_crack_updown_diff
+  category: 病害类型/上下行差异
+  question: 全路网上行和下行的裂缝数量相差多少处？
+  focus: 检查同一病害类型在上下行的差异。
+  source: fresh
+- id: type_lane_second_main
+  category: 病害类型/车道
+  question: 第二车道上主要是什么病害？
+  focus: 检查车道维度未更新时能否说清能力边界。
+  source: fresh
+- id: type_crack_length_over_two
+  category: 病害类型/尺寸阈值
+  question: 长度大于 2 米的裂缝有多少处？总长度是多少米？
+  focus: 检查尺寸阈值过滤与数量、长度统计。
+  source: fresh
+- id: type_pothole_length_under_one
+  category: 病害类型/尺寸阈值
+  question: 长度不超过 1 米的坑槽有多少处？
+  focus: 检查小于等于阈值的数量统计。
+  source: fresh
+- id: type_area_over_hundred
+  category: 病害类型/尺寸阈值
+  question: 面积超过 100 平方米的病害有多少处？都是什么类型？
+  focus: 检查面积阈值过滤与类型分布。
+  source: fresh
+- id: type_total_area_share
+  category: 病害类型/面积占比
+  question: 按病害类型分组统计总面积，哪一类病害的面积占比最大？
+  focus: 检查类型分组、面积规模与占比结论。
+  source: fresh
+- id: type_patrol_batch_distribution
+  category: 病害类型/巡查批次
+  question: 巡查编号 XCBH202607220003 这次检出的病害类型分布是怎样的？
+  focus: 检查按巡查批次查看病害类型分布。
+  source: fresh
+- id: type_changzhi_last_month_types
+  category: 病害类型/时间
+  question: 上个月，长沙－芷江高速公路上检出了哪些病害类型？各多少处？
+  focus: 检查时间范围与单路线病害类型分布。
+  source: fresh
+- id: type_unknown_route_distribution
+  category: 病害类型/识别可靠性
+  question: AI 认不出来的病害主要集中在哪条路上？有多少处？
+  focus: 检查未识别病害的路线分布。
+  source: fresh
+- id: type_two_routes_pothole_compare
+  category: 病害类型/多路对比
+  question: 包头-茂名和上海-昆明这两条路上，坑槽的数量分别是多少？
+  focus: 检查两条路线同一病害类型的数量比较。
+  source: fresh
+- id: type_xixiang_crack_segments
+  category: 病害类型/分段
+  question: 宝安大道西乡段的裂缝主要分布在哪些桩号分段？
+  focus: 检查路线与桩号分段组合的病害类型分布。
+  source: fresh
+- id: time_route_month_trend_changzhi
+  category: 时间/路线/月
+  question: 长沙－芷江高速公路2026年10月和11月的病害数量及总面积分别是多少？请比较变化。
+  focus: 检查路线逐月多指标趋势，数量和面积必须分别呈现。
+  source: old
+- id: time_route_two_patrol_difference_1030_1102
+  category: 时间/巡检批次对比
+  question: 包头-茂名在2026年10月30日和11月2日检出的病害数量分别是多少？后一次比前一次多多少处？
+  focus: 检查两个明确日期的同路线比较、差值方向和计算工具。
+  source: old
+- id: fresh_disease_expansion_speed
+  category: 趋势
+  question: 哪些路段的坑槽病害面积在连续三次巡检中呈现快速增长趋势？
+  focus: 追踪特定病害类型在多轮巡检中的面积变化，识别增长率显著高于阈值的路段。
+  source: old
+- id: time_month_no_data_2025
+  category: 时间/能力边界
+  question: 2025年各月全路网病害数量分别是多少？请说明有没有可供趋势分析的数据。
+  focus: 检查完全无数据的年份能否明确说明覆盖不足，不能编造零趋势结论。
+  source: old
+- id: route_metrics
+  category: 历史题
+  question: 按路线分组，统计每条路线的病害总数、病害总面积、平均单处病害面积，并关联获取该路线的长度
+  focus: ''
+  source: old

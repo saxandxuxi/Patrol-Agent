@@ -1,0 +1,194 @@
+{
+  "exam_id": "time-unit-20261107-04",
+  "code_fingerprint": "content:6da3f5b4f3ee56b362b05175a0b85b55dbe4d363bf9ba952f7d0913ff0210fed",
+  "passed_fresh": 15,
+  "total_fresh": 15,
+  "passed_old": 5,
+  "total_old": 5,
+  "passed_total": 20,
+  "total": 20,
+  "promoted": true,
+  "promotion_reason": "达到 15 新题 80% 和 5 旧题 80% 晋级线",
+  "results": [
+    {
+      "id": "time_day_total_1029",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确解析了时间范围（2026-10-29全天）和全路网范围。SQL使用COUNT(*)准确统计病害数量为22处。明细查询返回22条记录，total_count为22，truncated为false，回答中明确说明了命中总数、展示行数且未截断，完全符合考察重点要求。",
+      "answer": "共 22处；“q2. 列出2026年10月29日（>=2026-10-29 且 <2026-10-30）全路网检出的病”共 22 条，当前展示前 22 条，完整明细请在结果工作台查看。"
+    },
+    {
+      "id": "time_day_route_distribution_1029",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "用户询问2026年10月29日病害出现的路线及数量。系统生成的SQL正确过滤了时间范围（>= '2026-10-29' AND < '2026-10-30'），按route_name分组并统计COUNT(*)。执行结果显示两条路线及其具体数量，且明确说明共2行结果，未截断。回答完整覆盖了用户要求的实体、时间和指标。",
+      "answer": "“q1. 按 route_name 分组，统计 2026-10-29 当天采集的病害数量 COUNT(*)”查询完成，共 2 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "time_route_two_patrol_difference_1029_1031",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了用户意图，分别查询了2026年10月29日（结果0处）和10月31日（结果184处）长沙绕城高速的病害数量，并计算出差值为-184处。SQL逻辑正确使用了时间范围过滤和路线关联，最终回答完整覆盖了问题要求的两个日期数量及差值。",
+      "answer": "数量差值 = -184（0 - 184）。"
+    },
+    {
+      "id": "time_year_grouped_all_records",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确拒绝执行，指出过滤字段 del_flag 来源为 model_inference 且缺乏字典或业务规则支持，无法可靠规划查询。根据规则，当系统明确说明具体缺失原因（字段解析能力缺失）并停止猜测时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：过滤值 del_flag 来源为 model_inference，但没有经过字典、业务规则或受控解析"
+    },
+    {
+      "id": "time_quarter_q4_total",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了时间范围（2026年第四季度，即2026-10-01至2026-12-31），SQL查询使用了正确的过滤条件（collection_time >= '2026-10-01' AND collection_time < '2027-01-01'）并统计了病害总数。最终回答明确给出了总数33187处，并针对明细列表的截断情况（共33187条，展示前500条）进行了说明，符合判定规则中关于明细截断需说明命中总数和展示行数的要求。",
+      "answer": "共 33187处；“q2. 列出2026年第四季度（2026-10-01至2026-12-31）检出的病害明细，用于核对总数”共 33187 条，当前展示前 500 条，完整明细请在结果工作台查看。"
+    },
+    {
+      "id": "time_month_oct_nov_disease_trend",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确查询了2026年10月（19082处）和11月（14105处）的全路网病害数量，并基于这两个数值计算了环比变化率（-26.08%）。回答覆盖了用户要求的两个月数量、比较及变化方向，数据与SQL执行结果一致。",
+      "answer": "环比变化 = -26.08（(14105 - 19082) / 19082 * 100）。"
+    },
+    {
+      "id": "time_day_trend_1023_1030",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户要求查询2026年10月23日至10月30日每天的病害数量。系统执行SQL后，发现数据库中缺失2026-10-24和2026-10-25两天的数据。最终回答明确列出了有数据的日期及数量，并明确指出缺少2026-10-24和2026-10-25的数据，且说明无法据此判断完整时间窗口的趋势。这符合‘如果时间序列覆盖不足，系统明确说明缺失月份并拒绝给出确定性趋势结论，可以判为 correct_unsupported’的规则。",
+      "answer": "日期 2026-10-23，数量 405；日期 2026-10-26，数量 135；日期 2026-10-27，数量 5853；日期 2026-10-28，数量 2946；日期 2026-10-29，数量 22；日期 2026-10-30，数量 1559；查询窗口 2026-10-23 至 2026-10-30；实际返回时间桶为 2026-10-23、2026-10-26、2026-10-27、2026-10-28、2026-10-29、2026-10-30；缺少日期或时间桶 2026-10-24、2026-10-25，无法据此判断完整时间窗口的趋势。"
+    },
+    {
+      "id": "time_week_range_1026_1102",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "用户询问2026年10月26日至11月2日期间每周的病害总数。系统正确识别了时间范围，将其转换为数据库查询条件（>= 2026-10-26 且 < 2026-11-03），这准确覆盖了10月26日至11月2日的所有日期。SQL按周（ISO周）分组统计了病害数量，返回了两个周的数据点（2026-W44和2026-W45）。最终回答清晰列出了这两周的病害数量，并指出了趋势和极值，完全回答了用户关于“每周病害总数”的问题。虽然回答中添加了趋势分析，但核心数据准确无误。",
+      "answer": "在2026年10月26日至11月3日（不含）期间，依赖节点的病害数量呈现显著下降趋势。\n\n依据周度分组统计结果，时间序列包含两个数据点：2026-W44周的病害数量为18,677起，而随后的2026-W45周降至1,433起。极值方面，最大值出现在2026-W44周（18,677起），最小值出现在2026-W45周（1,433起）。这一变化表明在该短周期内，病害报告数量大幅减少。\n\n局限性说明：本次分析仅基于提供的两周数据，样本量较小（row_count=2），无法判断长期季节性规律或更细微的波动。此外，“依赖节点”的具体定义及数据来源未在证据中明确，结论仅反映给定时间窗口内的统计数值变化，不涉及成因分析或正式的健康状况评分。"
+    },
+    {
+      "id": "time_route_month_trend_changsha_ring",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了路线（长沙绕城高速）和时间范围（2026年10月、11月）。SQL分别查询了两个月的病害总数，结果分别为390处和0处。最终回答明确给出了两个月份的具体数量，并计算了变化百分比（-100%），完整覆盖了用户关于数量和变化方向的提问。",
+      "answer": "数量变化百分比 = -100.00（(0 - 390) / 390 * 100）。"
+    },
+    {
+      "id": "time_route_multimetric_changsha_ring",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了路线（长沙绕城高速）和时间范围（2026年10月），SQL查询准确计算了病害数量（390）和总面积（4507.90）。最终回答明确给出了这两个指标的具体数值，且与执行结果一致，完全覆盖了用户问题的考察重点。",
+      "answer": "“q1. 统计长沙绕城高速在2026年10月（2026-10-01至2026-11-01）的病害总数和总面”查询完成，共 1 行，详细结果已生成，请在结果工作台查看。；“q2. 列出长沙绕城高速在2026年10月（2026-10-01至2026-11-01）检出的病害明细，”返回 390 条，明细已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "time_month_type_distribution_changzhi",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "unknown",
+      "reason": "系统正确识别了路线（长沙－芷江高速公路）和时间范围（2026年10月），并按病害类型（problem_type_name）进行了分组统计。SQL逻辑正确，使用了JOIN关联路线表以过滤特定路线，并应用了时间过滤。最终回答列出了所有25种病害类型及其对应的数量，完整覆盖了用户要求的实体、时间、维度和指标。结果非空且未截断，结论由数据直接支持。",
+      "answer": "“q1. 按 problem_type_name 分组，统计长沙－芷江高速公路在 2026-10-01 至”查询完成，共 25 行，详细结果已生成，请在结果工作台查看。"
+    },
+    {
+      "id": "time_day_type_filter_1102_lateral",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "用户询问2026年11月2日检出的横向裂缝数量。系统生成的SQL正确过滤了时间范围（>=2026-11-02 AND <2026-11-03）和病害类型（problem_type_name = '横向裂缝'）。执行结果显示COUNT(*)为38，且明细列表也确认共有38条记录，未截断。最终回答明确给出“共 38处”，与查询结果一致，完全覆盖了用户问题的实体、时间和指标要求。",
+      "answer": "共 38处；“q1_list. 列出2026年11月2日（>=2026-11-02 AND <2026-11-03）且probl”共 38 条，当前展示前 38 条，完整明细请在结果工作台查看。"
+    },
+    {
+      "id": "time_day_patrol_tasks_1102",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "用户询问2026年11月2日创建的巡检任务数量。系统生成的SQL正确筛选了patrol表中create_time在'2026-11-02 00:00:00'至'2026-11-03 00:00:00'之间且del_flag=0的记录，并执行COUNT(*)。查询返回结果为5，最终回答明确给出“共 5次”，完全覆盖了用户问题的实体、时间和指标要求，逻辑与结果一致。",
+      "answer": "共 5次。"
+    },
+    {
+      "id": "time_month_patrol_total_november",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_answer",
+      "failure_layer": "",
+      "reason": "用户询问2026年11月巡检任务总次数。系统生成的SQL正确过滤了时间范围（create_time >= '2026-11-01' AND create_time < '2026-12-01'）并排除了逻辑删除数据（del_flag = 0），对patrol表进行了COUNT(*)统计。执行结果显示数量为20，最终回答明确给出“共 20次”，完全覆盖了用户问题的实体、时间和指标要求，且逻辑自洽。",
+      "answer": "共 20次。"
+    },
+    {
+      "id": "time_day_no_data_august_trend",
+      "source": "fresh",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "用户询问2026年8月的数据及趋势。系统执行SQL查询该时间段，返回0行结果。最终回答明确指出'查询返回 0 行'且'无法判断趋势'，符合规则中'如果时间序列覆盖不足，系统明确说明缺失月份并拒绝给出确定性趋势结论，可以判为 correct_unsupported'的要求。",
+      "answer": "查询返回 0 行；查询窗口 2026-08-01 至 2026-08-31 内没有匹配记录，无法判断趋势。"
+    },
+    {
+      "id": "fresh_time_monthly_trend_multi_route",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明数据库中不存在用户指定的路线实体“S20外环高速”，并提供了相近路线列表供确认，未进行猜测或静默替换，符合数据能力缺失的判定规则。",
+      "answer": "该查询无法执行：没有找到路线“S20外环高速”。名字相近的路线有：新化文田-东安井头圩、龙山石牌(省界)-凤凰茶田(省界)、慈利-安化县渠江、双峰洪山殿-嘉禾县城、望城乌山-湘潭茶恩寺，请确认是哪一条。"
+    },
+    {
+      "id": "fresh_lane_disease_unsupported",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "业务能力文档明确说明'区分车道的病害数量查询及数量统计（目前系统未更新车道分布）'和'指定车道病害类型与数量（暂未更新）'。系统最终回答明确指出'当前数据能力不支持：业务能力文档声明车道分布尚未更新'，符合考察重点中要求的'明确告知当前车道分布数据未更新...并说明数据缺失情况'。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：业务能力文档声明车道分布尚未更新，不能把 lane_index 当作可靠统计依据"
+    },
+    {
+      "id": "fresh_task_completion_rate_ranking",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确声明当前数据能力不支持，具体原因为'只有管养单位 ID，缺少可验证的单位名称和台账关联'。根据规则，当最终回答本身明确说明了业务能力、字段、关联或数据确实缺失，且原因具体时，判为 correct_unsupported。",
+      "answer": "无法可靠规划该查询：当前数据能力不支持：当前数据只有管养单位 ID，缺少可验证的单位名称和台账关联"
+    },
+    {
+      "id": "fresh_disease_direction_type_diff",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统识别到用户提供的路线名称“包头-茂名高速”在数据库中不存在，并给出了相近的候选项“包头-茂名”，明确拒绝猜测并请求用户确认。根据规则，当问题本身缺少必要的业务定义（此处为精确的路线实体匹配），系统明确要求补充口径且没有猜测时，判为 correct_unsupported。",
+      "answer": "该查询无法执行：没有找到路线“包头-茂名高速”。名字相近的路线有：包头-茂名，请确认是哪一条。"
+    },
+    {
+      "id": "fresh_time_trend_area",
+      "source": "old",
+      "ok": true,
+      "verdict": "correct_unsupported",
+      "failure_layer": "unsupported",
+      "reason": "系统明确说明数据库中不存在名为“S20外环高速”的路线实体，并提供了相近路线列表供用户确认。根据规则，当数据库确实缺少数据能力且系统明确说明具体缺失原因并停止猜测时，判为 correct_unsupported。",
+      "answer": "该查询无法执行：没有找到路线“S20外环高速”。名字相近的路线有：新化文田-东安井头圩、龙山石牌(省界)-凤凰茶田(省界)、慈利-安化县渠江、双峰洪山殿-嘉禾县城、望城乌山-湘潭茶恩寺，请确认是哪一条。"
+    }
+  ]
+}

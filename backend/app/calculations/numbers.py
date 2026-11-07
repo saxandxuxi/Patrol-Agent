@@ -44,4 +44,31 @@ def numeric_value(
             value = as_decimal(item)
             if value is not None:
                 return value
-    return None
+    return _empty_scope_value(dependency)
+
+
+NON_ADDITIVE_METRICS = (
+    "average",
+    "avg",
+    "density",
+    "ratio",
+    "percentage",
+    "share",
+)
+
+
+def _empty_scope_value(dependency: dict[str, Any]) -> Decimal | None:
+    """范围内确实没有记录时，可加和的聚合就是 0；平均值/占比这类不能编。"""
+    if not dependency.get("empty_scope"):
+        return None
+    spec = dependency.get("spec")
+    metrics = list(spec.get("metrics") or ()) if isinstance(spec, dict) else []
+    if not metrics:
+        return None
+    if any(
+        token in str(metric).lower()
+        for metric in metrics
+        for token in NON_ADDITIVE_METRICS
+    ):
+        return None
+    return Decimal("0")

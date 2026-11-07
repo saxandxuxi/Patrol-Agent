@@ -112,6 +112,7 @@
       this.options = {
         assistantUrl: '/',
         fullAssistantUrl: '/',
+        assetVersion: '20261106-result-contract-v3',
         ...options,
       }
       this.ready = false
@@ -189,6 +190,14 @@
       const url = new URL(this.options.assistantUrl, window.location.href)
       url.searchParams.set('mode', 'embed')
       url.searchParams.set('host_origin', window.location.origin)
+      url.searchParams.set('assistant_version', this.options.assetVersion)
+      return url.toString()
+    }
+
+    fullUrl(view = '') {
+      const url = new URL(this.options.fullAssistantUrl, window.location.href)
+      if (view) url.searchParams.set('view', view)
+      url.searchParams.set('assistant_version', this.options.assetVersion)
       return url.toString()
     }
 
@@ -451,11 +460,9 @@
       } else if (name === 'recent') {
         this.openPanel({ type: 'assistant:open-history' })
       } else if (name === 'workbench' || name === 'presets') {
-        const url = new URL(this.options.fullAssistantUrl, window.location.href)
-        url.searchParams.set('view', name)
-        window.open(url.toString(), '_blank', 'noopener')
+        window.open(this.fullUrl(name), '_blank', 'noopener')
       } else if (name === 'full') {
-        window.open(new URL(this.options.fullAssistantUrl, window.location.href).toString(), '_blank', 'noopener')
+        window.open(this.fullUrl(), '_blank', 'noopener')
       }
     }
 

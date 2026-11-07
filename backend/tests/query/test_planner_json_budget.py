@@ -2,7 +2,9 @@ import unittest
 from unittest.mock import patch
 
 from app.query.analysis import analyze_single_turn
+from app.query.audit import audit_query_plan
 from app.query.fields import FieldReachSet, PhysicalSchemaView
+from tests.query.factories import count_plan
 
 
 class PlannerJsonBudgetTests(unittest.TestCase):
@@ -38,6 +40,19 @@ class PlannerJsonBudgetTests(unittest.TestCase):
         )
 
         self.assertEqual(chat_json.call_args.kwargs["max_tokens"], 4096)
+
+    @patch("app.query.audit.chat_json", return_value={"complete": True, "issues": []})
+    def test_plan_audit_uses_long_output_budget(self, chat_json):
+        audit_query_plan(
+            "展示过去8周每周病害趋势",
+            count_plan(),
+        )
+
+        self.assertEqual(chat_json.call_args.kwargs["max_tokens"], 4096)
+        prompt = "\n".join(
+            item["content"] for item in chat_json.call_args.args[0]
+        )
+        self.assertIn("当前日期：", prompt)
 
 
 if __name__ == "__main__":

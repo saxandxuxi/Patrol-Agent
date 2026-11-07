@@ -27,6 +27,8 @@ class FieldCapability:
     physical_column: str = ""
     requires_join: tuple[str, ...] = ()
     enum_key: str = ""
+    status: str = "available"
+    unavailable_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -114,6 +116,8 @@ class PlannerFieldView:
     comment: str
     roles: tuple[str, ...]
     enum_values: tuple[EnumValueCapability, ...] = ()
+    status: str = "available"
+    unavailable_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -145,6 +149,8 @@ class PlannerCapabilityView:
                     "type": field.data_type,
                     "comment": field.comment,
                     "roles": list(field.roles),
+                    "status": field.status,
+                    "unavailable_reason": field.unavailable_reason,
                     "enum_values": [
                         {
                             "code": item.code,

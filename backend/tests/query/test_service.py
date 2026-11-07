@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from app.query.compiler import CompiledQuery
 from app.query.contracts import (
+    AnswerPackage,
     ExecutionObservation,
     InputBinding,
     PlanNode,
@@ -22,6 +23,7 @@ from app.query.service import (
     _default_wren_executor,
     _materialize_inputs,
     _observation_payload,
+    _repair_failed_post_calc,
     _scope_key,
     _section_identity,
     _simple_spec_mdl,
@@ -546,7 +548,7 @@ class ServiceTests(unittest.TestCase):
             ),
         )
         self.assertIn("查询窗口", answer)
-        self.assertIn("未出现的月份", answer)
+        self.assertIn("缺少日期或时间桶", answer)
 
     def test_month_distribution_reports_months_without_rows(self):
         spec = QuerySpec(
@@ -785,6 +787,358 @@ class ServiceTests(unittest.TestCase):
 
         self.assertEqual(effective.filters[0].op, "=")
         self.assertEqual(effective.filters[0].storage_value, "P1")
+
+    def test_route_name_dependency_keeps_display_view_filter(self):
+        """上游结果给的是路线中文名（展示视图），过滤必须回到 route_name IN，
+        不能拿中文名去和 route.id 比较。"""
+
+        target_spec = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("route_name",),
+            filters=(),
+            output_projection=("route_name", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="认不出来的病害主要集中在哪条路上？",
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="route_name",
+                    to_field="route_name",
+                    op="in",
+                ),
+            ),
+        )
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT 1",
+            columns=("路线名称",),
+            preview_rows=({"route_name": "长沙－芷江高速公路"},),
+            result_rows=({"route_name": "长沙－芷江高速公路"},),
+            rows_fetched=1,
+        )
+        route = {
+            "id": "51ca5f84a0f811f1a6310242ac120002",
+            "code": "S50",
+            "short_name": "长沙－芷江高速公路",
+            "full_name": "S50长芷高速",
+        }
+
+        with patch(
+            "app.services.route_resolver._resolve_route",
+            return_value=route,
+        ):
+            effective = _materialize_inputs(
+                target_spec,
+                {"q1": observation},
+                {"q1": target_spec},
+            )
+
+        binding = effective.filters[0]
+        self.assertEqual(binding.op, "in")
+        self.assertEqual(binding.storage_value, ["长沙－芷江高速公路"])
+        self.assertEqual(binding.source, "previous_result")
+        sql = _simple_spec_mdl(effective)
+        self.assertIn("disease.route_name IN ('长沙－芷江高速公路')", sql)
+        self.assertNotIn("route.id", sql)
+
+    def test_enum_dependency_resolves_label_to_storage_code(self):
+        """上游分组结果是中文标签（上行），过滤要用存储 code（1）。"""
+
+        target_spec = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="上行的病害有多少处？",
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="up_or_down",
+                    to_field="up_or_down",
+                    op="in",
+                ),
+            ),
+        )
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT 1",
+            columns=("上下行方向",),
+            preview_rows=({"up_or_down": "上行"},),
+            result_rows=({"up_or_down": "上行"},),
+            rows_fetched=1,
+        )
+
+        effective = _materialize_inputs(
+            target_spec,
+            {"q1": observation},
+            {"q1": target_spec},
+        )
+
+        binding = effective.filters[0]
+        self.assertEqual(binding.op, "in")
+        self.assertEqual(binding.storage_value, "1")
+        self.assertEqual(binding.display_value, "上行")
+        self.assertIn("disease.up_or_down IN ('1')", _simple_spec_mdl(effective))
+
+    def test_unresolvable_route_dependency_stops_with_reason(self):
+        target_spec = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="这条路上的病害有多少处？",
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="route_name",
+                    to_field="route_name",
+                    op="in",
+                ),
+            ),
+        )
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT 1",
+            columns=("路线名称",),
+            preview_rows=({"route_name": "未知路线"},),
+            result_rows=({"route_name": "未知路线"},),
+            rows_fetched=1,
+        )
+
+        with self.assertRaises(UnsupportedQuerySpec) as ctx:
+            _materialize_inputs(
+                target_spec,
+                {"q1": observation},
+                {"q1": target_spec},
+            )
+
+        self.assertIn("未知路线", str(ctx.exception))
+
+    def _post_calc_plan(self, question="比较两次巡查", node_id="pc"):
+        data_spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="统计两次巡查的坑槽数量",
+        )
+        calc_spec = QuerySpec(
+            id=node_id,
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="计算两次巡查的变化量",
+        )
+        plan = QueryPlan(
+            question=question,
+            nodes=(
+                PlanNode(id="q1", spec=data_spec),
+                PlanNode(id=node_id, spec=calc_spec, depends_on=("q1",)),
+            ),
+        )
+        failed = AnswerPackage(
+            "列计算必须且只能有一个多行来源节点",
+            (
+                {
+                    "node_id": node_id,
+                    "type": "post_calc",
+                    "status": "repairable",
+                    "failure_code": "calculation_operand_missing",
+                    "answer": "列计算必须且只能有一个多行来源节点；请改用 calculate_series。",
+                    "depends_on": ["q1"],
+                },
+            ),
+        )
+        return plan, failed
+
+    @patch("app.query.service.resolve_templates")
+    @patch("app.query.service._execute_plan")
+    @patch("app.query.service.analyze_single_turn")
+    def test_failed_post_calc_is_replanned_once(self, analyze, execute, templates):
+        plan, failed = self._post_calc_plan()
+        analyze.return_value = plan
+        templates.return_value = empty_candidate_set()
+        execute.return_value = AnswerPackage(
+            "变化 -3",
+            (
+                {
+                    "node_id": "pc",
+                    "type": "post_calc",
+                    "status": "accepted",
+                    "answer": "变化 -3",
+                },
+            ),
+        )
+
+        result = _repair_failed_post_calc(
+            plan,
+            failed,
+            "比较两次巡查",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            None,
+            (),
+        )
+
+        self.assertEqual(result.text, "变化 -3")
+        self.assertEqual(analyze.call_count, 1)
+        self.assertIn("post_calc", analyze.call_args.kwargs["planning_feedback"])
+
+    @patch("app.query.service.resolve_templates")
+    @patch("app.query.service._execute_plan")
+    @patch("app.query.service.analyze_single_turn")
+    def test_post_calc_repair_keeps_original_when_data_scope_drifts(
+        self,
+        analyze,
+        execute,
+        templates,
+    ):
+        plan, failed = self._post_calc_plan()
+        drifted_spec = plan.nodes[0].spec.__class__(
+            **{
+                **plan.nodes[0].spec.__dict__,
+                "filters": (
+                    ValueBinding(
+                        field="problem_type_name",
+                        op="=",
+                        storage_value="泛油",
+                        display_value="泛油",
+                        source="user_explicit",
+                        resolver="damage_type_dictionary",
+                        raw_text="泛油",
+                    ),
+                ),
+            }
+        )
+        analyze.return_value = QueryPlan(
+            question=plan.question,
+            nodes=(
+                PlanNode(id="q1", spec=drifted_spec),
+                plan.nodes[1],
+            ),
+        )
+
+        result = _repair_failed_post_calc(
+            plan,
+            failed,
+            "比较两次巡查",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            None,
+            (),
+        )
+
+        self.assertEqual(result, failed)
+        self.assertEqual(execute.call_count, 0)
+
+    @patch("app.query.service.resolve_templates")
+    @patch("app.query.service._execute_plan")
+    @patch("app.query.service.analyze_single_turn")
+    def test_post_calc_repair_keeps_original_when_repaired_answer_still_fails(
+        self,
+        analyze,
+        execute,
+        templates,
+    ):
+        plan, failed = self._post_calc_plan()
+        analyze.return_value = plan
+        templates.return_value = empty_candidate_set()
+        execute.return_value = AnswerPackage(
+            "还是算不出来",
+            (
+                {
+                    "node_id": "pc",
+                    "type": "post_calc",
+                    "status": "repairable",
+                    "failure_code": "calculation_operand_missing",
+                    "answer": "还是算不出来",
+                },
+            ),
+        )
+
+        result = _repair_failed_post_calc(
+            plan,
+            failed,
+            "比较两次巡查",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            None,
+            (),
+        )
+
+        self.assertEqual(result, failed)
+
+    @patch("app.query.service.analyze_single_turn")
+    def test_successful_answer_never_triggers_replan(self, analyze):
+        plan, _failed = self._post_calc_plan()
+        accepted = AnswerPackage(
+            "变化 -3",
+            (
+                {
+                    "node_id": "pc",
+                    "type": "post_calc",
+                    "status": "accepted",
+                    "answer": "变化 -3",
+                },
+            ),
+        )
+
+        result = _repair_failed_post_calc(
+            plan,
+            accepted,
+            "比较两次巡查",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            None,
+            (),
+        )
+
+        self.assertEqual(result, accepted)
+        self.assertEqual(analyze.call_count, 0)
 
     @patch(
         "app.calculations.domain.analysis.chat",
@@ -1083,6 +1437,60 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("共 20108 条，当前展示前 500 条", detail_section["answer"])
 
     @patch("app.query.service.verify_result", return_value=VerificationReport(status="accepted"))
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    @patch("app.query.service.resolve_templates", return_value=empty_candidate_set())
+    @patch("app.query.service.analyze_single_turn")
+    def test_detail_does_not_inherit_smaller_inconsistent_count(
+        self,
+        analyze,
+        _resolve,
+        compile_query_mock,
+        execute,
+        _verify,
+    ):
+        analyze.return_value = length_query_plan()
+        compile_query_mock.side_effect = [
+            compiled_count_query(),
+            CompiledQuery("SELECT id FROM ai_problem LIMIT 500", "wren", "wren"),
+        ]
+        execute.side_effect = [
+            ExecutionObservation(
+                node_id="summary",
+                ok=True,
+                engine="wren",
+                sql="SELECT COUNT(*)",
+                columns=("n",),
+                row_count=1,
+                preview_rows=({"n": "1"},),
+                result_rows=({"n": "1"},),
+                rows_fetched=1,
+            ),
+            ExecutionObservation(
+                node_id="detail",
+                ok=True,
+                engine="wren",
+                sql="SELECT id FROM ai_problem LIMIT 500",
+                columns=("id",),
+                row_count=2,
+                preview_rows=({"id": "1"}, {"id": "2"}),
+                result_rows=({"id": "1"}, {"id": "2"}),
+                rows_fetched=2,
+            ),
+        ]
+
+        result = start_single_turn(
+            "病害长度大于 2 米的有多少处？把明细列出来",
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+
+        detail_section = result.answer.sections[-1]
+        self.assertIsNone(detail_section["total_count"])
+        self.assertFalse(detail_section["truncated"])
+        self.assertIn("返回 2 条", detail_section["answer"])
+
+    @patch("app.query.service.verify_result", return_value=VerificationReport(status="accepted"))
     @patch("app.query.service.execute_compiled", return_value=count_observation())
     @patch("app.query.service.compile_query", return_value=compiled_count_query())
     @patch("app.query.service.resolve_templates", return_value=empty_candidate_set())
@@ -1171,6 +1579,84 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(task["depends_on"], ["q1"])
         self.assertEqual(len(upstream["q1"]["rows"]), 2)
         self.assertIn("裂缝", result.answer.text)
+
+    @patch("app.query.service.verify_result", return_value=VerificationReport(status="accepted"))
+    @patch("app.query.service.execute_compiled", return_value=count_observation())
+    @patch("app.query.service.compile_query", return_value=compiled_count_query())
+    @patch("app.query.service.resolve_templates", return_value=empty_candidate_set())
+    @patch("app.query.service.analyze_single_turn")
+    @patch("app.query.service._default_post_calc_executor")
+    def test_zero_denominator_post_calc_returns_structured_unsupported(
+        self,
+        post_calc,
+        analyze,
+        _resolve,
+        _compile,
+        _execute,
+        _verify,
+    ):
+        data_spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+            question="统计任务数量",
+        )
+        calc_spec = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="patrol",
+            view="avg",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+            question="计算平均每次任务检出病害数",
+        )
+        analyze.return_value = QueryPlan(
+            question="设备平均每次任务检出多少病害",
+            nodes=(
+                PlanNode(id="q1", spec=data_spec),
+                PlanNode(
+                    id="q2",
+                    spec=calc_spec,
+                    depends_on=("q1",),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+        post_calc.return_value = {
+            "accepted": False,
+            "reply": "无法计算：任务次数为 0",
+            "failure": {
+                "failure_code": "calculation_zero_denominator",
+                "reason": "无法计算：任务次数为 0",
+            },
+        }
+
+        result = start_single_turn(
+            "设备平均每次任务检出多少病害",
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+
+        section = result.answer.sections[-1]
+        self.assertEqual(section["status"], "unsupported")
+        self.assertEqual(
+            section["failure_code"],
+            "calculation_zero_denominator",
+        )
+        self.assertIn("无法计算", result.answer.text)
 
     @patch("app.query.service.resolve_templates")
     @patch("app.query.service.analyze_single_turn")
@@ -1328,7 +1814,10 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(compile_query_mock.call_count, 1)
         self.assertEqual(len(result.answer.sections), 1)
         self.assertEqual(result.answer.sections[0]["status"], "unsupported")
-        self.assertIn("时间序列不完整", result.answer.text)
+        self.assertIn(
+            "无法据此判断完整时间窗口的趋势",
+            result.answer.text,
+        )
 
     @patch("app.query.service.execute_compiled", return_value=count_observation())
     @patch("app.query.service.compile_query", return_value=compiled_count_query())

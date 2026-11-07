@@ -2,6 +2,7 @@ import unittest
 from decimal import Decimal
 
 from app.calculations.columns import calculate_columns
+from app.calculations.domain.trend import render_series_calculation
 from app.calculations.evidence import compact_table_evidence
 from app.calculations.models import CalculationOperand, CalculationRequest
 from app.calculations.numbers import as_decimal, numeric_value
@@ -237,6 +238,27 @@ class ColumnCalculationTests(unittest.TestCase):
             ["B"],
         )
 
+    def test_column_percentage_share_accepts_constant_total(self):
+        result = calculate_columns(
+            "percentage_share",
+            [
+                {"route_name": "A", "count": 10},
+                {"route_name": "B", "count": 30},
+            ],
+            {
+                "numerator": "count",
+                "total": "count",
+            },
+            "share",
+            constants={"total": Decimal("40")},
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(
+            [row["share"] for row in result.rows],
+            [Decimal("25.000000"), Decimal("75.000000")],
+        )
+
 
 class SeriesCalculationTests(unittest.TestCase):
     def test_series_preserves_zero_batches_and_computes_differences(self):
@@ -265,6 +287,38 @@ class SeriesCalculationTests(unittest.TestCase):
             [row["percentage_change"] for row in result.rows],
             [None, Decimal("20"), Decimal("-25")],
         )
+
+    def test_series_percentage_change_marks_zero_baseline_as_undefined(self):
+        result = calculate_series(
+            "percentage_change",
+            ["b1", "b2", "b3"],
+            [0, 15, 3],
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(
+            [row["percentage_change"] for row in result.rows],
+            [None, None, Decimal("-80")],
+        )
+        self.assertEqual(result.evidence["undefined_points"], ("b2",))
+
+    def test_series_render_explains_zero_baseline_points(self):
+        result = calculate_series(
+            "percentage_change",
+            ["b1", "b2", "b3"],
+            [0, 15, 3],
+        )
+        request = CalculationRequest.from_dict(
+            {
+                "tool": "calculate_series",
+                "operation": "percentage_change",
+            }
+        )
+
+        reply = render_series_calculation(result, request)
+
+        self.assertIn("b2 的上一批次为 0", reply)
+        self.assertIn("相邻变化为：无，-80", reply)
 
     def test_compact_evidence_extracts_metric_boundaries(self):
         evidence = compact_table_evidence(

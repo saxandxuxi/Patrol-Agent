@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import traceback
 from datetime import datetime
 from typing import Any
@@ -100,3 +101,20 @@ def log_error(module: str, event: str, error: Exception, **fields: Any) -> None:
         traceback=traceback.format_exc(limit=5),
         **fields,
     )
+
+
+def console_json(prefix: str, payload: dict[str, Any]) -> None:
+    """向控制台输出纯 ASCII 调试记录，不能因为宿主 stdout 是 GBK 而中断业务流程。"""
+    line = prefix + json.dumps(payload, ensure_ascii=True, default=str) + "\n"
+    data = line.encode("ascii", "backslashreplace")
+    try:
+        stream = getattr(sys.stdout, "buffer", None)
+        if stream is not None:
+            stream.write(data)
+            stream.flush()
+        else:
+            sys.stdout.write(data.decode("ascii"))
+            sys.stdout.flush()
+    except Exception:
+        # 控制台只是调试旁路，写不出去也不能让查询失败。
+        pass

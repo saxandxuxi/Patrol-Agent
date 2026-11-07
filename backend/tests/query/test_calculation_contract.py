@@ -1,9 +1,9 @@
 import unittest
 from unittest.mock import patch
 
-from app.query.analysis import analyze_single_turn
+from app.query.analysis import _query_plan_calculation_issue, analyze_single_turn
 from app.query.capability_registry import CapabilityRegistry
-from app.query.contracts import QuerySpecError
+from app.query.contracts import PlanNode, QueryPlan, QuerySpec, QuerySpecError
 from app.query.fields import FieldReachSet, PhysicalSchemaView
 from app.query.values import resolve_value
 
@@ -205,6 +205,148 @@ class CalculationContractTests(unittest.TestCase):
             binding.resolver,
             "business_value:confidence:low_confidence",
         )
+
+    def test_series_tool_rejects_two_scalar_period_sources(self):
+        first = QuerySpec(
+            id="oct",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="10月数量",
+        )
+        second = QuerySpec(
+            **{
+                **first.__dict__,
+                "id": "nov",
+                "question": "11月数量",
+            }
+        )
+        post = calculation_payload()["views"][1]
+        post["calculation"] = {
+            "tool": "calculate_series",
+            "operation": "percentage_change",
+            "operands": [
+                {"name": "labels", "source": {"node": "oct", "field": "count"}},
+                {"name": "values", "source": {"node": "nov", "field": "count"}},
+            ],
+        }
+        spec = QuerySpec(
+            id="change",
+            kind="mysql",
+            subject="disease",
+            view="data",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("multi_metric_comparison",),
+            question="计算两个月数量变化",
+        )
+        from app.calculations.models import CalculationRequest
+
+        spec = QuerySpec(
+            **{
+                **spec.__dict__,
+                "calculation": CalculationRequest.from_dict(
+                    post["calculation"]
+                ),
+            }
+        )
+        plan = QueryPlan(
+            question="计算两个月数量变化",
+            nodes=(
+                PlanNode(id="oct", spec=first),
+                PlanNode(id="nov", spec=second),
+                PlanNode(
+                    id="change",
+                    spec=spec,
+                    depends_on=("oct", "nov"),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+
+        issue = _query_plan_calculation_issue(plan, self.registry)
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue.code, "calculation_tool_shape_mismatch")
+        self.assertIn("calculate_scalar", issue.suggested_repair)
+
+    def test_scalar_calculation_rejects_identical_source_twice(self):
+        from app.calculations.models import CalculationRequest
+
+        source = QuerySpec(
+            id="months",
+            kind="mysql",
+            subject="patrol",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("month",),
+            filters=(),
+            output_projection=("month", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="逐月任务数",
+        )
+        calculation = CalculationRequest.from_dict(
+            {
+                "tool": "calculate_scalar",
+                "operation": "add",
+                "operands": [
+                    {
+                        "name": "left",
+                        "source": {"node": "months", "field": "count"},
+                    },
+                    {
+                        "name": "right",
+                        "source": {"node": "months", "field": "count"},
+                    },
+                ],
+            }
+        )
+        post = QuerySpec(
+            id="total",
+            kind="mysql",
+            subject="patrol",
+            view="count",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="计算总数",
+            calculation=calculation,
+        )
+        plan = QueryPlan(
+            question="逐月任务与总数",
+            nodes=(
+                PlanNode(id="months", spec=source),
+                PlanNode(
+                    id="total",
+                    spec=post,
+                    depends_on=("months",),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+
+        issue = _query_plan_calculation_issue(plan, self.registry)
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue.code, "calculation_operand_missing")
+        self.assertIn("相同的上游来源", issue.reason)
 
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
     @patch("app.query.analysis.chat_json")

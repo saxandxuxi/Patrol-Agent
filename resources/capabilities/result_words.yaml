@@ -1,4 +1,66 @@
 result_words:
+  field_aliases:
+    count:
+    - 数量
+    - 处数
+    - 次数
+    - 病害数量
+    - 任务数量
+    - 记录数
+    total_area:
+    - 总面积
+    - 面积总和
+    average_area:
+    - 平均面积
+    sum_effective_disease_length:
+    - 病害总长度
+    - 有效病害总长度
+    average_length:
+    - 平均长度
+    route_name:
+    - 路线名称
+    - 路线
+    problem_type_name:
+    - 病害类型
+    - 类型
+    up_or_down:
+    - 上下行方向
+    - 上下行
+    - 方向
+    collection_time:
+    - 采集时间
+    - 时间
+    create_time:
+    - 创建时间
+    day:
+    - 日期
+    week:
+    - 周
+    - 周次
+    month:
+    - 月份
+    - 月
+    collection_time_quarter:
+    - 季度
+    quarter:
+    - 季度
+    collection_time_year:
+    - 年份
+    year:
+    - 年份
+    equipment_id:
+    - 巡检设备
+    - 设备编号
+    patrol_status:
+    - 巡检状态
+    patrol_mileage:
+    - 巡检里程
+    route_length_km:
+    - 路线长度
+    patrol_number:
+    - 任务编号
+    - 巡查编号
+    - 巡检编号
   metric_term_map:
   - words:
     - 病害

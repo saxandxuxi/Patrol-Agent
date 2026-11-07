@@ -175,6 +175,21 @@ class CapabilityRegistry:
         )
         registry = cls(snapshot)
         registry._augment_physical_fields(kind)
+        field_metadata = (
+            docs["templates"].get("fields")
+            if isinstance(docs["templates"], dict)
+            else {}
+        ) or {}
+        for subject, subject_fields in registry.snapshot.fields.items():
+            for field_id, field in tuple(subject_fields.items()):
+                metadata = field_metadata.get(f"{subject}.{field_id}")
+                if not isinstance(metadata, Mapping):
+                    continue
+                subject_fields[field_id] = replace(
+                    field,
+                    status=str(metadata.get("status") or "available"),
+                    unavailable_reason=str(metadata.get("reason") or ""),
+                )
         registry._augment_numeric_metrics()
         registry._augment_enums(kind)
         registry._validate_physical_fields(kind)
@@ -195,6 +210,8 @@ class CapabilityRegistry:
                 comment=field.comment,
                 roles=field.roles,
                 enum_values=tuple(enum.values.values()) if enum else (),
+                status=field.status,
+                unavailable_reason=field.unavailable_reason,
             )
         evidence = tuple(
             {

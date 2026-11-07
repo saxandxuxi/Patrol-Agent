@@ -1,0 +1,129 @@
+version: 1
+exam_id: disease-time-unit-20261107-03
+generated_at: '2026-11-07T12:19:59.050963+08:00'
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 20261123
+code_fingerprint: content:d7039911378ed50553b071d55736d2f9b35d2b6252f29ee05dd6873a32cae41e
+fresh_case_ids:
+- disease_month_last_week_vs_prev_week
+- disease_half_year_split
+- disease_recent_two_net_crack_change
+- disease_september_weekly_counts
+- disease_changzhi_three_month_monthly
+- disease_xixiang_last_week_total
+- disease_pingjiang_two_visit_area_gap
+- disease_october_oil_daily
+- disease_last_month_top_type
+- disease_ytd_quarter_ranking
+- disease_nov_composition_range
+- disease_recent_three_two_types_amount
+- disease_baotou_last_month_total
+- disease_week_over_week_change
+- disease_oct_first_ten_days_by_route
+old_case_ids:
+- time_week_range_1026_1102
+- time_day_route_distribution_1102
+- time_month_patrol_tasks_jun_nov
+- new_time_inter_task_gap
+- fresh_asset_road_grade_stats
+cases:
+- id: disease_month_last_week_vs_prev_week
+  category: 病害/时间/本月
+  question: 这个月最后一周检出的病害，比上一周多了还是少了？
+  focus: 检查本月内部相邻两周的对比与结论。
+  source: fresh
+- id: disease_half_year_split
+  category: 病害/时间/半年
+  question: 今年上半年和下半年分别检出多少处病害？
+  focus: 检查年度内上下半年切分与对称区间统计。
+  source: fresh
+- id: disease_recent_two_net_crack_change
+  category: 病害/时间/巡查批次
+  question: 最近两次巡查里，网裂的数量有没有增加？
+  focus: 检查最近两次巡查批次与网裂数量的增减判断。
+  source: fresh
+- id: disease_september_weekly_counts
+  category: 病害/时间/周粒度
+  question: 9月份各周的病害数量分别是多少？
+  focus: 检查自然周粒度分组与月度内周统计。
+  source: fresh
+- id: disease_changzhi_three_month_monthly
+  category: 病害/时间/路线
+  question: 长沙－芷江高速公路最近三个月每月的病害总数是多少？
+  focus: 检查路线、相对三个月范围与逐月总数。
+  source: fresh
+- id: disease_xixiang_last_week_total
+  category: 病害/路段/周
+  question: 宝安大道西乡段上周一共检出多少处病害？
+  focus: 检查路线与上周范围的数量统计。
+  source: fresh
+- id: disease_pingjiang_two_visit_area_gap
+  category: 病害/路段/两次巡查
+  question: 平江－洞口高速公路10月26日和11月3日这两次巡查，病害总面积差多少？
+  focus: 检查同路段两个明确日期的面积指标与差值。
+  source: fresh
+- id: disease_october_oil_daily
+  category: 病害/时间/日粒度
+  question: 泛油在10月的每一天分别是多少处？
+  focus: 检查整月范围、指定病害与逐日分组。
+  source: fresh
+- id: disease_last_month_top_type
+  category: 病害/时间/类型
+  question: 最近一个月里，哪种病害新增得最多？
+  focus: 检查相对一个月范围内按类型分组与最高项判断。
+  source: fresh
+- id: disease_ytd_quarter_ranking
+  category: 病害/时间/季度
+  question: 今年每个季度各检出多少处病害？哪个季度最多？
+  focus: 检查年度内季度分组与峰值季度判断。
+  source: fresh
+- id: disease_nov_composition_range
+  category: 病害/时间/类型
+  question: 11月2日到11月6日，检出的病害类型构成怎么样？
+  focus: 检查时间段范围与病害类型构成分布。
+  source: fresh
+- id: disease_recent_three_two_types_amount
+  category: 病害/时间/巡查批次
+  question: 最近三次巡查，条状修补和坑槽分别是多少处？
+  focus: 检查同一批次窗口下两种病害的数量对比。
+  source: fresh
+- id: disease_baotou_last_month_total
+  category: 病害/时间/路线
+  question: 包头-茂名这条路上个月检出了多少处病害？
+  focus: 检查路线与上月范围的数量统计。
+  source: fresh
+- id: disease_week_over_week_change
+  category: 病害/时间/周
+  question: 上周和上上周相比，病害数量是增加还是减少？
+  focus: 检查相邻自然周的对比与增减结论。
+  source: fresh
+- id: disease_oct_first_ten_days_by_route
+  category: 病害/时间/路线
+  question: 2026年10月1日到10月10日，各条路上各检出了多少处病害？
+  focus: 检查明确日期范围与路线分布统计。
+  source: fresh
+- id: time_week_range_1026_1102
+  category: 时间/周
+  question: 2026年10月26日至11月2日期间，每周的病害总数是多少？
+  focus: 检查相邻 ISO 周、跨月范围和周分组。
+  source: old
+- id: time_day_route_distribution_1102
+  category: 时间/日/路线
+  question: 2026年11月2日巡检覆盖了哪些路线？每条路线分别检出多少处病害？
+  focus: 检查同一单日窗口内的路线分组分布，不能遗漏或少算当天记录。
+  source: old
+- id: time_month_patrol_tasks_jun_nov
+  category: 时间/巡检任务/月
+  question: 从2026年6月到2026年11月，各月份的巡检任务次数分别是多少？总共多少次？
+  focus: 检查巡检任务逐月统计和总量计算，缺失月份要明确。
+  source: old
+- id: new_time_inter_task_gap
+  category: 时间
+  question: 查询长沙－芷江高速公路K50路段，最近两次巡检任务之间的时间间隔是多少天？期间是否有新发现的病害？
+  focus: 考察系统识别特定路段连续两次巡检任务的时间戳差值计算，以及关联查询间隔期内新增病害记录的能力。
+  source: old
+- id: fresh_asset_road_grade_stats
+  category: 资产
+  question: 统计本月内所有行政等级为“国道”的路段中，检出的病害总数量是多少？
+  focus: 正确筛选行政等级为国道的资产范围，并聚合该范围内所有病害的数量总和。
+  source: old

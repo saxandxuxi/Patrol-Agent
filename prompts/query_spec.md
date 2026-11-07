@@ -100,6 +100,9 @@
     - `calculate_columns`：逐行两列计算，保留原行上下文。
     - `calculate_series`：批次序列的差值或百分比变化。
     操作数来源写成 `{"node": "上游节点 id", "field": "上游实际产出字段"}`。
+    只有多个按时间或批次排序的序列桶才使用 `calculate_series`。
+    两个单独标量周期做差值或百分比变化时必须使用 `calculate_scalar`：
+    百分比变化使用 `old`、`new`，差值使用 `left`、`right`。
     `divide/ratio` 使用 `numerator`、`denominator`；
     `percentage_share` 使用 `numerator`、`total`；
     `percentage_change` 使用 `old`、`new`。
@@ -115,6 +118,18 @@
 28. 用户明确要求把道路划分成固定长度区间统计时，必须使用注册分段维度，不能直接按原始
     `pile_number` 字符串分组。500 米使用 `pile_segment_500m`，1 公里使用
     `pile_segment_1000m`；输出标签统一为“桩号分段”。
+29. `<<assist_evidence>>` 中的内容是代码规则产生的 `trusted=false` 候选证据，只能辅助
+    你判断用户原话可能涉及哪个字段、值或时间粒度，不能直接视为业务事实。你必须结合用户
+    原话、字段目录和能力视图决定是否使用。车道证据指向 `lane_index`，损坏程度/严重程度
+    指向 `history_damage_interval`，绝不能映射成 `damage_type`；若字段能力不可用，应如实
+    返回不支持原因。
+30. 能力视图字段的 `status` 不是 `available` 时，该字段不能进入 SQL。若用户问题明确要求
+    这个字段承载的语义，禁止删除该条件、改用其他字段，或退回“全量病害/全部路线”代理后
+    继续执行；应把它写入 `unknown_terms` 并保留原问题范围，由代码返回明确的不支持原因。
+31. 用户提到的路线或路段名称（“XX高速”“XX段”“XX大道”“XX大桥”等）一律用 `route_name`
+    过滤，名称按原话原样保留，不要拆词、不要加通配符。`luge_name` 是里程区段编号
+    （形如 `k0+800-k0+899`），不是名称字段，禁止用它过滤路线或路段名称。
+    过滤字段只能是能力视图里 `status=available` 的字段，并按字段目录给出的用法使用。
 
 允许的 view：
 count / sum / avg / distribution / list / detail / top / trend / bucket_compare / photo / data
@@ -175,6 +190,9 @@ count / sum / avg / distribution / list / detail / top / trend / bucket_compare 
 
 字段触达证据：
 <<reach>>
+
+代码规则候选证据（trusted=false，仅供参考）：
+<<assist_evidence>>
 
 上一轮规划审计反馈（如果没有则为“无”）：
 <<planning_feedback>>
