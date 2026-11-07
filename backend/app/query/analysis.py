@@ -31,7 +31,7 @@ from .contracts import (
 from .fields import FieldReachSet, OutputProjection, PhysicalSchemaView
 from .periods import normalize_named_period_window
 from .planner import build_query_plan
-from .shape_contracts import normalize_top_view
+from .shape_contracts import canonical_view, normalize_top_view
 from .spec_mdl import UnsupportedQuerySpec, compile_spec_mdl
 from .validator import validate_query_spec
 from .values import resolve_value
@@ -99,53 +99,13 @@ _METRIC_ALIASES = {
 }
 
 
-_VIEW_ALIASES = {
-    "group": "distribution",
-    "grouped": "distribution",
-    "aggregate": "distribution",
-    "summary": "distribution",
-}
-
-
-# 模型偶尔会自造“分析/图表”这类视图名。它们是表达方式，不是新能力：
-# 按有没有指标和维度落到已有视图，避免把内部视图名当成数据能力缺失。
-_ANALYSIS_VIEW_ALIASES = frozenset(
-    {
-        "analysis",
-        "analysis_only",
-        "insight",
-        "insights",
-        "statistics",
-        "stats",
-        "chart",
-        "graph",
-        "plot",
-        "visual",
-        "visualization",
-        "report",
-    }
-)
-
-
 def _canonical_view(
     value: Any,
     metrics: tuple[str, ...] = (),
     dimensions: tuple[str, ...] = (),
     node_type: str = "query_data",
 ) -> str:
-    view = str(value or "").strip()
-    if view in {"table", "table_view"}:
-        return "distribution" if metrics and dimensions else "list"
-    view = _VIEW_ALIASES.get(view, view)
-    if view in _ANALYSIS_VIEW_ALIASES:
-        if node_type == "post_calc":
-            return "data"
-        if metrics and dimensions:
-            return "distribution"
-        return "count" if metrics else "list"
-    if view in {"list", "detail"} and metrics:
-        return "distribution" if dimensions else "count"
-    return view
+    return canonical_view(value, metrics, dimensions, node_type)
 
 
 def _order_items(value: Any) -> tuple[Any, ...]:
@@ -323,6 +283,29 @@ def _spec_order_issue(spec: QuerySpec, registry: CapabilityRegistry | None) -> s
                 f"可用字段：{'、'.join(sorted(allowed))}"
             )
     return ""
+
+
+def _spec_extreme_order_issue(
+    spec: QuerySpec,
+    node_types: dict[str, str],
+) -> str:
+    """极值问法 + 无排序 = 返回任意记录，必须在执行前拦住。
+
+    实测问题：“全库面积最大的病害在哪条路？”被规划成不带排序的明细查询，
+    结果给了一条面积 0.46 的记录。这不是数据问题，是契约缺失：带条数上限
+    的明细查询没有排序字段时，任何一行都可能被返回。
+    """
+    if node_types.get(spec.id) != "query_data":
+        return ""
+    if spec.view not in {"list", "detail", "data", "top_records"}:
+        return ""
+    if spec.order_by or spec.limit is None:
+        return ""
+    return (
+        f"节点 {spec.id} 的问题是极值口径（最大/最多/最高/排名），"
+        "但计划里没有排序字段：现在这条 SQL 返回的是任意几条记录，不是极值。"
+        "请补 order_by（极值对应的指标或字段及其方向）后重试。"
+    )
 
 
 def _unavailable_assist_reason(
@@ -1060,10 +1043,18 @@ def _analyze_once(
             else "data"
         ),
     )
+    requires_order = any(
+        str(item.get("candidate_type") or "") == "order_hint"
+        for item in assist_evidence
+    )
     for spec in specs:
         order_issue = _spec_order_issue(spec, registry)
         if order_issue:
             raise QuerySpecError(order_issue)
+        if requires_order:
+            extreme_issue = _spec_extreme_order_issue(spec, node_types)
+            if extreme_issue:
+                raise QuerySpecError(extreme_issue)
     plan = _complete_trend_analysis(plan, contract.intent_family)
     plan = _complete_trend_dependencies(plan)
     plan = _complete_trend_calculation(plan)

@@ -54,6 +54,25 @@ def validate_query_spec(
                 stage="contract",
             )
         )
+    # 逐条记录的视图不聚合。声明了指标却落在这些视图上，指标会被编译器丢掉，
+    # 用户问“总面积”只会拿到明细行，必须执行前拦住去修。
+    if (
+        node_type == "query_data"
+        and spec.view in {"list", "detail", "data"}
+        and spec.metrics
+    ):
+        issues.append(
+            VerificationIssue(
+                code="metrics_require_aggregate_view",
+                message=(
+                    f"视图 {spec.view} 不聚合，声明的指标"
+                    f"（{'、'.join(spec.metrics)}）不会被执行；"
+                    "请改用 count / sum / avg / distribution / top_groups"
+                ),
+                node_id=spec.id,
+                stage="contract",
+            )
+        )
     for field in projection.fields:
         if not field.display_label.strip():
             issues.append(

@@ -29,3 +29,11 @@ fields:
       physical_column: level
       requires_join: [route]
       enum_key: basic_facilities_routes.level
+    tech_grade:
+      expression: section.tech_grade
+      label: 公路技术等级
+      roles: [code, dimension]
+      physical_table: basic_facilities_sections
+      physical_column: tech_grade
+      requires_join: [section]
+      enum_key: basic_facilities_sections.tech_grade

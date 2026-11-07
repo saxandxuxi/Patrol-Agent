@@ -89,6 +89,72 @@ def _disease_filter(
     where: list[str],
 ) -> None:
     normalized = _base_field(field)
+    if normalized == "tech_grade":
+        # 公路技术等级在路段台账上（section.tech_grade），按病害的路段关联。
+        joins.add("section")
+        labels = {
+            "0": "高速公路",
+            "1": "一级公路",
+            "2": "二级公路",
+            "3": "三级公路",
+            "4": "四级公路",
+            "5": "等外公路",
+        }
+        texts = [
+            str(item)
+            for item in (value if isinstance(value, (list, tuple)) else [value])
+        ]
+        labels_used = [labels.get(item, item) for item in texts]
+        expression = (
+            "CASE section.tech_grade "
+            "WHEN '0' THEN '高速公路' WHEN '1' THEN '一级公路' "
+            "WHEN '2' THEN '二级公路' WHEN '3' THEN '三级公路' "
+            "WHEN '4' THEN '四级公路' WHEN '5' THEN '等外公路' "
+            "ELSE COALESCE(NULLIF(section.tech_grade, ''), '未填写') END"
+        )
+        if op in {"in", "="} and len(labels_used) > 1:
+            where.append(
+                expression
+                + " IN ("
+                + ", ".join(_literal(item) for item in labels_used)
+                + ")"
+            )
+            return
+        where.append(f"{expression} {op} {_literal(labels_used[0])}")
+        return
+    if normalized == "route_level":
+        # 行政等级存在路线台账上（route.level），普通病害查询要显式关联；
+        # 值可能已经过枚举解析（'1'）也可能还是中文标签（'省道'），两种都认。
+        joins.add("route")
+        labels = {
+            "0": "国道",
+            "1": "省道",
+            "2": "县道",
+            "3": "乡道",
+            "4": "村道",
+        }
+        texts = [
+            str(item)
+            for item in (value if isinstance(value, (list, tuple)) else [value])
+        ]
+        labels_used = [labels.get(item, item) for item in texts]
+        expression = (
+            "CASE route.level "
+            "WHEN '0' THEN '国道' WHEN '1' THEN '省道' "
+            "WHEN '2' THEN '县道' WHEN '3' THEN '乡道' "
+            "WHEN '4' THEN '村道' "
+            "ELSE COALESCE(NULLIF(route.level, ''), '未填写') END"
+        )
+        if op in {"in", "="} and len(labels_used) > 1:
+            where.append(
+                expression
+                + " IN ("
+                + ", ".join(_literal(item) for item in labels_used)
+                + ")"
+            )
+            return
+        where.append(f"{expression} {op} {_literal(labels_used[0])}")
+        return
     if normalized in {"route_name", "routes_id"}:
         if normalized == "route_name":
             if op == "in" or isinstance(value, (list, tuple)):
@@ -136,6 +202,22 @@ def _disease_filter(
     if normalized == "pile_number":
         distance = _pile_meter(value)
         where.append(f"disease.pile_distance {op} {distance}")
+        return
+    if normalized in {"pile_segment_500m", "pile_segment_1000m"}:
+        # 上一节点常把“高发桩号分段”作为依赖值传下来。分段是注册维度
+        # （由桩号换算的表达式），不是物理列，按同一表达式过滤即可，
+        # 不能凭空报“不支持过滤字段”。
+        segment_expression, _label = _disease_dimension(normalized, "", joins)
+        values = list(value) if isinstance(value, (list, tuple)) else [value]
+        if op in {"in", "="} and len(values) > 1:
+            where.append(
+                segment_expression
+                + " IN ("
+                + ", ".join(_literal(item) for item in values)
+                + ")"
+            )
+            return
+        where.append(f"{segment_expression} {op} {_literal(values[0])}")
         return
     expression = expressions.get(normalized)
     if not expression:
@@ -301,6 +383,18 @@ def _disease_dimension(
         return (
             "COALESCE(NULLIF(disease.road_surface_type, ''), '未填写')",
             "路面类型",
+        )
+    if normalized == "tech_grade":
+        if joins is None:
+            raise UnsupportedQuerySpec("公路技术等级分组缺少路段台账关联")
+        joins.add("section")
+        return (
+            "CASE section.tech_grade "
+            "WHEN '0' THEN '高速公路' WHEN '1' THEN '一级公路' "
+            "WHEN '2' THEN '二级公路' WHEN '3' THEN '三级公路' "
+            "WHEN '4' THEN '四级公路' WHEN '5' THEN '等外公路' "
+            "ELSE COALESCE(NULLIF(section.tech_grade, ''), '未填写') END",
+            "公路技术等级",
         )
     if normalized in {"collection_time_month", "month"}:
         return "DATE_FORMAT(disease.collection_time, '%Y-%m')", "月份"
@@ -503,6 +597,11 @@ def _join_sql(joins: set[str]) -> list[str]:
             values.append("JOIN route ON disease.routes_id = route.id")
     if "disease_patrol" in joins:
         values.append("JOIN patrol ON patrol.id = disease.patrol_id")
+    if "section" in joins:
+        values.append(
+            "JOIN section ON section.id = disease.sections_id "
+            "AND section.del_flag = 0"
+        )
     if "work_order" in joins:
         values.append("JOIN ai_work_order ON ai_work_order.problem_id = disease.id")
     return values

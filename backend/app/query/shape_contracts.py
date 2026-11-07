@@ -6,6 +6,58 @@ from .capability_registry import CapabilityRegistry
 from .contracts import QuerySpec, SUPPORTED_QUERY_VIEWS
 
 
+_VIEW_ALIASES = {
+    "group": "distribution",
+    "grouped": "distribution",
+    "aggregate": "distribution",
+    "summary": "distribution",
+}
+
+# 模型偶尔会自造“分析/图表”这类视图名。它们是表达方式，不是新能力：
+# 按有没有指标和维度落到已有视图，避免把内部视图名当成数据能力缺失。
+_ANALYSIS_VIEW_ALIASES = frozenset(
+    {
+        "analysis",
+        "analysis_only",
+        "insight",
+        "insights",
+        "statistics",
+        "stats",
+        "chart",
+        "graph",
+        "plot",
+        "visual",
+        "visualization",
+        "report",
+    }
+)
+
+# 这几个视图返回逐条记录，不聚合。声明了指标还落在这些视图上，
+# 指标会被编译器静默丢掉（用户要“总面积”，拿到的却是明细行）。
+_RECORD_VIEWS = frozenset({"list", "detail", "data"})
+
+
+def canonical_view(
+    value: object,
+    metrics: tuple[str, ...] = (),
+    dimensions: tuple[str, ...] = (),
+    node_type: str = "query_data",
+) -> str:
+    view = str(value or "").strip()
+    if view in {"table", "table_view"}:
+        return "distribution" if metrics and dimensions else "list"
+    view = _VIEW_ALIASES.get(view, view)
+    if view in _ANALYSIS_VIEW_ALIASES:
+        if node_type == "post_calc":
+            return "data"
+        if metrics and dimensions:
+            return "distribution"
+        return "count" if metrics else "list"
+    if view in _RECORD_VIEWS and metrics and node_type != "post_calc":
+        return "distribution" if dimensions else "count"
+    return view
+
+
 @dataclass(frozen=True)
 class ContractIssue:
     code: str
@@ -49,6 +101,18 @@ def validate_shape_contract(
                 spec,
                 "unsupported_view",
                 f"不支持的查询视图：{spec.view}",
+            ),
+        )
+    if spec.view in _RECORD_VIEWS and spec.metrics:
+        return (
+            _issue(
+                spec,
+                "metrics_require_aggregate_view",
+                (
+                    f"视图 {spec.view} 只返回逐条记录，声明的指标"
+                    f"（{'、'.join(spec.metrics)}）不会被执行；"
+                    "请改用 count / sum / avg / distribution / top_groups"
+                ),
             ),
         )
     subject = registry.snapshot.subjects.get(spec.subject)

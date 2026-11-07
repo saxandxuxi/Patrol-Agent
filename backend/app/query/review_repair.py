@@ -8,7 +8,7 @@ from ..services import field_grounding
 from .analysis import analyze_single_turn
 from .contracts import AnswerPackage, UserDecision, immutable_scope_hash
 from .review import ReviewEvidence, serialize_query_spec
-from .service import _default_schema, _execute_plan
+from .service import _default_schema, _execute_plan, _field_reach_from_ground
 
 
 _MAX_REPAIR_ROUNDS = 2
@@ -145,7 +145,12 @@ def repair_review_evidence(evidence: ReviewEvidence) -> ReviewRepairResult:
     kind = str(first_spec.get("kind") or "mysql")
     subject = str(first_spec.get("subject") or "")
     schema = _default_schema(kind)
-    reach = field_grounding.ground(kind, evidence.original_question)
+    # field_grounding.ground 返回的是命中字典，规划器要的是 FieldReachSet。
+    # 直接把它当 FieldReachSet 用会在取 .hits 时崩（'dict' object has no
+    # attribute 'hits'），用户点“答错了”后只会看到这句报错。
+    reach = _field_reach_from_ground(
+        field_grounding.ground(kind, evidence.original_question)
+    )
     feedback = _planning_feedback(evidence)
     previous_signature = ""
     last_answer: AnswerPackage | None = None

@@ -130,6 +130,16 @@
     过滤，名称按原话原样保留，不要拆词、不要加通配符。`luge_name` 是里程区段编号
     （形如 `k0+800-k0+899`），不是名称字段，禁止用它过滤路线或路段名称。
     过滤字段只能是能力视图里 `status=available` 的字段，并按字段目录给出的用法使用。
+32. 极值和排名问法（最大、最小、最多、最少、最高、最低、最严重、排名、前几名）必须
+    声明 `order_by`（排序字段 + `direction`）：返回明细用 `top_records`，返回分组用
+    `top_groups`。带 `limit` 却没有排序的明细查询返回的是任意几条记录，会被执行前
+    契约直接拒绝。
+33. `metrics` 必须落在聚合视图上：只能配 `count`、`sum`、`avg`、`distribution`、
+    `trend`、`top_groups`。`list`、`detail`、`data` 只返回逐条记录，声明指标会被
+    执行前契约拒绝。
+34. 依赖前序节点取值的查询，必须让结果自带依赖条件：明细节点把该字段写进
+    `output_projection`，分组节点把该字段写进 `dimensions`。否则用户看到
+    “K0+000~K0+500 共 304 处”时无法知道这是哪条路、哪种病害的数据。
 
 允许的 view：
 count / sum / avg / distribution / list / detail / top / trend / bucket_compare / photo / data

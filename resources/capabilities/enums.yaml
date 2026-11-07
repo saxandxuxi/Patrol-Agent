@@ -26,3 +26,20 @@ enums:
         label: 乡道
       "4":
         label: 村道
+  basic_facilities_sections.tech_grade:
+    table: basic_facilities_sections
+    column: tech_grade
+    label: 公路技术等级
+    values:
+      "0":
+        label: 高速公路
+      "1":
+        label: 一级公路
+      "2":
+        label: 二级公路
+      "3":
+        label: 三级公路
+      "4":
+        label: 四级公路
+      "5":
+        label: 等外公路

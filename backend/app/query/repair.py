@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .contracts import QuerySpec
+from .shape_contracts import canonical_view
 
 
 _ALLOWED_ACTIONS = {
@@ -76,7 +77,12 @@ def apply_repair(
             raise ValueError("scope cannot change during repair")
         return spec
     if patch.action == "patch_metric":
-        return replace(spec, metrics=_add_unique(spec.metrics, patch.payload.get("add")))
+        metrics = _add_unique(spec.metrics, patch.payload.get("add"))
+        return replace(
+            spec,
+            metrics=metrics,
+            view=canonical_view(spec.view, metrics, spec.dimensions, "query_data"),
+        )
     if patch.action == "patch_dimension":
         return replace(
             spec,
@@ -86,7 +92,10 @@ def apply_repair(
         view = str(patch.payload.get("view") or "").strip()
         if not view:
             raise ValueError("patch_view_shape requires a view")
-        return replace(spec, view=view)
+        return replace(
+            spec,
+            view=canonical_view(view, spec.metrics, spec.dimensions, "query_data"),
+        )
     if patch.action == "request_template_confirmation":
         return spec
     return spec

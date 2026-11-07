@@ -133,39 +133,64 @@ def _resolve_code(
     from .capability_registry import CapabilityRegistry, resolve_enum
 
     registry = registry or CapabilityRegistry.load(kind)
-    table = ""
-    if subject and subject in registry.snapshot.subjects:
-        table = registry.snapshot.subjects[subject].base_table
-    if not table:
-        table = next(
-            (
-                table_name
-                for table_name, column_name in registry.snapshot.enums
-                if column_name == field
-            ),
-            "",
-        )
-    result = resolve_enum(registry, table, field, raw_value)
-    if result.status == "ambiguous":
-        choices = "、".join(item.label for item in result.values)
-        raise QuerySpecAmbiguity(
-            f"字段 {table}.{field} 的值“{raw_value}”存在多个匹配：{choices}"
-        )
-    if result.status != "resolved" or not result.values:
-        raise QuerySpecError(
-            f"字段 {table}.{field} 的枚举值不在字典中：{raw_value}"
-        )
-    resolved = result.values[0]
-    text = str(raw_value or "").strip()
+    table, column = _enum_location(registry, subject, field)
+    raw_items = (
+        list(raw_value)
+        if isinstance(raw_value, (list, tuple))
+        else [raw_value]
+    )
+    texts = [str(item or "").strip() for item in raw_items]
+    texts = [item for item in texts if item]
+    if not texts:
+        raise QuerySpecError(f"字段 {table}.{column} 缺少可解析的枚举值")
+    resolved_values = []
+    for text in texts:
+        result = resolve_enum(registry, table, column, text)
+        if result.status == "ambiguous":
+            choices = "、".join(item.label for item in result.values)
+            raise QuerySpecAmbiguity(
+                f"字段 {table}.{column} 的值“{text}”存在多个匹配：{choices}"
+            )
+        if result.status != "resolved" or not result.values:
+            raise QuerySpecError(
+                f"字段 {table}.{column} 的枚举值不在字典中：{text}"
+            )
+        resolved_values.append(result.values[0])
+    codes = [item.code for item in resolved_values]
+    display = "、".join(
+        item.display or item.label for item in resolved_values
+    )
+    explicit = all(item and item in question for item in texts)
     return ValueBinding(
         field=field,
         op="=",
-        storage_value=resolved.code,
-        display_value=resolved.display,
-        source=_source(text, question),
-        resolver=f"enum:{table}.{field}",
-        raw_text=text,
+        storage_value=codes if len(codes) > 1 else codes[0],
+        display_value=display,
+        source="user_explicit" if explicit else "model_inference",
+        resolver=f"enum:{table}.{column}",
+        raw_text="、".join(texts),
     )
+
+
+def _enum_location(registry: Any, subject: str, field: str) -> tuple[str, str]:
+    """字段的枚举归属按字段目录里的物理列来定。
+
+    有些逻辑字段存在别的表上（行政等级 route_level 在路线台账），
+    不能拿主体的基表去找枚举。
+    """
+    capability = registry.snapshot.fields.get(subject, {}).get(field)
+    if (
+        capability is not None
+        and capability.physical_table
+        and capability.physical_column
+    ):
+        return capability.physical_table, capability.physical_column
+    if subject in registry.snapshot.subjects:
+        return registry.snapshot.subjects[subject].base_table, field
+    for table, column in registry.snapshot.enums:
+        if column == field:
+            return table, column
+    return "", field
 
 
 def resolve_value(
@@ -190,12 +215,7 @@ def resolve_value(
         from .capability_registry import CapabilityRegistry
 
         enum_registry = CapabilityRegistry.load(kind)
-    enum_table = (
-        enum_registry.snapshot.subjects[subject].base_table
-        if subject in enum_registry.snapshot.subjects
-        else ""
-    )
-    if (enum_table, field) in enum_registry.snapshot.enums:
+    if _enum_location(enum_registry, subject, field) in enum_registry.snapshot.enums:
         value = _resolve_code(
             field,
             raw_value,

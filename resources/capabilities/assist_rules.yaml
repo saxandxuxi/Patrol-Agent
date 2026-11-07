@@ -18,6 +18,11 @@ keyword_rules:
     any: [对比, 相比, 变化, 差异, 差多少, 多了, 少了, 分别]
     candidate_type: comparison_hint
     candidate_value: compare
+  superlative_hint:
+    any: [最大, 最小, 最多, 最少, 最高, 最低, 最严重, 最差, 最好, 排名, 第一名, 前几名, 前几条]
+    candidate_type: order_hint
+    candidate_value: order_required
+    reason: "“最大/最多/最高/排名”这类极值问法必须给出排序字段：带条数上限却没有排序的查询，返回的是任意几条记录，不是极值。"
   unknown_type:
     any: [认不出来, 认不出, 识别不出, 识别不了, 无法识别, 未识别, 未知类型, 类型未知, 没有识别, 没识别]
     candidate_type: semantic_value
@@ -109,6 +114,14 @@ regex_rules:
     candidate_value: route_level
     requires_field: true
     reason: "“行政等级/行政级别/道路等级”在病害主体下的分组字段是 route_level（国道/省道/县道/乡道/村道），需要关联路线台账。"
+  - id: group_by_tech_grade
+    pattern: "(?:公路)?(?:路面)?技术等级|高速(?:公路)?等级|一级公路|二级公路|三级公路|四级公路"
+    candidate_type: semantic_field
+    candidate_field: tech_grade
+    candidate_value: tech_grade
+    discouraged_fields: [route_level, road_surface_type]
+    requires_field: true
+    reason: "“公路技术等级/路面技术等级（高速公路、一级公路…）”是路段台账的 tech_grade，与行政等级（国道/省道）是两件事，不能互相替代。"
   - id: group_by_month
     pattern: "(?:按|各|每(?:个|月)?)[^，。；]{0,8}月|各月|按月"
     candidate_type: group_by
@@ -201,6 +214,14 @@ regex_rules:
     candidate_type: field_range
     candidate_field: pile_number
     reason: "桩号区间候选，数值边界应由受控桩号解析器换算后再进入 SQL。"
+  - id: pile_segment_group
+    pattern: "(?:高发路段|高发桩号|病害集中|密集路段|哪些位置|什么位置|多少米处|哪个桩号|桩号分段|多少米范围)"
+    candidate_type: group_by
+    candidate_field: pile_segment_500m
+    candidate_value: pile_segment_500m
+    discouraged_fields: [luge_name]
+    requires_field: true
+    reason: "“高发路段/哪些位置/多少米处”要按注册的桩号分段维度分组（默认 500 米），不能按 luge_name 这类里程区段编号分组。"
 
 metric_rules:
   metric_count:
