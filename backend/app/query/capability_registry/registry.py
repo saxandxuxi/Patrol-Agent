@@ -20,12 +20,14 @@ from .models import (
     PlannerFieldView,
     SubjectCapability,
     freeze_snapshot,
+    thaw_snapshot,
 )
 
 
 class CapabilityRegistry:
-    def __init__(self, snapshot: CapabilitySnapshot):
+    def __init__(self, snapshot: CapabilitySnapshot, kind: str = "mysql"):
         self._snapshot = snapshot
+        self._kind = str(kind or "mysql")
 
     @property
     def snapshot(self) -> CapabilitySnapshot:
@@ -45,6 +47,7 @@ class CapabilityRegistry:
                 base_table=str(raw.get("base_table") or ""),
                 joins=dict(raw.get("joins") or {}),
                 allowed_views=tuple(str(item) for item in raw.get("allowed_views") or ()),
+                entities=tuple(str(item) for item in raw.get("entities") or ()),
             )
             for subject_id, raw in docs["subjects"].items()
             if isinstance(raw, dict)
@@ -55,6 +58,9 @@ class CapabilityRegistry:
                     field_id=str(field_id),
                     expression=str(raw.get("expression") or ""),
                     label=str(raw.get("label") or field_id),
+                    filter_expression=str(
+                        raw.get("filter_expression") or ""
+                    ),
                     roles=tuple(str(item) for item in raw.get("roles") or ()),
                     unit=str(raw.get("unit") or ""),
                     physical_table=str(raw.get("physical_table") or ""),
@@ -77,6 +83,9 @@ class CapabilityRegistry:
                     unit=str(raw.get("unit") or ""),
                     allowed_views=tuple(str(item) for item in raw.get("allowed_views") or ()),
                     requires_join=tuple(str(item) for item in raw.get("requires_join") or ()),
+                    propagate_across_groups=bool(
+                        raw.get("propagate_across_groups", False)
+                    ),
                 )
                 for metric_id, raw in raw_metrics.items()
                 if isinstance(raw, dict) and not str(metric_id).startswith("_")
@@ -84,6 +93,7 @@ class CapabilityRegistry:
             for subject, raw_metrics in docs["metrics"].items()
             if isinstance(raw_metrics, dict) and not str(subject).startswith("_")
         }
+        metric_generation = docs["metrics"].get("_field_metric_generation") or {}
         derived_metrics = {
             str(subject): {
                 str(metric_id): DerivedMetricCapability(
@@ -170,10 +180,11 @@ class CapabilityRegistry:
             time_buckets=dict(docs["time_buckets"]),
             result_words=dict(docs["result_words"]),
             repair_policy=dict(docs["repair_policy"]),
+            capability_gaps=dict(docs["capability_gaps"]),
             templates=dict(docs["templates"]),
             calculators=dict(docs["calculators"]),
         )
-        registry = cls(snapshot)
+        registry = cls(snapshot, kind)
         registry._augment_physical_fields(kind)
         field_metadata = (
             docs["templates"].get("fields")
@@ -190,7 +201,7 @@ class CapabilityRegistry:
                     status=str(metadata.get("status") or "available"),
                     unavailable_reason=str(metadata.get("reason") or ""),
                 )
-        registry._augment_numeric_metrics()
+        registry._augment_numeric_metrics(metric_generation)
         registry._augment_enums(kind)
         registry._validate_physical_fields(kind)
         registry._snapshot = freeze_snapshot(registry.snapshot)
@@ -209,6 +220,7 @@ class CapabilityRegistry:
                 data_type=field.data_type,
                 comment=field.comment,
                 roles=field.roles,
+                unit=field.unit,
                 enum_values=tuple(enum.values.values()) if enum else (),
                 status=field.status,
                 unavailable_reason=field.unavailable_reason,
@@ -229,6 +241,7 @@ class CapabilityRegistry:
                 "unit": metric.unit,
                 "allowed_views": list(metric.allowed_views),
                 "requires_join": list(metric.requires_join),
+                "propagate_across_groups": metric.propagate_across_groups,
             }
             for metric_id, metric in self.snapshot.metrics.get(subject, {}).items()
         }
@@ -249,6 +262,9 @@ class CapabilityRegistry:
         calculators = {
             tool: {
                 "input_shapes": list(raw.get("input_shapes") or ()),
+                "source_selectors": list(
+                    raw.get("source_selectors") or ()
+                ),
                 "operations": list(raw.get("operations") or ()),
                 "precision": int(raw.get("precision") or 6),
                 "zero_denominator": str(
@@ -266,6 +282,49 @@ class CapabilityRegistry:
             )
             or {}
         )
+        entities: dict[str, dict[str, Any]] = {}
+        if subject_cap.entities:
+            from .entity_resolver import list_entities
+
+        for entity_id in subject_cap.entities:
+            capability = self.snapshot.entities.get(entity_id)
+            if capability is None:
+                continue
+            try:
+                values = list_entities(self, entity_id, self._kind)
+            except Exception:  # noqa: BLE001
+                values = ()
+            entities[entity_id] = {
+                "identity": capability.identity,
+                "values": [
+                    {
+                        "code": item.code,
+                        "label": item.label,
+                        # 别名和规范名相同的不用重复占上下文，只留真正的别名。
+                        "aliases": [
+                            alias
+                            for alias in item.aliases
+                            if alias and alias != item.label
+                        ],
+                    }
+                    for item in values
+                ],
+            }
+        capability_gaps = {
+            gap_id: {
+                "status": str(raw.get("status") or "unavailable"),
+                "reason": str(raw.get("reason") or ""),
+            }
+            for gap_id, raw in self.snapshot.capability_gaps.items()
+            if isinstance(raw, Mapping)
+            and (
+                not raw.get("applies_to")
+                or subject in {
+                    str(item)
+                    for item in raw.get("applies_to") or ()
+                }
+            )
+        }
         return PlannerCapabilityView(
             subject=subject,
             base_table=subject_cap.base_table,
@@ -278,6 +337,11 @@ class CapabilityRegistry:
             derived_metric_details=derived_metric_details,
             calculators=calculators,
             business_values=business_values,
+            entities=entities,
+            capability_gaps=capability_gaps,
+            query_semantics=thaw_snapshot(
+                self.snapshot.query_shapes.get("planner_semantics") or {}
+            ),
         )
 
     def metric(
@@ -359,9 +423,17 @@ class CapabilityRegistry:
                     },
                 )
 
-    def _augment_numeric_metrics(self) -> None:
+    def _augment_numeric_metrics(
+        self,
+        generation_rules: Mapping[str, Any],
+    ) -> None:
         for subject_id, fields in self.snapshot.fields.items():
             metrics = dict(self.snapshot.metrics.get(subject_id) or {})
+            subject_rules = generation_rules.get(subject_id) or {}
+            if not isinstance(subject_rules, Mapping):
+                raise CapabilityConfigError(
+                    f"invalid_metric_generation: {subject_id}"
+                )
             for field_id, field in fields.items():
                 numeric = (
                     "numeric" in field.roles
@@ -372,6 +444,23 @@ class CapabilityRegistry:
                 )
                 if not numeric or not field.physical_column:
                     continue
+                rule = subject_rules.get(field_id) or {}
+                if not isinstance(rule, Mapping):
+                    raise CapabilityConfigError(
+                        f"invalid_metric_generation: {subject_id}.{field_id}"
+                    )
+                divisor = str(rule.get("divisor") or "").strip()
+                if divisor:
+                    try:
+                        valid_divisor = float(divisor) > 0
+                    except ValueError:
+                        valid_divisor = False
+                    if not valid_divisor:
+                        raise CapabilityConfigError(
+                            "invalid_metric_generation_divisor: "
+                            f"{subject_id}.{field_id}"
+                        )
+                output_unit = str(rule.get("unit") or field.unit)
                 for prefix, aggregate in (
                     ("sum_", "SUM"),
                     ("avg_", "AVG"),
@@ -381,10 +470,16 @@ class CapabilityRegistry:
                     metric_id = f"{prefix}{field_id}"
                     if metric_id in metrics:
                         continue
+                    expression = (
+                        f"{aggregate}({{alias}}.{field.physical_column})"
+                    )
+                    if divisor:
+                        expression = f"{expression} / {divisor}"
                     metrics[metric_id] = MetricCapability(
                         metric_id=metric_id,
-                        expression=f"{aggregate}({{alias}}.{field.physical_column})",
+                        expression=expression,
                         label=f"{field.label}{'合计' if prefix == 'sum_' else '平均' if prefix == 'avg_' else '最小' if prefix == 'min_' else '最大'}",
+                        unit=output_unit,
                         allowed_views=(
                             "count",
                             "distribution",

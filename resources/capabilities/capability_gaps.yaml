@@ -1,0 +1,21 @@
+capability_gaps:
+  management_zone:
+    status: unavailable
+    applies_to: [disease, patrol, route, section, work_order]
+    reason: 病害、巡检和路线台账没有可靠的管养片区名称或路线归属字段，无法按管养片区筛选、分组或统计。
+  patrol_pile_scope:
+    status: partial
+    applies_to: [disease, patrol]
+    reason: 巡检任务本身没有完整的桩号覆盖范围；只能通过病害记录的 patrol_id 与 pile_distance 关联，定位在该路段实际产生过病害记录的巡检批次，不能据此声称任务已完整巡检整个桩号区间。
+  inspection_coverage_scope:
+    status: partial
+    applies_to: [disease, patrol]
+    reason: 巡检任务可以通过 ai_maintain_routes_patrol 获取路线归属，但没有路段或桩号连续覆盖范围字段；可以比较任务关联病害记录的有无和集合差异，但不能据此证明任务完整覆盖同一路段，也不能把“没有记录”说成“没有病害”或据此断言长期扩张趋势。
+  device_runtime_status:
+    status: unavailable
+    applies_to: [patrol]
+    reason: 当前没有设备在线、离线、故障状态及最后上报时间字段；巡检状态只描述巡检任务，不能代替设备运行状态。
+  lane_level_distribution:
+    status: unavailable
+    applies_to: [disease]
+    reason: 业务能力文档声明车道分布尚未更新，当前不能按车道生成可靠的病害数量、热力图或分布结论。

@@ -1,4 +1,104 @@
 query_shapes:
+  planner_semantics:
+    answer_operations:
+      single_result:
+        meaning: 一个查询视图即可回答问题。
+      scalar_comparison:
+        meaning: 比较两个或多个已有数值的大小、差值或比例。
+      entity_set_comparison:
+        meaning: 比较两个真实批次之间新增或消失的病害、巡检等实体记录。
+        required_assertion: dataset_comparison
+        required_dependency_views: [list, detail]
+        required_identity_field:
+          disease: problem_number
+          patrol: [task_number, patrol_number]
+      trend:
+        meaning: 用户要求观察时间序列的变化方向。
+        default_time_dimension: month
+      ranking:
+        meaning: 用户要求按真实指标返回极值或前 N 名。
+      analysis:
+        meaning: 用户要求基于已有事实解释、归纳或比较多个指标。
+      unsupported:
+        meaning: 当前字段、实体或数据覆盖无法可靠回答。
+    view_selection:
+      ordered_complete_result:
+        meaning: 用户要求按指标排序并查看全部对象，但没有给出明确的前 N 数量。
+        grouped_view: distribution
+        detail_view: list
+        preserve_order_by: true
+        limit: null
+      explicit_top_n:
+        meaning: 用户明确给出了前几名、最多几个或前 N 条。
+        grouped_view: top_groups
+        detail_view: top_records
+        require_positive_limit: true
+        require_order_by: true
+    time_scope:
+      new_records_without_baseline:
+        meaning: 用户只给出一个时间范围并询问新增情况，未给出上一周期或上一次巡查作为比较基线。
+        default_scope: 统计该时间范围内新采集或新发现的病害记录。
+        preserve_conditions:
+        - 用户原话中的路线、病害类型和其他过滤条件
+        - 明确的时间范围
+        prohibited_defaults:
+        - 不得自行推断上一周期，也不得把时间范围内的总量说成相对增量。
+        - 不得把“新增”映射为 problem_source 或其他枚举条件。
+        final_answer_note: 必须说明这是所选时间范围内新采集或新发现的记录口径。
+      explicit_period_comparison:
+        meaning: 用户明确要求与上一周期、上一季度或上一次巡查比较。
+        required_shape: 为每个周期生成同形数据节点，再由 post_calc 计算或解释差值。
+        entity_scope_note: 如果比较对象是“新增或消失的病害/任务实体”，按 entity_set_comparison 的明细与身份字段契约执行，不能只见“比较”就做 COUNT 相减。
+    segment_patrol_evidence:
+      meaning: 巡检任务没有完整桩号覆盖字段时，用户仍可按“该路段实际产生过病害记录”的巡检批次提问；该口径只证明任务在该路段留下了病害记录，不证明任务完整巡检了整段。
+      allowed_subject: disease
+      required_filters: [route_name, pile_number]
+      batch_dimension: patrol_number
+      batch_assertion: recent_window
+      final_answer_note: 必须写明“这是按病害记录定位的巡检批次”，不能把结果说成完整巡检覆盖。
+    unanchored_pile_segment:
+      meaning: 用户只说“K50路段”而未给起止边界时，按 K50+000 至 K51+000 的 1 公里路段理解；用户给出明确起止边界时始终以用户边界为准。
+      default_span_m: 1000
+      start_boundary: 含起点
+      end_boundary: 不含终点
+    entity_set_comparison:
+      meaning: 用户要求比较两次巡查、两个批次或两个时间点之间新增或消失的实体记录。
+      required_assertions:
+      - dataset_comparison
+      allowed_dependency_views:
+      - list
+      - detail
+      identity_fields:
+        disease:
+        - problem_number
+        patrol:
+        - task_number
+        - patrol_number
+      rules:
+      - 两个数据节点必须使用相同的实体身份字段，并按两个真实的巡查批次或周期取数。
+      - 不允许用两个 COUNT 指标相减代替实体集合差集。
+      - 用户给出两个日期时，必须先把日期落实为对应路线、对应巡检批次；日期没有对应批次时返回明确的口径缺失或不可用原因。
+    enum_dimension_completion:
+      assertion: complete_enum_dimensions
+      meaning: 用户明确要求查看某个闭集枚举维度的全部实际成员时，结果必须补出缺失成员并按 0 展示，不能把“未返回该分组”解释成无法判断。
+      default_complete_fields:
+        disease:
+        - up_or_down
+      excluded_values:
+      - 全部/未区分
+      - 全部/未知
+      - 未区分
+      - 未知
+      - 未填写
+      - 未识别
+    nested_top_groups:
+      assertion: top_per_outer_group
+      meaning: 用户要求每个外层类别分别返回组内前 N 名时，按外层类别分区排名，不能把整个结果集只取全局前 N 名。
+      required_view: top_groups
+      dimension_order:
+      - outer_group_dimension
+      - within_group_ranking_dimension
+      limit_meaning: 每个外层分区内保留的行数
   count:
     allowed_views:
     - count
@@ -29,6 +129,8 @@ query_shapes:
     - project
     group_by:
     - damage_type
+    - categories_type
+    - category_name
     - pic_type
     - route
     - section
@@ -61,6 +163,7 @@ query_shapes:
     - pile_bucket
     - pile_segment_500m
     - pile_segment_1000m
+    - pile_segment_<N>m
     - manage_dept
     - problem_status
     - problem_source

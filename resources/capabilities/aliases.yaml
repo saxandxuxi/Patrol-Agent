@@ -12,7 +12,25 @@ aliases:
   disease_type:
     横缝: 横向裂缝
     纵缝: 纵向裂缝
+    竖缝: 纵向裂缝
     龟裂: 网状裂缝
+    网裂: 网状裂缝
+  route_name:
+    怀化市绕城高速公路:
+    - 怀化绕城高速
+    - 怀化绕城
+  route_name_rules:
+    connectors: [到, 至, 去, 往]
+    leading_words: [从, 由]
+    suffixes: [高速公路, 高速, 公路, 线]
+    determiners: [那一条, 这一条, 那一段, 这一段, 那条, 这条, 那段, 这段, 该条, 此条, 该段, 此段, 一段, 的]
+  field_equivalences:
+    - left: route_name
+      right: routes_id
+      reason: 路线名称是展示值，routes_id 是同一路线的存储关联值
+    - left: device_code
+      right: equipment_id
+      reason: 病害设备编号与巡检任务设备关联值使用同一套设备编号
   profiling:
     subjects:
     - 字段

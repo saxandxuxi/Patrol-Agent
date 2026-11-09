@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from app.query.compiler import CompiledQuery
+from app.query.capability_registry import CapabilityRegistry
 from app.query.contracts import (
     AnswerPackage,
     ExecutionObservation,
@@ -11,6 +12,7 @@ from app.query.contracts import (
     QuerySpec,
     QuerySpecAmbiguity,
     QuerySpecError,
+    UserDecision,
     ValueBinding,
     VerificationIssue,
     VerificationReport,
@@ -21,6 +23,7 @@ from app.query.service import (
     _default_post_calc_executor,
     _default_template_executor,
     _default_wren_executor,
+    _execute_plan,
     _materialize_inputs,
     _observation_payload,
     _repair_failed_post_calc,
@@ -28,11 +31,13 @@ from app.query.service import (
     _section_identity,
     _simple_spec_mdl,
     _terminal_sections,
+    confirm_single_turn,
     start_single_turn,
 )
+from app.query.scope_facts import INSIDE, OUTSIDE, PARTIAL, ScopeFacts
 from app.query.spec_mdl import UnsupportedQuerySpec
 from app.services.llm import LLMError
-from app.services.nl2sql import QueryPlanError
+from app.services.route_resolver import QueryPlanError
 from app.query.templates import (
     CandidateSet,
     ConfirmationCard,
@@ -107,6 +112,813 @@ def count_observation() -> ExecutionObservation:
 
 
 class ServiceTests(unittest.TestCase):
+    @patch("app.query.service.empty_scope_facts")
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    def test_count_outside_known_coverage_returns_zero_with_explicit_caveat(
+        self,
+        compile_query,
+        execute_compiled,
+        empty_scope_facts,
+    ):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(
+                ValueBinding(
+                    field="collection_time",
+                    op="between",
+                    storage_value=("2026-10-15", "2026-10-16"),
+                    display_value="2026年10月15日",
+                    source="user_explicit",
+                    resolver="date",
+                    raw_text="2026年10月15日",
+                ),
+            ),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="2026年10月15日怀化绕城高速检出多少处泛油",
+        )
+        compile_query.return_value = compiled_count_query()
+        execute_compiled.return_value = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT COUNT(*) AS n FROM ai_problem",
+            columns=("n",),
+            row_count=1,
+            preview_rows=({"n": "0"},),
+            result_rows=({"n": "0"},),
+            rows_fetched=1,
+        )
+        empty_scope_facts.return_value = ScopeFacts(
+            verdict=OUTSIDE,
+            detail=(
+                "怀化市绕城高速公路现有病害记录的采集时间在 "
+                "2026-10-28 16:43 至 2026-11-04 10:37"
+            ),
+        )
+
+        answer = _execute_plan(
+            QueryPlan(
+                question=spec.question,
+                nodes=(PlanNode(id="q1", spec=spec),),
+            ),
+            UserDecision(token=""),
+            registry=CapabilityRegistry.load(),
+        )
+
+        section = answer.sections[0]
+        self.assertEqual(section["status"], "accepted")
+        self.assertIn("0处", section["answer"])
+        self.assertIn("2026-10-28", section["answer"])
+        self.assertIn("不能据此推断", section["answer"])
+        self.assertIn("2026-10-28", section["coverage_detail"])
+
+    @patch("app.query.service.empty_scope_facts")
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    def test_distribution_outside_known_coverage_uses_same_scope_caveat(
+        self,
+        compile_query,
+        execute_compiled,
+        empty_scope_facts,
+    ):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("problem_type_name",),
+            filters=(
+                ValueBinding(
+                    field="route_name",
+                    op="=",
+                    storage_value="sk-route",
+                    display_value="上海-昆明",
+                    source="user_explicit",
+                    resolver="route_dictionary",
+                    raw_text="上海-昆明",
+                ),
+                ValueBinding(
+                    field="pile_number",
+                    op="between",
+                    storage_value=(1180000, 1220000),
+                    display_value="K1180+000 至 K1220+000",
+                    source="user_explicit",
+                    resolver="pile_range",
+                    raw_text="K1180到K1220",
+                ),
+            ),
+            output_projection=("problem_type_name", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="上海-昆明K1180到K1220按病害类型分别有多少处",
+        )
+        compile_query.return_value = compiled_count_query()
+        execute_compiled.return_value = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT problem_type_name, COUNT(*) FROM ai_problem",
+            columns=("problem_type_name", "count"),
+            row_count=0,
+            preview_rows=(),
+            result_rows=(),
+            rows_fetched=0,
+        )
+        empty_scope_facts.return_value = ScopeFacts(
+            verdict=OUTSIDE,
+            detail=(
+                "查询区间超出该路线桩号覆盖范围；"
+                "上海-昆明现有病害记录的桩号在 "
+                "K1256+462~K1430+687"
+            ),
+        )
+
+        answer = _execute_plan(
+            QueryPlan(
+                question=spec.question,
+                nodes=(PlanNode(id="q1", spec=spec),),
+            ),
+            UserDecision(token=""),
+            registry=CapabilityRegistry.load(),
+        )
+
+        section = answer.sections[0]
+        self.assertEqual(section["status"], "accepted")
+        self.assertIn("没有可返回的分组记录", section["answer"])
+        self.assertIn("K1256+462~K1430+687", section["answer"])
+        self.assertIn("不能据此推断", section["answer"])
+        self.assertNotIn("无法给出数值", section["answer"])
+
+    @patch("app.query.service.empty_scope_facts")
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    def test_partial_pile_coverage_zero_is_not_reported_as_complete_zero(
+        self,
+        compile_query,
+        execute_compiled,
+        empty_scope_facts,
+    ):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(
+                ValueBinding(
+                    field="route_name",
+                    op="=",
+                    storage_value="bt-route",
+                    display_value="包头-茂名",
+                    source="user_explicit",
+                    resolver="route_dictionary",
+                    raw_text="包头-茂名高速",
+                ),
+                ValueBinding(
+                    field="pile_number",
+                    op="between",
+                    storage_value=(2200000, 2210000),
+                    display_value="K2200+000 至 K2210+000",
+                    source="user_explicit",
+                    resolver="pile_range",
+                    raw_text="K2200到K2210",
+                ),
+            ),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="包头-茂名K2200到K2210有多少处病害",
+        )
+        compile_query.return_value = compiled_count_query()
+        execute_compiled.return_value = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT COUNT(*) AS n FROM ai_problem",
+            columns=("n",),
+            row_count=1,
+            preview_rows=({"n": "0"},),
+            result_rows=({"n": "0"},),
+            rows_fetched=1,
+        )
+        empty_scope_facts.return_value = ScopeFacts(
+            verdict=PARTIAL,
+            detail=(
+                "查询区间仅部分落在该路线的现有病害记录覆盖范围内；"
+                "包头-茂名现有病害记录的桩号在 "
+                "K2161+000~K2203+999。未覆盖部分不能判定为无病害"
+            ),
+        )
+
+        answer = _execute_plan(
+            QueryPlan(
+                question=spec.question,
+                nodes=(PlanNode(id="q1", spec=spec),),
+            ),
+            UserDecision(token=""),
+            registry=CapabilityRegistry.load(),
+        )
+
+        section = answer.sections[0]
+        self.assertEqual(section["status"], "accepted")
+        self.assertNotIn("failure_code", section)
+        self.assertIn("重叠部分未观察到匹配记录", section["answer"])
+        self.assertIn("不是整个查询区间的完整零结果", section["answer"])
+        self.assertIn("未覆盖部分不能判定为无病害", section["answer"])
+        self.assertNotIn("属于“范围内确实没有记录”", section["answer"])
+
+    @patch("app.query.service.coverage_facts")
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    def test_non_empty_pile_query_carries_coverage_evidence(
+        self,
+        compile_query,
+        execute_compiled,
+        coverage_facts,
+    ):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(
+                ValueBinding(
+                    field="route_name",
+                    op="=",
+                    storage_value="bt-route",
+                    display_value="包头-茂名",
+                    source="user_explicit",
+                    resolver="route_dictionary",
+                    raw_text="包头-茂名高速",
+                ),
+                ValueBinding(
+                    field="pile_number",
+                    op="between",
+                    storage_value=(2200000, 2210000),
+                    display_value="K2200+000 至 K2210+000",
+                    source="user_explicit",
+                    resolver="pile_range",
+                    raw_text="K2200到K2210",
+                ),
+            ),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="包头-茂名K2200到K2210有多少处病害",
+        )
+        compile_query.return_value = compiled_count_query()
+        execute_compiled.return_value = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT COUNT(*) AS n FROM ai_problem",
+            columns=("n",),
+            row_count=1,
+            preview_rows=({"n": "98"},),
+            result_rows=({"n": "98"},),
+            rows_fetched=1,
+        )
+        coverage_facts.return_value = ScopeFacts(
+            verdict=PARTIAL,
+            detail=(
+                "查询区间仅部分落在该路线的现有病害记录覆盖范围内；"
+                "包头-茂名现有病害记录的桩号在 "
+                "K2161+000~K2203+999。未覆盖部分不能判定为无病害，"
+                "当前结果只能代表有记录覆盖的重叠部分"
+            ),
+        )
+
+        answer = _execute_plan(
+            QueryPlan(
+                question=spec.question,
+                nodes=(PlanNode(id="q1", spec=spec),),
+            ),
+            UserDecision(token=""),
+            registry=CapabilityRegistry.load(),
+        )
+
+        section = answer.sections[0]
+        self.assertEqual(section["status"], "accepted")
+        self.assertIn("K2161+000~K2203+999", section["coverage_detail"])
+        self.assertIn("K2161+000~K2203+999", section["answer"])
+        self.assertIn("仅部分", section["answer"])
+        self.assertIn("未覆盖部分不能判定为无病害", section["answer"])
+        self.assertIn("只能代表有记录覆盖的重叠部分", section["answer"])
+
+    @patch("app.query.service.coverage_facts")
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    def test_null_joined_route_is_rendered_as_unlinked_relation(
+        self,
+        compile_query,
+        execute_compiled,
+        coverage_facts,
+    ):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=("task_number", "route_name"),
+            filters=(),
+            output_projection=("linked_disease_count",),
+            order_by=(),
+            limit=500,
+            required_assertions=(),
+            question="列出巡检任务、路线和关联病害数",
+        )
+        compile_query.return_value = CompiledQuery(
+            "SELECT task_number, route_name, linked_disease_count",
+            "wren",
+            "wren",
+        )
+        execute_compiled.return_value = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT task_number, route_name, linked_disease_count",
+            columns=("任务编号", "路线名称", "任务关联病害数"),
+            row_count=1,
+            preview_rows=(
+                {
+                    "任务编号": "XJJL202611050000",
+                    "路线名称": None,
+                    "任务关联病害数": "0",
+                },
+            ),
+            result_rows=(
+                {
+                    "任务编号": "XJJL202611050000",
+                    "路线名称": None,
+                    "任务关联病害数": "0",
+                },
+            ),
+            rows_fetched=1,
+        )
+        coverage_facts.return_value = ScopeFacts(
+            verdict=INSIDE,
+            detail="巡检记录覆盖到 2026-11-05 09:53",
+        )
+
+        answer = _execute_plan(
+            QueryPlan(
+                question=spec.question,
+                nodes=(PlanNode(id="q1", spec=spec),),
+            ),
+            UserDecision(token=""),
+            registry=CapabilityRegistry.load(),
+        )
+
+        self.assertIn("路线名称 未关联路线", answer.text)
+        self.assertIn("任务关联病害数 0", answer.text)
+        self.assertNotIn("路线名称 无有效数值", answer.text)
+
+    @patch("app.query.service._default_post_calc_executor")
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    def test_completed_enum_zero_group_reaches_post_calc(
+        self,
+        compile_query,
+        execute_compiled,
+        post_calc_executor,
+    ):
+        source_spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count", "route_length_km"),
+            dimensions=("up_or_down",),
+            filters=(
+                ValueBinding(
+                    field="up_or_down",
+                    op="in",
+                    storage_value=["1", "2"],
+                    display_value="上行、下行",
+                    source="user_explicit",
+                    resolver="enum",
+                    raw_text="上行和下行",
+                ),
+            ),
+            output_projection=("up_or_down", "count", "route_length_km"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="统计上下行各自坑槽数量和路线长度",
+        )
+        post_calc_spec = QuerySpec(
+            id="compare",
+            kind="mysql",
+            subject="disease",
+            view="data",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("analysis_only",),
+            question="比较上下行密度",
+        )
+        compile_query.return_value = CompiledQuery(
+            "SELECT direction, count, route_length_km",
+            "wren",
+            "wren",
+        )
+        execute_compiled.return_value = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT direction, count, route_length_km",
+            columns=("上下行", "数量", "路线长度"),
+            row_count=1,
+            preview_rows=(
+                {"上下行": "上行", "数量": "4", "路线长度": "540.299"},
+            ),
+            result_rows=(
+                {"上下行": "上行", "数量": "4", "路线长度": "540.299"},
+            ),
+            rows_fetched=1,
+        )
+        post_calc_executor.return_value = {
+            "accepted": True,
+            "reply": "已比较上下行数据。",
+            "rows": [],
+            "columns": [],
+        }
+
+        _execute_plan(
+            QueryPlan(
+                question="上行和下行哪一侧的坑槽病害更密集",
+                nodes=(
+                    PlanNode(id="q1", spec=source_spec),
+                    PlanNode(
+                        id="compare",
+                        spec=post_calc_spec,
+                        depends_on=("q1",),
+                        node_type="post_calc",
+                    ),
+                ),
+            ),
+            UserDecision(token=""),
+            registry=CapabilityRegistry.load(),
+        )
+
+        upstream = post_calc_executor.call_args.args[1]["q1"]["rows"]
+        down = next(row for row in upstream if row["上下行"] == "下行")
+        self.assertEqual(down["数量"], 0)
+        self.assertEqual(down["路线长度"], "540.299")
+
+    @patch("app.query.service._default_post_calc_executor")
+    @patch("app.query.service.empty_scope_facts")
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    def test_post_calc_is_unsupported_when_upstream_partial_scope_is_empty(
+        self,
+        compile_query,
+        execute_compiled,
+        empty_scope_facts,
+        post_calc_executor,
+    ):
+        source_spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(
+                ValueBinding(
+                    field="route_name",
+                    op="=",
+                    storage_value="route-1",
+                    display_value="怀化市绕城高速公路",
+                    source="user_explicit",
+                    resolver="route_dictionary",
+                ),
+                ValueBinding(
+                    field="collection_time",
+                    op=">=",
+                    storage_value="2026-11-01 00:00:00",
+                    display_value="2026-11-01 00:00:00",
+                    source="user_explicit",
+                    resolver="time_range",
+                ),
+                ValueBinding(
+                    field="collection_time",
+                    op="<",
+                    storage_value="2026-12-01 00:00:00",
+                    display_value="2026-12-01 00:00:00",
+                    source="user_explicit",
+                    resolver="time_range",
+                ),
+            ),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+            question="统计指定批次病害数量",
+        )
+        post_calc_spec = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="data",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("analysis_only",),
+            question="根据前序结果计算主病害占比",
+        )
+        compile_query.return_value = CompiledQuery(
+            "SELECT COUNT(*) AS n",
+            "wren",
+            "wren",
+        )
+        execute_compiled.return_value = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT COUNT(*) AS n",
+            columns=("数量",),
+            row_count=0,
+            preview_rows=(),
+            result_rows=(),
+            rows_fetched=0,
+        )
+        empty_scope_facts.return_value = ScopeFacts(
+            verdict=PARTIAL,
+            detail=(
+                "查询区间仅部分落在怀化市绕城高速公路的现有病害记录"
+                "覆盖范围内，现有记录采集到 2026-11-04 10:37"
+            ),
+        )
+
+        answer = _execute_plan(
+            QueryPlan(
+                question="查询指定批次病害总数并计算主病害占比",
+                nodes=(
+                    PlanNode(id="q1", spec=source_spec),
+                    PlanNode(
+                        id="q2",
+                        spec=post_calc_spec,
+                        depends_on=("q1",),
+                        node_type="post_calc",
+                    ),
+                ),
+            ),
+            UserDecision(token=""),
+            registry=CapabilityRegistry.load(),
+        )
+
+        sections = {section["node_id"]: section for section in answer.sections}
+        self.assertEqual(sections["q1"]["status"], "accepted")
+        self.assertEqual(sections["q2"]["status"], "unsupported")
+        self.assertEqual(
+            sections["q2"]["failure_code"],
+            "dependency_empty_scope",
+        )
+        self.assertIn("未覆盖部分", sections["q2"]["answer"])
+        post_calc_executor.assert_not_called()
+
+    @patch("app.query.service.empty_scope_facts")
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    def test_empty_explicit_enum_filter_is_materialized_as_zero_group(
+        self,
+        compile_query,
+        execute_compiled,
+        empty_scope_facts,
+    ):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count", "route_length_km"),
+            dimensions=("up_or_down",),
+            filters=(
+                ValueBinding(
+                    field="up_or_down",
+                    op="=",
+                    storage_value="2",
+                    display_value="下行",
+                    source="user_explicit",
+                    resolver="enum",
+                    raw_text="下行",
+                ),
+            ),
+            output_projection=("up_or_down", "count", "route_length_km"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="统计下行坑槽数量和路线长度",
+        )
+        compile_query.return_value = CompiledQuery(
+            "SELECT direction, count, route_length_km",
+            "wren",
+            "wren",
+        )
+        execute_compiled.return_value = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT direction, count, route_length_km",
+        )
+        empty_scope_facts.return_value = ScopeFacts(
+            verdict=INSIDE,
+            detail="测试范围覆盖",
+        )
+
+        answer = _execute_plan(
+            QueryPlan(
+                question="上海-昆明高速下行坑槽多少处",
+                nodes=(PlanNode(id="q1", spec=spec),),
+            ),
+            UserDecision(token=""),
+            registry=CapabilityRegistry.load(),
+        )
+
+        section = answer.sections[0]
+        self.assertEqual(section["status"], "accepted")
+        self.assertEqual(len(section["rows"]), 1)
+        self.assertEqual(section["rows"][0]["上下行"], "下行")
+        self.assertEqual(section["rows"][0]["数量"], 0)
+        self.assertIsNone(section["rows"][0]["路线长度"])
+        self.assertIn("下行", section["answer"])
+        self.assertIn("0", section["answer"])
+
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    @patch("app.query.service.empty_scope_facts")
+    def test_scoped_empty_count_is_materialized_as_zero(
+        self,
+        empty_scope_facts,
+        compile_query,
+        execute_compiled,
+    ):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(
+                ValueBinding(
+                    field="up_or_down",
+                    op="=",
+                    storage_value="2",
+                    display_value="下行",
+                    source="user_explicit",
+                    resolver="enum",
+                    raw_text="下行",
+                ),
+            ),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+        compile_query.return_value = CompiledQuery(
+            "SELECT COUNT(*) AS n",
+            "wren",
+            "wren",
+        )
+        execute_compiled.return_value = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT COUNT(*) AS n",
+        )
+        empty_scope_facts.return_value = ScopeFacts(
+            verdict=INSIDE,
+            detail="测试范围覆盖",
+        )
+
+        answer = _execute_plan(
+            QueryPlan(
+                question="下行有多少处",
+                nodes=(PlanNode(id="q1", spec=spec),),
+            ),
+            UserDecision(token=""),
+            registry=CapabilityRegistry.load(),
+        )
+
+        section = answer.sections[0]
+        self.assertEqual(section["status"], "accepted")
+        self.assertEqual(section["rows"], [{"数量": "0"}])
+        self.assertIn("共 0处", section["answer"])
+
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    @patch("app.query.service.empty_scope_facts")
+    def test_empty_list_dependency_propagates_as_zero_count(
+        self,
+        empty_scope_facts,
+        compile_query,
+        execute_compiled,
+    ):
+        source_spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=("patrol_number",),
+            filters=(
+                ValueBinding(
+                    field="device_code",
+                    op="=",
+                    storage_value="DEV-2046",
+                    display_value="DEV-2046",
+                    source="user_explicit",
+                    resolver="device",
+                ),
+            ),
+            output_projection=("patrol_number",),
+            order_by=(),
+            limit=500,
+            required_assertions=(),
+        )
+        target_spec = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="patrol_number",
+                    to_field="patrol_number",
+                ),
+            ),
+        )
+        compile_query.return_value = CompiledQuery(
+            "SELECT 1",
+            "wren",
+            "wren",
+        )
+        execute_compiled.return_value = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT 1",
+        )
+        empty_scope_facts.return_value = ScopeFacts(
+            verdict=INSIDE,
+            detail="测试范围覆盖",
+        )
+
+        answer = _execute_plan(
+            QueryPlan(
+                question="设备在指定时间的病害数",
+                nodes=(
+                    PlanNode(id="q1", spec=source_spec),
+                    PlanNode(
+                        id="q2",
+                        spec=target_spec,
+                        depends_on=("q1",),
+                    ),
+                ),
+            ),
+            UserDecision(token=""),
+            registry=CapabilityRegistry.load(),
+        )
+
+        target = answer.sections[1]
+        self.assertEqual(target["status"], "accepted")
+        self.assertEqual(target["rows"], [{"数量": "0"}])
+        self.assertIn("q1", target["answer"])
+        self.assertEqual(compile_query.call_count, 1)
+
     @patch("app.query.service.analyze_single_turn")
     def test_unresolved_route_returns_structured_unsupported_answer(self, analyze):
         analyze.side_effect = QueryPlanError(
@@ -237,78 +1049,40 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(terminal, [sections[2]])
 
     @patch("app.query.service.wren_engine.compile_mdl_sql_verbose")
-    @patch("app.query.service.sql_engine.generate_mdl_sql", return_value="MDL SQL")
-    @patch("app.query.service.nl2sql.retrieve_query_context", return_value={})
-    @patch("app.query.service.wren_engine.mdl_context", return_value="models")
-    @patch("app.query.service.nl2sql.select_tables", return_value=set())
-    @patch("app.query.service.nl2sql.simple_patrol_route_list_mdl", return_value="")
-    @patch("app.query.service.nl2sql.simple_route_group_mdl", return_value="")
-    @patch(
-        "app.query.service.nl2sql.build_query_plan",
-        return_value={
-            "kind": "mysql",
-            "slots": {},
-            "subject": "disease",
-            "required_conditions": [],
-        },
-    )
+    @patch("app.query.service.compile_spec_mdl", return_value="MDL SQL")
     def test_wren_adapter_compiles_from_frozen_question(
         self,
-        _build_plan,
-        _route_group,
-        _patrol_list,
-        _select_tables,
-        _mdl_context,
-        _retrieve,
-        _generate,
+        compile_spec,
         compile_sql,
     ):
         compile_sql.return_value = ("SELECT COUNT(*) AS n FROM ai_problem", "")
-        sql = _default_wren_executor(
-            count_plan().nodes[0].spec.__class__(
-                **{
-                    **count_plan().nodes[0].spec.__dict__,
-                    "question": "泛油有多少处？",
-                }
-            )
+        spec = count_plan().nodes[0].spec.__class__(
+            **{
+                **count_plan().nodes[0].spec.__dict__,
+                "question": "泛油有多少处？",
+            }
         )
+        sql = _default_wren_executor(spec)
+
         self.assertEqual(sql, "SELECT COUNT(*) AS n FROM ai_problem")
+        compile_spec.assert_called_once_with(spec)
+        compile_sql.assert_called_once_with("mysql", "MDL SQL")
 
     @patch("app.query.service.wren_engine.compile_mdl_sql_verbose")
-    @patch("app.query.service.sql_engine.generate_mdl_sql")
-    @patch("app.query.service.nl2sql.retrieve_query_context", return_value={})
-    @patch("app.query.service.wren_engine.mdl_context", return_value="models")
-    @patch("app.query.service.nl2sql.select_tables", return_value=set())
-    @patch("app.query.service.nl2sql.simple_patrol_route_list_mdl", return_value="")
-    @patch("app.query.service.nl2sql.simple_route_group_mdl", return_value="")
-    @patch(
-        "app.query.service.nl2sql.build_query_plan",
-        return_value={
-            "kind": "mysql",
-            "slots": {},
-            "subject": "disease",
-            "required_conditions": [],
-        },
-    )
+    @patch("app.query.service.compile_spec_mdl", return_value="MDL SQL")
     def test_controlled_compile_failure_does_not_fall_back_to_llm(
         self,
-        _build_plan,
-        _route_group,
-        _patrol_list,
-        _select_tables,
-        _mdl_context,
-        _retrieve,
-        generate_sql,
+        compile_spec,
         compile_sql,
     ):
-        generate_sql.side_effect = ["GOOD MDL"]
         compile_sql.side_effect = [("", "bad token")]
         spec = count_plan().nodes[0].spec.__class__(
             **{**count_plan().nodes[0].spec.__dict__, "question": "泛油有多少处？"}
         )
         with self.assertRaisesRegex(UnsupportedQuerySpec, "bad token"):
             _default_wren_executor(spec)
-        generate_sql.assert_not_called()
+
+        compile_spec.assert_called_once_with(spec)
         self.assertEqual(compile_sql.call_count, 1)
 
     def test_count_answer_uses_domain_unit(self):
@@ -788,6 +1562,129 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(effective.filters[0].op, "=")
         self.assertEqual(effective.filters[0].storage_value, "P1")
 
+    def test_row_index_dependency_selects_the_ordered_upstream_row(self):
+        source_spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=("patrol_number",),
+            filters=(),
+            output_projection=("patrol_number",),
+            order_by=({"field": "collection_time", "direction": "desc"},),
+            limit=2,
+            required_assertions=(),
+        )
+        target_spec = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="patrol_number",
+                    to_field="patrol_number",
+                    op="=",
+                    row_index=1,
+                ),
+            ),
+        )
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT 1",
+            columns=("任务编号",),
+            preview_rows=(
+                {"patrol_number": "P1"},
+                {"patrol_number": "P2"},
+            ),
+            result_rows=(
+                {"patrol_number": "P1"},
+                {"patrol_number": "P2"},
+            ),
+            rows_fetched=2,
+        )
+
+        effective = _materialize_inputs(
+            target_spec,
+            {"q1": observation},
+            {"q1": source_spec},
+        )
+
+        self.assertEqual(effective.filters[0].op, "=")
+        self.assertEqual(effective.filters[0].storage_value, "P2")
+
+    def test_scalar_dependency_rejects_multiple_values_without_row_index(self):
+        source_spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=("patrol_number",),
+            filters=(),
+            output_projection=("patrol_number",),
+            order_by=({"field": "collection_time", "direction": "desc"},),
+            limit=2,
+            required_assertions=(),
+        )
+        target_spec = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="patrol_number",
+                    to_field="patrol_number",
+                    op="=",
+                ),
+            ),
+        )
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT 1",
+            columns=("任务编号",),
+            preview_rows=(
+                {"patrol_number": "P1"},
+                {"patrol_number": "P2"},
+            ),
+            result_rows=(
+                {"patrol_number": "P1"},
+                {"patrol_number": "P2"},
+            ),
+            rows_fetched=2,
+        )
+
+        with self.assertRaises(UnsupportedQuerySpec) as raised:
+            _materialize_inputs(
+                target_spec,
+                {"q1": observation},
+                {"q1": source_spec},
+            )
+
+        self.assertIn("row_index", str(raised.exception))
+
     def test_route_name_dependency_keeps_display_view_filter(self):
         """上游结果给的是路线中文名（展示视图），过滤必须回到 route_name IN，
         不能拿中文名去和 route.id 比较。"""
@@ -1140,6 +2037,56 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(result, accepted)
         self.assertEqual(analyze.call_count, 0)
 
+    @patch("app.query.service.resolve_templates")
+    @patch("app.query.service._execute_plan")
+    @patch("app.query.service.analyze_single_turn")
+    def test_confirmed_template_path_also_repairs_failed_post_calc(
+        self,
+        analyze,
+        execute,
+        templates,
+    ):
+        """用户点过确认卡之后，计算节点失败同样要重排一次。
+
+        以前 `confirm_single_turn` 直接 `_execute_plan` 就返回，修复循环只挂在
+        没命中模板的分支上：确认路径（用户实际走得最多的一条）计算失败时，
+        用户只能拿到"后置计算必须声明 calculation"这种内部错误。
+        """
+        plan, failed = self._post_calc_plan()
+        accepted = AnswerPackage(
+            "变化 -3",
+            (
+                {
+                    "node_id": "pc",
+                    "type": "post_calc",
+                    "status": "accepted",
+                    "answer": "变化 -3",
+                },
+            ),
+        )
+        analyze.return_value = plan
+        templates.return_value = candidate_set_with_one_template()
+        execute.side_effect = [failed, accepted]
+
+        pending = start_single_turn(
+            "比较两次巡查",
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+        result = confirm_single_turn(
+            pending.confirmation_ticket.token,
+            {"q1": "c1"},
+            {},
+        )
+
+        self.assertEqual(result.text, "变化 -3")
+        self.assertEqual(analyze.call_count, 2)
+        self.assertIn("post_calc", analyze.call_args.kwargs["planning_feedback"])
+        first_call, second_call = execute.call_args_list
+        # 重排后仍沿用用户已确认的口径与候选集，不再弹第二次确认卡。
+        self.assertIs(second_call.args[1], first_call.args[1])
+        self.assertIs(second_call.args[2], pending.candidate_set)
+
     @patch(
         "app.calculations.domain.analysis.chat",
         side_effect=RuntimeError("model unavailable"),
@@ -1305,17 +2252,14 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("route.route_length_km", sql)
         self.assertNotIn("LIMIT 1", sql)
 
-    @patch("app.query.service.nl2sql.build_template_sql_for", return_value="SELECT 1")
-    @patch("app.query.service.nl2sql.build_query_plan", return_value={
-        "kind": "mysql",
-        "subject": "disease",
-        "slots": {},
-        "required_conditions": [],
-    })
-    def test_builtin_template_uses_registered_builder(
+    @patch("app.query.service.wren_engine.compile_mdl_sql_verbose", return_value=("SELECT 1", ""))
+    @patch("app.query.service.compile_spec_mdl", return_value="SELECT COUNT(*) FROM disease")
+    @patch("app.services.nl2sql.build_template_sql_for")
+    def test_builtin_template_uses_controlled_queryspec_compiler(
         self,
-        _build_plan,
         build_sql,
+        _compile_spec,
+        _compile_wren,
     ):
         contract = TemplateContract(
             id="threshold_count",
@@ -1353,13 +2297,14 @@ class ServiceTests(unittest.TestCase):
                 warnings=(),
             ),
         )
-        sql = _default_template_executor(candidate, {}, count_plan().nodes[0].spec)
-        self.assertEqual(sql, "SELECT 1")
-        build_sql.assert_called_once()
-        self.assertEqual(
-            build_sql.call_args.args[1],
-            "_build_threshold_count_template",
+        sql = _default_template_executor(
+            candidate,
+            {},
+            count_plan().nodes[0].spec,
         )
+        self.assertEqual(sql, "SELECT 1")
+        _compile_spec.assert_called_once()
+        build_sql.assert_not_called()
 
     def test_route_trend_compiles_route_filter_and_month_bucket(self):
         spec = QuerySpec(
@@ -1435,6 +2380,90 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(detail_section["total_count"], 20108)
         self.assertTrue(detail_section["truncated"])
         self.assertIn("共 20108 条，当前展示前 500 条", detail_section["answer"])
+
+    @patch("app.query.service.verify_result")
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    @patch("app.query.service.resolve_templates")
+    @patch("app.query.service.analyze_single_turn")
+    def test_detail_inherits_count_metric_instead_of_first_numeric_metric(
+        self,
+        analyze,
+        resolve,
+        compile_query_mock,
+        execute,
+        verify,
+    ):
+        base_plan = length_query_plan()
+        detail_node = base_plan.nodes[1]
+        summary_spec = QuerySpec(
+            id="summary",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("sum_effective_disease_length", "count"),
+            dimensions=(),
+            filters=detail_node.spec.filters,
+            output_projection=("sum_effective_disease_length", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+        )
+        analyze.return_value = QueryPlan(
+            question=base_plan.question,
+            nodes=(
+                PlanNode(id="summary", spec=summary_spec),
+                detail_node,
+            ),
+        )
+        resolve.return_value = empty_candidate_set()
+        compile_query_mock.side_effect = [
+            CompiledQuery(
+                "SELECT SUM(effective_disease_length), COUNT(*) FROM ai_problem",
+                "wren",
+                "wren",
+            ),
+            CompiledQuery("SELECT id FROM ai_problem LIMIT 500", "wren", "wren"),
+        ]
+        execute.side_effect = [
+            ExecutionObservation(
+                node_id="summary",
+                ok=True,
+                engine="wren",
+                sql="SELECT SUM(effective_disease_length), COUNT(*) FROM ai_problem",
+                columns=("病害总长度", "病害数量"),
+                row_count=1,
+                preview_rows=(
+                    {"病害总长度": "798.54", "病害数量": "158"},
+                ),
+                result_rows=(
+                    {"病害总长度": "798.54", "病害数量": "158"},
+                ),
+                rows_fetched=1,
+            ),
+            ExecutionObservation(
+                node_id="detail",
+                ok=True,
+                engine="wren",
+                sql="SELECT id FROM ai_problem LIMIT 500",
+                columns=("id",),
+                row_count=158,
+                preview_rows=({"id": "1"},),
+                rows_fetched=158,
+            ),
+        ]
+        verify.return_value = VerificationReport(status="accepted")
+
+        result = start_single_turn(
+            base_plan.question,
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+
+        detail_section = result.answer.sections[-1]
+        self.assertEqual(detail_section["total_count"], 158)
+        self.assertFalse(detail_section["truncated"])
+        self.assertIn("共 158 条，当前展示前 158 条", detail_section["answer"])
 
     @patch("app.query.service.verify_result", return_value=VerificationReport(status="accepted"))
     @patch("app.query.service.execute_compiled")
@@ -1637,10 +2666,26 @@ class ServiceTests(unittest.TestCase):
         )
         post_calc.return_value = {
             "accepted": False,
-            "reply": "无法计算：任务次数为 0",
+            "reply": "除数不能为 0",
             "failure": {
                 "failure_code": "calculation_zero_denominator",
-                "reason": "无法计算：任务次数为 0",
+                "reason": "除数不能为 0",
+                "evidence": {
+                    "calculation": {
+                        "operation": "divide",
+                        "zero_operand": "denominator",
+                        "operands": [
+                            {
+                                "name": "denominator",
+                                "label": "统计任务数量",
+                                "value": 0,
+                            }
+                        ],
+                        "output": {
+                            "label": "平均每次任务检出病害数",
+                        },
+                    }
+                },
             },
         }
 
@@ -1656,7 +2701,8 @@ class ServiceTests(unittest.TestCase):
             section["failure_code"],
             "calculation_zero_denominator",
         )
-        self.assertIn("无法计算", result.answer.text)
+        self.assertIn("统计任务数量为 0", result.answer.text)
+        self.assertIn("平均值无法定义", result.answer.text)
 
     @patch("app.query.service.resolve_templates")
     @patch("app.query.service.analyze_single_turn")
@@ -1683,6 +2729,51 @@ class ServiceTests(unittest.TestCase):
         )
         self.assertIsNotNone(result.answer)
         self.assertIn("规划不完整", result.answer.text)
+        self.assertNotIn("换一种说法", result.answer.text)
+        self.assertNotIn("切换模型", result.answer.text)
+        self.assertEqual(result.answer.sections[0]["status"], "unsupported")
+
+    @patch(
+        "app.query.service.analyze_single_turn",
+        side_effect=QuerySpecError(
+            "未知能力缺口 id：missing_route_length_field；"
+            "只能使用当前能力视图中登记的能力缺口"
+        ),
+    )
+    def test_unknown_capability_gap_does_not_leak_internal_id(
+        self,
+        _analyze,
+    ):
+        result = start_single_turn(
+            "按管养片区统计病害",
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+
+        self.assertNotIn("missing_route_length_field", result.answer.text)
+        self.assertIn("能力缺口", result.answer.text)
+        self.assertEqual(result.answer.sections[0]["status"], "unsupported")
+
+    @patch(
+        "app.query.service.analyze_single_turn",
+        side_effect=QuerySpecError(
+            "calculation_required: post_calc 必须声明 calculation 工具和参数"
+        ),
+    )
+    def test_calculation_plan_failure_is_explained_without_internal_code(
+        self,
+        _analyze,
+    ):
+        """计算节点生不出来是系统侧计划问题，不能把内部 failure_code 甩给用户。"""
+        result = start_single_turn(
+            "上海到昆明和二连浩特到广州哪条泛油更多",
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+
+        self.assertIsNotNone(result.answer)
+        self.assertNotIn("calculation_required", result.answer.text)
+        self.assertIn("没能给出可执行的计算方案", result.answer.text)
         self.assertEqual(result.answer.sections[0]["status"], "unsupported")
 
     @patch(
@@ -1717,18 +2808,20 @@ class ServiceTests(unittest.TestCase):
             "llm_output_invalid",
         )
 
+    @patch("app.query.service._default_post_calc_executor")
     @patch("app.query.service.verify_result", return_value=VerificationReport(status="accepted"))
     @patch("app.query.service.execute_compiled")
     @patch("app.query.service.compile_query")
     @patch("app.query.service.resolve_templates", return_value=empty_candidate_set())
     @patch("app.query.service.analyze_single_turn")
-    def test_incomplete_trend_stops_downstream_conclusion(
+    def test_incomplete_trend_keeps_observed_series_for_downstream_calculation(
         self,
         analyze,
         _resolve,
         compile_query_mock,
         execute,
         _verify,
+        post_calc,
     ):
         trend_spec = QuerySpec(
             id="q1",
@@ -1804,6 +2897,12 @@ class ServiceTests(unittest.TestCase):
             ),
             rows_fetched=2,
         )
+        post_calc.return_value = {
+            "accepted": True,
+            "reply": "在已观察到的时间桶中，2026-11 最高。",
+            "rows": [{"周": "2026-11", "数量": 1883}],
+            "columns": ["周", "数量"],
+        }
 
         result = start_single_turn(
             "最近三个月趋势",
@@ -1812,11 +2911,24 @@ class ServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(compile_query_mock.call_count, 1)
-        self.assertEqual(len(result.answer.sections), 1)
-        self.assertEqual(result.answer.sections[0]["status"], "unsupported")
+        self.assertEqual(len(result.answer.sections), 2)
+        self.assertEqual(result.answer.sections[0]["status"], "accepted")
+        self.assertEqual(result.answer.sections[1]["status"], "accepted")
         self.assertIn(
             "无法据此判断完整时间窗口的趋势",
             result.answer.text,
+        )
+        self.assertIn(
+            "已观察到的时间桶",
+            result.answer.text,
+        )
+        upstream = post_calc.call_args.args[1]
+        self.assertEqual(
+            upstream["q1"]["rows"],
+            [
+                {"月份": "2026-10", "数量": "11886"},
+                {"月份": "2026-11", "数量": "1883"},
+            ],
         )
 
     @patch("app.query.service.execute_compiled", return_value=count_observation())

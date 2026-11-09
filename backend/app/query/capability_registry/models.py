@@ -12,6 +12,7 @@ class SubjectCapability:
     base_table: str
     joins: dict[str, dict[str, str]] = field(default_factory=dict)
     allowed_views: tuple[str, ...] = ()
+    entities: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class FieldCapability:
     field_id: str
     expression: str
     label: str
+    filter_expression: str = ""
     data_type: str = ""
     comment: str = ""
     roles: tuple[str, ...] = ()
@@ -39,6 +41,7 @@ class MetricCapability:
     unit: str = ""
     allowed_views: tuple[str, ...] = ()
     requires_join: tuple[str, ...] = ()
+    propagate_across_groups: bool = False
 
 
 @dataclass(frozen=True)
@@ -104,6 +107,7 @@ class CapabilitySnapshot:
     time_buckets: dict[str, Any]
     result_words: dict[str, Any]
     repair_policy: dict[str, Any]
+    capability_gaps: dict[str, Any]
     templates: dict[str, Any]
     calculators: dict[str, Any]
 
@@ -115,6 +119,7 @@ class PlannerFieldView:
     data_type: str
     comment: str
     roles: tuple[str, ...]
+    unit: str = ""
     enum_values: tuple[EnumValueCapability, ...] = ()
     status: str = "available"
     unavailable_reason: str = ""
@@ -133,6 +138,9 @@ class PlannerCapabilityView:
     derived_metric_details: dict[str, dict[str, Any]] = field(default_factory=dict)
     calculators: dict[str, dict[str, Any]] = field(default_factory=dict)
     business_values: dict[str, dict[str, Any]] = field(default_factory=dict)
+    entities: dict[str, dict[str, Any]] = field(default_factory=dict)
+    capability_gaps: dict[str, dict[str, Any]] = field(default_factory=dict)
+    query_semantics: dict[str, Any] = field(default_factory=dict)
 
     def to_prompt_dict(self) -> dict[str, Any]:
         return {
@@ -142,6 +150,9 @@ class PlannerCapabilityView:
             "derived_metrics": self.derived_metric_details,
             "calculators": self.calculators,
             "business_values": self.business_values,
+            "entities": self.entities,
+            "capability_gaps": self.capability_gaps,
+            "query_semantics": self.query_semantics,
             "allowed_views": list(self.allowed_views),
             "fields": {
                 field_id: {
@@ -149,6 +160,7 @@ class PlannerCapabilityView:
                     "type": field.data_type,
                     "comment": field.comment,
                     "roles": list(field.roles),
+                    "unit": field.unit,
                     "status": field.status,
                     "unavailable_reason": field.unavailable_reason,
                     "enum_values": [
@@ -184,4 +196,15 @@ def freeze_snapshot(value: Any) -> Any:
                 for item in value.__dataclass_fields__.values()
             },
         )
+    return value
+
+
+def thaw_snapshot(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): thaw_snapshot(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [thaw_snapshot(item) for item in value]
     return value

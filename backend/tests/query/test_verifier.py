@@ -52,6 +52,44 @@ def count_observation() -> ExecutionObservation:
 
 
 class VerifierTests(unittest.TestCase):
+    def test_aggregate_result_keeps_every_requested_metric_column(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count", "total_area", "average_area"),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+        )
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT COUNT(*) AS count FROM ai_problem",
+            columns=("数量",),
+            row_count=1,
+            preview_rows=({"数量": "10"},),
+            result_rows=({"数量": "10"},),
+            rows_fetched=1,
+        )
+
+        report = verify_result(
+            spec,
+            CompiledQuery(observation.sql, "wren", "wren"),
+            observation,
+        )
+
+        self.assertEqual(report.status, "repairable")
+        self.assertIn(
+            "missing_metric_columns",
+            {item.code for item in report.issues},
+        )
+
     def test_empty_detail_does_not_require_output_columns(self):
         spec = QuerySpec(
             id="detail",

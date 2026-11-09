@@ -1,6 +1,7 @@
 import unittest
 
 from evals.run_holdout_eval import run_case
+from app.services import prompts
 
 
 class HoldoutEvaluationTests(unittest.TestCase):
@@ -53,6 +54,62 @@ class HoldoutEvaluationTests(unittest.TestCase):
         )
         self.assertTrue(result.ok)
 
+    def test_correct_unsupported_allows_blocked_dependents(self):
+        result = run_case(
+            {
+                "id": "held-2b",
+                "category": "时间",
+                "question": "对比两次并不存在的巡检",
+            },
+            lambda _: {
+                "answer": "台账中没有这两个巡检批次，无法对比。",
+                "sections": [
+                    {
+                        "status": "unsupported",
+                        "failure_code": "patrol_batch_not_resolved",
+                    },
+                    {
+                        "status": "blocked",
+                        "failure_code": "dependency_failed",
+                    },
+                ],
+                "verification": {"status": "blocked"},
+            },
+            lambda _case, _payload, _doc: {
+                "accepted": True,
+                "verdict": "correct_unsupported",
+                "failure_layer": "unsupported",
+                "reason": "已核实的批次数量为 0，用户前提与台账冲突",
+            },
+            "业务文档",
+        )
+
+        self.assertTrue(result.ok)
+
+    def test_correct_unsupported_still_rejects_runtime_errors(self):
+        result = run_case(
+            {
+                "id": "held-2c",
+                "category": "时间",
+                "question": "对比两次巡检",
+            },
+            lambda _: {
+                "answer": "执行异常。",
+                "error": "RuntimeError: database unavailable",
+                "sections": [{"status": "error"}],
+                "verification": {"status": "error"},
+            },
+            lambda _case, _payload, _doc: {
+                "accepted": True,
+                "verdict": "correct_unsupported",
+                "failure_layer": "unsupported",
+                "reason": "错误地接受了运行时故障",
+            },
+            "业务文档",
+        )
+
+        self.assertFalse(result.ok)
+
     def test_judge_cannot_accept_an_execution_failure_contradiction(self):
         result = run_case(
             {"id": "held-3", "category": "病害", "question": "问题"},
@@ -70,3 +127,14 @@ class HoldoutEvaluationTests(unittest.TestCase):
             "业务文档",
         )
         self.assertFalse(result.ok)
+
+    def test_judge_prompt_distinguishes_structured_batch_premise_mismatch(self):
+        prompt = prompts.load("query_holdout_judge")
+
+        self.assertIn(
+            "lookup_scope=patrol_route_association_batch_lookup",
+            prompt,
+        )
+        self.assertIn("resolved_batch_count=0", prompt)
+        self.assertIn("用户前提与巡检台账冲突", prompt)
+        self.assertIn("不能泛化成所有空批次", prompt)

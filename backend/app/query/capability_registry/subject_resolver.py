@@ -6,6 +6,7 @@ from typing import Any
 from ...services import prompts
 from ...services.llm import chat_json, role_model
 from ..fields import FieldReachSet
+from .entity_resolver import list_entities
 from .registry import CapabilityRegistry
 
 
@@ -23,10 +24,12 @@ def resolve_subject(
     reach: FieldReachSet,
     registry: CapabilityRegistry,
     grounded: dict[str, Any] | None = None,
+    kind: str = "mysql",
 ) -> SubjectResolution:
     grounded = grounded or {}
     candidates: list[str] = []
     evidence: list[str] = []
+    entity_candidates: set[str] = set()
     raw_subject = str(grounded.get("subject") or "").strip()
     if raw_subject in registry.snapshot.subjects:
         candidates.append(raw_subject)
@@ -37,22 +40,47 @@ def resolve_subject(
             if subject.base_table == table and subject_id not in candidates:
                 candidates.append(subject_id)
                 evidence.append(f"field_grounding.table={table}")
-    for table_item in grounded.get("tables") or []:
-        table_name = str(
-            table_item.get("proxy_table")
-            or table_item.get("name")
-            or table_item.get("table")
-            or ""
-        ).strip()
-        if not table_name:
-            continue
-        for subject_id, subject in registry.snapshot.subjects.items():
-            if subject.base_table != table_name or subject_id in candidates:
-                continue
-            candidates.append(subject_id)
-            evidence.append(
-                f"grounding_table={table_name}:{table_item.get('score', 0)}"
+    # 已注册实体值是“用户明确提到的业务对象”，但它们常常同时出现在多张表的
+    # 注释里（例如路线名出现在路段台账、病害类型出现在病害表）。表级检索因此
+    # 只能提供候选，不能决定主体；这里把字典实体的精确命中补成主体候选证据。
+    for subject_id, subject in registry.snapshot.subjects.items():
+        for entity_id in subject.entities:
+            try:
+                values = list_entities(registry, entity_id, kind)
+            except Exception:
+                values = ()
+            matched = next(
+                (
+                    name
+                    for value in values
+                    for name in (value.label, *value.aliases)
+                    if len(name) >= 2 and name in question
+                ),
+                "",
             )
+            if not matched:
+                continue
+            if subject_id not in candidates:
+                candidates.append(subject_id)
+            entity_candidates.add(subject_id)
+            evidence.append(f"entity={entity_id}:{matched}")
+        for family in registry.snapshot.entity_families.values():
+            if family.entity not in subject.entities:
+                continue
+            matched = next(
+                (
+                    name
+                    for name in (family.label, *family.aliases)
+                    if len(name) >= 2 and name in question
+                ),
+                "",
+            )
+            if not matched:
+                continue
+            if subject_id not in candidates:
+                candidates.append(subject_id)
+            entity_candidates.add(subject_id)
+            evidence.append(f"entity_family={family.family_id}:{matched}")
     for hit in reach.hits:
         for subject_id, subject in registry.snapshot.subjects.items():
             if subject.base_table == hit.table and subject_id not in candidates:
@@ -69,6 +97,32 @@ def resolve_subject(
         if matching_fields:
             candidates.append(subject_id)
             evidence.append(f"subject_field={subject_id}")
+    # search_models 的表级结果只负责召回。登记实体是强证据，存在时不再引入表级
+    # 噪声；其余情况下都要把召回表一并交给语义路由器。字段触达可能因为列注释里
+    # 同时出现“巡检、病害”等泛化词而落错表，不能让这个软落点直接短路主体判断。
+    if not entity_candidates:
+        for table_item in grounded.get("tables") or []:
+            table_name = str(
+                table_item.get("proxy_table")
+                or table_item.get("name")
+                or table_item.get("table")
+                or ""
+            ).strip()
+            if not table_name:
+                continue
+            for subject_id, subject in registry.snapshot.subjects.items():
+                if subject.base_table != table_name:
+                    continue
+                if subject_id not in candidates:
+                    candidates.append(subject_id)
+                evidence.append(
+                    f"grounding_table={table_name}:{table_item.get('score', 0)}"
+                )
+                evidence.append(
+                    f"recall_table={table_name}:"
+                    f"score={table_item.get('score', 0)}:"
+                    f"table_score={table_item.get('table_score', 0)}"
+                )
     if len(candidates) == 1:
         return SubjectResolution(
             subject=candidates[0],
@@ -97,6 +151,7 @@ def resolve_subject(
                     "subject_router",
                     question=question,
                     subjects=summaries,
+                    grounding_evidence=evidence,
                 ),
                 model=role_model("semantic"),
             )

@@ -46,10 +46,10 @@ field_aliases:
 
 regex_rules:
   - id: named_period
-    pattern: "(?:本|这|当)(?:个)?(?:年度|年|季度|季|月)|(?:上|下)(?:个)?(?:年度|年|季度|季|月)|第[一二三四1-4]季度|今年|去年"
+    pattern: "(?:本|这|当)(?:个)?(?:年度|年|季度|季|月)|(?:上|下)(?:个)?(?:年度|年|季度|季|月)|第[一二三四1-4]季度|今年|去年|(?:最近|近|过去)[0-9一二两三四五六七八九十]+个?月"
     candidate_type: time_period
     candidate_field: collection_time
-    reason: "“本季度/今年/第几季度”是一整个自然周期，必须保留整段（含暂时没有数据的月份），不能截到当天。"
+    reason: "“本季度/今年/第几季度/最近 N 个月”是明确时间窗口，必须保留整段（含暂时没有数据的月份），不能截到当天。"
     repeat_matches: true
   - id: date_range
     pattern: "(?:\\d{4}年)?\\d{1,2}月\\d{1,2}日\\s*(?:到|至|~|—|－|-)\\s*(?:\\d{4}年)?\\d{1,2}月\\d{1,2}日"
@@ -122,6 +122,13 @@ regex_rules:
     discouraged_fields: [route_level, road_surface_type]
     requires_field: true
     reason: "“公路技术等级/路面技术等级（高速公路、一级公路…）”是路段台账的 tech_grade，与行政等级（国道/省道）是两件事，不能互相替代。"
+  - id: group_by_road_surface_type
+    pattern: "(?:按|各|每(?:种)?|不同)[^，。；]{0,12}(?:路面类型|路面材料)|(?:路面类型|路面材料)(?:分布|分组)|(?:沥青|水泥)(?:混凝土)?路面"
+    candidate_type: group_by
+    candidate_field: road_surface_type
+    candidate_value: road_surface_type
+    requires_field: true
+    reason: "用户明确要求路面类型/路面材料时使用 road_surface_type；它可以与公路技术等级 tech_grade 同时存在。"
   - id: group_by_month
     pattern: "(?:按|各|每(?:个|月)?)[^，。；]{0,8}月|各月|按月"
     candidate_type: group_by
@@ -150,11 +157,11 @@ regex_rules:
   - id: damage_severity
     pattern: "(?:损坏程度|病害等级|严重[“”\"']?(?:程度|等级))"
     candidate_type: semantic_field
-    candidate_field: history_damage_interval
+    candidate_field: damage_type
     candidate_value: damage_severity
-    discouraged_fields: [damage_type]
+    discouraged_fields: [history_damage_interval]
     requires_field: true
-    reason: "巡检库的损坏程度/严重等级物理字段是 history_damage_interval；damage_type 是历史遗留列名，不是病害类型。'最严重/最突出'这类排名语气词不是损坏程度证据，不能触发本规则。"
+    reason: "巡检库的损坏程度字段是 damage_type，编码 0/5/10 已由 sys_dict.degree_of_damage_type 映射为轻度/中度/重度；history_damage_interval 当前全为空。'最严重/最突出'这类排名语气词不是损坏程度证据，不能触发本规则。"
   - id: lane_ordinal
     pattern: "(第[一二三四五六七八九十两0-9]+车道)"
     group: 1
@@ -222,6 +229,13 @@ regex_rules:
     discouraged_fields: [luge_name]
     requires_field: true
     reason: "“高发路段/哪些位置/多少米处”要按注册的桩号分段维度分组（默认 500 米），不能按 luge_name 这类里程区段编号分组。"
+  - id: top_n
+    pattern: "(?:前|取前|排名前|最多(?:的)?|最常见(?:的)?)\\s*([一二三四五六七八九十两0-9]+)\\s*(?:类|种|个|条|项|名)"
+    group: 1
+    candidate_type: top_n
+    value_transform: chinese_integer
+    repeat_matches: true
+    reason: "用户原话给出了明确的 Top N 数量；这只是结构候选，仍需结合原问题判断是分组排名还是明细排名。"
 
 metric_rules:
   metric_count:

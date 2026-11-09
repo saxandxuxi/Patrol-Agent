@@ -6,9 +6,8 @@ from typing import Any
 
 from ..config import settings
 from .db import DatabaseError, db_manager
-from . import prompts
+from .legacy_query_chain import raise_disabled
 from . import event_bus
-from .llm import chat, sql_model
 from .logging_service import log_event
 
 
@@ -330,25 +329,7 @@ def generate_mdl_sql(
     见 docs/WrenAI集成方案.md 阶段三：LLM 只负责选模型和字段，JOIN/字典/JSON/del_flag
     全部由 Wren 编译器补。
     """
-    required_text = "\n".join(f"- {item}" for item in required_conditions) or "- 无额外强制条件"
-    response = chat(
-        prompts.messages(
-            "sql_mdl",
-            models=models_text[:12000],
-            required=required_text,
-            feedback_line=f"===上次失败原因，请修正：{feedback}" if feedback else "",
-            slots=slots,
-            examples=examples[:4000] or "（暂时没有可参考的示例）",
-            errors=errors[:1500] or "（暂无同类错误经验）",
-            samples=samples[:1200] or "（暂无取值样例）",
-            question=question,
-        ),
-        temperature=0,
-        model=sql_model(),
-    )
-    raise_if_ambiguous(response)
-    # 模型有时会裹 markdown 代码块或加解释，必须抽出纯 SQL（否则 Wren 编译必失败）
-    return extract_sql(response)
+    raise_disabled("sql_mdl")
 
 
 def generate_sql(
@@ -361,26 +342,7 @@ def generate_sql(
     feedback: str = "",
     samples: str = "",
 ) -> str:
-    dialect = "MySQL" if kind == "mysql" else "PostgreSQL"
-    required_text = "\n".join(f"- {item}" for item in required_conditions) or "- 无额外强制条件"
-    response = chat(
-        prompts.messages(
-            "sql_physical",
-            dialect=dialect,
-            schema=schema_context[:16000],
-            samples=samples[:1200] or "（暂无取值样例）",
-            examples=examples[:5000],
-            required=required_text,
-            sql_max_rows=settings.sql_max_rows,
-            feedback=feedback,
-            slots=slots,
-            question=question,
-        ),
-        temperature=0,
-        model=sql_model(),
-    )
-    raise_if_ambiguous(response)
-    return response
+    raise_disabled("sql_physical")
 
 
 _UNREQUESTED_ENUM_CONTEXTS: dict[str, tuple[str, ...]] = {

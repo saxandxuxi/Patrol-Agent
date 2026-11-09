@@ -153,6 +153,216 @@ class SpecMdlTests(unittest.TestCase):
         self.assertIn("ORDER BY patrol.end_date DESC", sql)
         self.assertIn("LIMIT 5", sql)
 
+    def test_patrol_list_can_output_task_number(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="patrol",
+                view="list",
+                metrics=(),
+                dimensions=(),
+                filters=(),
+                output_projection=("task_number",),
+                order_by=({"field": "collection_time", "direction": "desc"},),
+                limit=5,
+                required_assertions=(),
+                question="列出最近5次巡检任务的任务编号",
+            )
+        )
+
+        self.assertIn("patrol.task_number AS 任务编号", sql)
+
+    def test_disease_list_projects_and_orders_confidence(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="list",
+                metrics=(),
+                dimensions=(),
+                filters=(),
+                output_projection=(
+                    "problem_number",
+                    "problem_type_name",
+                    "route_name",
+                    "pile_number",
+                    "collection_time",
+                    "confidence",
+                ),
+                order_by=({"field": "confidence", "direction": "asc"},),
+                limit=500,
+                required_assertions=("preserve_user_scope",),
+                question="输出病害明细和 AI 识别置信度，按置信度升序",
+            )
+        )
+
+        self.assertIn("disease.confidence AS AI置信度", sql)
+        self.assertIn("ORDER BY disease.confidence ASC", sql)
+
+    def test_disease_category_name_filters_on_storage_code(
+        self,
+    ):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="list",
+                metrics=(),
+                dimensions=(),
+                filters=(binding("category_name", "=", "15"),),
+                output_projection=(
+                    "problem_number",
+                    "problem_type_name",
+                    "category_name",
+                ),
+                order_by=(),
+                limit=500,
+                required_assertions=("preserve_user_scope",),
+                question="调出来一下交安事件病害的记录",
+            )
+        )
+
+        self.assertIn("disease.categories_type = '15'", sql)
+        self.assertIn("disease.category_name AS 病害大类", sql)
+
+    def test_disease_distribution_can_group_by_category_name(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("category_name",),
+                filters=(),
+                output_projection=("category_name", "count"),
+                order_by=(),
+                limit=None,
+                required_assertions=("preserve_user_scope",),
+                question="按病害大类统计数量",
+            )
+        )
+
+        self.assertIn("disease.category_name AS 病害大类", sql)
+        self.assertIn("GROUP BY disease.category_name", sql)
+
+    def test_disease_damage_severity_uses_authoritative_dictionary(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("damage_type",),
+                filters=(binding("damage_type", "=", "10"),),
+                output_projection=("damage_type", "count"),
+                order_by=(),
+                limit=None,
+                required_assertions=("preserve_user_scope",),
+                question="重度病害有多少条",
+            )
+        )
+
+        self.assertIn("disease.damage_type = '10'", sql)
+        self.assertIn("AS 损坏程度", sql)
+        self.assertIn("GROUP BY", sql)
+
+    def test_patrol_list_projects_registered_fields_beyond_hand_written_map(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="patrol",
+                view="list",
+                metrics=(),
+                dimensions=(),
+                filters=(),
+                output_projection=(
+                    "patrol_number",
+                    "patrol_type",
+                    "route_name",
+                    "up_or_down",
+                ),
+                order_by=({"field": "create_time", "direction": "desc"},),
+                limit=1,
+                required_assertions=("recent_window", "preserve_user_scope"),
+                question="把最近一次巡查记录调出来",
+            )
+        )
+
+        self.assertIn("patrol.patrol_type AS 巡查类型", sql)
+        self.assertIn("route.short_name AS 路线名称", sql)
+        self.assertIn("patrol.up_or_down AS 上下行", sql)
+        self.assertIn("LEFT JOIN patrol_route", sql)
+        self.assertIn("LEFT JOIN route", sql)
+
+    def test_patrol_route_filter_uses_dictionary_id_against_route_primary_key(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="patrol",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("equipment_id",),
+                filters=(
+                    ValueBinding(
+                        field="route_name",
+                        op="=",
+                        storage_value="51c9c71ea0f811f1a6310242ac120002",
+                        display_value="上海-昆明",
+                        source="user_explicit",
+                        resolver="route_dictionary",
+                        raw_text="上海-昆明高速",
+                    ),
+                ),
+                output_projection=("equipment_id", "count"),
+                order_by=({"field": "count", "direction": "desc"},),
+                limit=None,
+                required_assertions=("preserve_user_scope",),
+                question="上海-昆明高速上各设备分别完成了多少次任务",
+            )
+        )
+
+        self.assertIn(
+            "route.id = '51c9c71ea0f811f1a6310242ac120002'",
+            sql,
+        )
+        self.assertIn("LEFT JOIN patrol_route", sql)
+        self.assertIn("LEFT JOIN route", sql)
+        self.assertNotIn("patrol.route_name", sql)
+
+    def test_patrol_distribution_uses_linked_disease_count(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="patrol",
+                view="distribution",
+                metrics=("linked_disease_count",),
+                dimensions=("task_number",),
+                filters=(binding("collection_time", ">=", "2026-11-05"),),
+                output_projection=("task_number", "linked_disease_count"),
+                order_by=({"field": "task_number", "direction": "asc"},),
+                limit=None,
+                required_assertions=(),
+                question="列出巡检任务编号及该任务检出的病害总数",
+            )
+        )
+
+        self.assertIn("patrol.task_number AS 任务编号", sql)
+        self.assertIn("COUNT(DISTINCT disease.id) AS 任务关联病害数", sql)
+        self.assertIn(
+            "LEFT JOIN disease ON disease.patrol_id = patrol.id "
+            "AND disease.del_flag = 0",
+            sql,
+        )
+        self.assertNotIn("COUNT(*) AS 数量", sql)
+
     @patch("app.query.spec_mdl.dictionary.patrol_status_labels")
     def test_patrol_status_dimension_uses_display_labels(self, status_labels):
         status_labels.return_value = {"0": "未开始", "15": "已完成"}
@@ -260,6 +470,29 @@ class SpecMdlTests(unittest.TestCase):
         )
 
         self.assertIn("FLOOR(disease.pile_distance / 1000) * 1000", sql)
+        self.assertIn("AS 桩号分段", sql)
+        self.assertIn("GROUP BY CONCAT(", sql)
+
+    def test_disease_two_kilometer_bucket_compiles(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="top_groups",
+                metrics=("count",),
+                dimensions=("pile_segment_2000m",),
+                filters=(),
+                output_projection=(),
+                order_by=({"field": "count", "direction": "desc"},),
+                limit=3,
+                required_assertions=(),
+                question="按每2公里分段统计病害高发区间",
+            )
+        )
+
+        self.assertIn("FLOOR(disease.pile_distance / 2000) * 2000", sql)
+        self.assertIn("+ 2000", sql)
         self.assertIn("AS 桩号分段", sql)
         self.assertIn("GROUP BY CONCAT(", sql)
 
@@ -381,7 +614,8 @@ class SpecMdlTests(unittest.TestCase):
             question="每300米一段统计病害数量",
         )
         with self.assertRaisesRegex(
-            UnsupportedQuerySpec, "pile_segment_500m"
+            UnsupportedQuerySpec,
+            r"pile_segment_<N>m.*pile_segment_2000m",
         ):
             compile_spec_mdl(spec)
 
@@ -699,9 +933,37 @@ class SpecMdlTests(unittest.TestCase):
         )
         sql = compile_spec_mdl(spec)
         self.assertIn("patrol.equipment_id", sql)
-        self.assertIn("JOIN patrol_route", sql)
+        self.assertIn("LEFT JOIN patrol_route", sql)
         self.assertIn("COUNT(*) AS 数量", sql)
         self.assertIn("GROUP BY patrol.equipment_id, route.short_name", sql)
+
+    def test_patrol_task_detail_keeps_tasks_without_route_relations(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="distribution",
+            metrics=("linked_disease_count",),
+            dimensions=("task_number", "route_name"),
+            filters=(
+                binding("collection_time", ">=", "2026-11-05 00:00:00"),
+                binding("collection_time", "<", "2026-11-06 00:00:00"),
+            ),
+            output_projection=(
+                "task_number",
+                "route_name",
+                "linked_disease_count",
+            ),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="列出当天巡检任务、覆盖路线和病害数",
+        )
+
+        sql = compile_spec_mdl(spec)
+
+        self.assertIn("LEFT JOIN patrol_route", sql)
+        self.assertIn("LEFT JOIN route", sql)
 
     def test_patrol_count_task_alias_compiles_to_count(self):
         sql = compile_spec_mdl(
@@ -772,12 +1034,56 @@ class SpecMdlTests(unittest.TestCase):
             question="结构化子问题",
         )
         sql = compile_spec_mdl(spec)
-        self.assertIn(
-            "ORDER BY patrol.create_time DESC, SUM(patrol.patrol_mileage) DESC",
-            sql,
-        )
+        self.assertIn("ORDER BY patrol.create_time DESC", sql)
+        self.assertIn("SUM(patrol.patrol_mileage) / 1000.0", sql)
         self.assertIn("LIMIT 1", sql)
         self.assertNotIn("GROUP BY patrol.patrol_mileage", sql)
+
+    def test_patrol_mileage_converts_stored_meters_to_km(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="patrol",
+                view="distribution",
+                metrics=("patrol_mileage",),
+                dimensions=("equipment_id",),
+                filters=(),
+                output_projection=("equipment_id", "patrol_mileage"),
+                order_by=({"field": "patrol_mileage", "direction": "desc"},),
+                limit=None,
+                required_assertions=(),
+                question="每台设备累计巡检里程",
+            )
+        )
+
+        self.assertIn("SUM(patrol.patrol_mileage) / 1000", sql)
+        self.assertIn("AS 巡检里程", sql)
+
+    def test_patrol_collection_time_uses_the_same_physical_time_in_all_roles(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=(),
+            filters=(binding("collection_time", ">=", "2026-11-01 00:00:00"),),
+            output_projection=("patrol_number", "collection_time"),
+            order_by=({"field": "collection_time", "direction": "desc"},),
+            limit=5,
+            required_assertions=(),
+            question="列出最近5次巡检，并显示巡检时间",
+        )
+
+        sql = compile_spec_mdl(spec)
+
+        self.assertIn(
+            "patrol.create_time >= '2026-11-01 00:00:00'",
+            sql,
+        )
+        self.assertIn("patrol.create_time AS 巡检时间", sql)
+        self.assertIn("ORDER BY patrol.create_time DESC", sql)
 
     def test_business_unavailable_field_is_rejected_before_sql(self):
         spec = QuerySpec(

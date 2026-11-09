@@ -129,6 +129,35 @@ class ValueAnalysisTests(unittest.TestCase):
         self.assertEqual(value.source, "user_explicit")
         self.assertEqual(value.resolver, "damage_type_dictionary")
 
+    def test_disease_category_and_severity_use_database_dictionary_codes(self):
+        category = resolve_value(
+            "category_name",
+            "=",
+            "交安事件",
+            "调出来一下交安事件病害的记录",
+            "mysql",
+            subject="disease",
+        )
+        severity = resolve_value(
+            "damage_type",
+            "=",
+            "重度",
+            "重度病害数量有多少条",
+            "mysql",
+            subject="disease",
+        )
+
+        self.assertEqual(category.storage_value, "15")
+        self.assertEqual(
+            category.resolver,
+            "enum:ai_problem.categories_type",
+        )
+        self.assertEqual(severity.storage_value, "10")
+        self.assertEqual(
+            severity.resolver,
+            "enum:ai_problem.damage_type",
+        )
+
     def test_umbrella_damage_type_expands_to_dictionary_values(self):
         value = resolve_value(
             "problem_type_name",
@@ -156,6 +185,36 @@ class ValueAnalysisTests(unittest.TestCase):
         self.assertIn("纵向裂缝", value.storage_value)
         self.assertIn("坑槽", value.storage_value)
         self.assertTrue(value.resolver.startswith("entity_family:"))
+
+    def test_damage_type_list_keeps_explicit_member_provenance(self):
+        value = resolve_value(
+            "problem_type_name",
+            "in",
+            ["坑槽", "纵向裂缝"],
+            "坑槽和纵向裂缝分别在上行、下行各有多少处？",
+            "mysql",
+        )
+
+        self.assertEqual(value.source, "user_explicit")
+
+    def test_month_boundaries_keep_explicit_time_provenance(self):
+        start = resolve_value(
+            "collection_time",
+            ">=",
+            "2026-10-01",
+            "2026年10月，长沙－芷江高速的坑槽有多少处？",
+            "mysql",
+        )
+        end = resolve_value(
+            "collection_time",
+            "<",
+            "2026-11-01",
+            "2026年10月，长沙－芷江高速的坑槽有多少处？",
+            "mysql",
+        )
+
+        self.assertEqual(start.source, "user_explicit")
+        self.assertEqual(end.source, "user_explicit")
 
     def test_quarter_value_is_normalized_to_exact_time_bounds(self):
         value = resolve_value(

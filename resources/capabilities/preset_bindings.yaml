@@ -8,7 +8,6 @@ filters:
   problem_type_name: damage_type
   collection_time: time_range
   create_time: time_range
-  date_granularity: time_range
   date_from: time_range
   date_to: time_range
   top_n: limit
@@ -19,6 +18,10 @@ parameter_aliases:
   routes_id: route_id
   problem_type_name: damage_type
   limit: top_n
+
+# 参数由 QuerySpec 的其他字段确定性推导，不是额外的用户过滤条件。
+derived_parameters:
+  - date_granularity
 
 # 这些字段共同表达一个完整时间范围。
 time_fields:

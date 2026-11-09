@@ -1,18 +1,499 @@
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 from app.query.analysis import analyze_single_turn
 from app.query.capability_registry import CapabilityRegistry
 from app.query.contracts import (
+    InputBinding,
+    PlanNode,
+    QueryPlan,
+    QuerySpec,
     QuerySpecError,
     QuerySpecUnsupported,
     ValueBinding,
 )
 from app.query.fields import FieldReachSet, PhysicalSchemaView
+from app.query.input_bindings import query_plan_input_binding_issue
 from app.services.plan_contract import build_step_contract
 
 
 class QueryPlanningTests(unittest.TestCase):
+    @patch("app.query.analysis.chat_json")
+    def test_input_row_index_round_trips_from_query_spec(self, chat_json):
+        chat_json.return_value = {
+            "final_goal": "用第二次巡查编号统计坑槽",
+            "intent_family": "data",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "按巡检时间倒序取最近两次巡查编号",
+                    "subject": "patrol",
+                    "view": "list",
+                    "metrics": [],
+                    "dimensions": ["patrol_number"],
+                    "filters": [],
+                    "output_projection": ["patrol_number"],
+                    "order_by": [
+                        {"field": "collection_time", "direction": "desc"}
+                    ],
+                    "limit": 2,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "q2",
+                    "action": "query_data",
+                    "question": "按第二次巡查编号统计坑槽数量",
+                    "subject": "disease",
+                    "view": "count",
+                    "metrics": ["count"],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": ["count"],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": ["q1"],
+                    "inputs": [
+                        {
+                            "from_node": "q1",
+                            "from_field": "patrol_number",
+                            "to_field": "patrol_number",
+                            "op": "=",
+                            "row_index": 1,
+                        }
+                    ],
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "倒数第二次巡查的坑槽数量",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+            registry=CapabilityRegistry.load(),
+        )
+
+        self.assertEqual(
+            plan.nodes[1].spec.input_bindings[0].row_index,
+            1,
+        )
+
+    def test_dependency_rejects_incompatible_source_field(self):
+        registry = CapabilityRegistry.load()
+        source = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=("collection_time",),
+            order_by=({"field": "collection_time", "direction": "desc"},),
+            limit=1,
+            required_assertions=(),
+        )
+        target = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="collection_time",
+                    to_field="patrol_number",
+                    op="=",
+                ),
+            ),
+        )
+        plan = QueryPlan(
+            question="最近一次巡检里坑槽有多少处？",
+            nodes=(
+                PlanNode(id="q1", spec=source),
+                PlanNode(id="q2", spec=target, depends_on=("q1",)),
+            ),
+        )
+
+        issue = query_plan_input_binding_issue(plan, registry)
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue.code, "input_field_incompatible")
+
+    def test_query_data_dependency_requires_executable_input_binding(self):
+        registry = CapabilityRegistry.load()
+        source = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("problem_type_name", "pile_segment_1000m"),
+            filters=(),
+            output_projection=(
+                "problem_type_name",
+                "pile_segment_1000m",
+            ),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+        target = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="top_groups",
+            metrics=("count",),
+            dimensions=("problem_type_name", "pile_segment_1000m"),
+            filters=(),
+            output_projection=(
+                "problem_type_name",
+                "pile_segment_1000m",
+            ),
+            order_by=({"field": "count", "direction": "desc"},),
+            limit=1,
+            required_assertions=(),
+        )
+        plan = QueryPlan(
+            question="按病害类型给出病害最集中的桩号段",
+            nodes=(
+                PlanNode(id="q1", spec=source),
+                PlanNode(id="q2", spec=target, depends_on=("q1",)),
+            ),
+        )
+
+        issue = query_plan_input_binding_issue(plan, registry)
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue.code, "missing_input_binding")
+        self.assertEqual(issue.node_id, "q2")
+
+    def test_input_equivalence_must_come_from_capability_config(self):
+        fixture = CapabilityRegistry.load()
+        aliases = dict(fixture.snapshot.aliases)
+        aliases["field_equivalences"] = []
+        registry = CapabilityRegistry(
+            replace(fixture.snapshot, aliases=aliases)
+        )
+        source = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=("device_code",),
+            filters=(),
+            output_projection=("device_code",),
+            order_by=(),
+            limit=1,
+            required_assertions=(),
+        )
+        target = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=("equipment_id",),
+            filters=(),
+            output_projection=("equipment_id",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="device_code",
+                    to_field="equipment_id",
+                    op="=",
+                ),
+            ),
+        )
+        plan = QueryPlan(
+            question="设备编号追踪",
+            nodes=(
+                PlanNode(id="q1", spec=source),
+                PlanNode(id="q2", spec=target, depends_on=("q1",)),
+            ),
+        )
+
+        issue = query_plan_input_binding_issue(plan, registry)
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue.code, "input_field_incompatible")
+
+    def test_registered_field_equivalence_allows_display_storage_binding(self):
+        registry = CapabilityRegistry.load()
+        source = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="list",
+            metrics=(),
+            dimensions=("route_name",),
+            filters=(),
+            output_projection=("route_name",),
+            order_by=(),
+            limit=1,
+            required_assertions=(),
+        )
+        target = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="list",
+            metrics=(),
+            dimensions=("routes_id",),
+            filters=(),
+            output_projection=("routes_id",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="route_name",
+                    to_field="routes_id",
+                    op="=",
+                ),
+            ),
+        )
+        plan = QueryPlan(
+            question="路线名称追踪",
+            nodes=(
+                PlanNode(id="q1", spec=source),
+                PlanNode(id="q2", spec=target, depends_on=("q1",)),
+            ),
+        )
+
+        issue = query_plan_input_binding_issue(plan, registry)
+
+        self.assertIsNone(issue)
+
+    def test_dependency_row_index_requires_ordered_upstream(self):
+        registry = CapabilityRegistry.load()
+        source = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=("patrol_number",),
+            filters=(),
+            output_projection=("patrol_number",),
+            order_by=(),
+            limit=2,
+            required_assertions=(),
+        )
+        target = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="patrol_number",
+                    to_field="patrol_number",
+                    op="=",
+                    row_index=0,
+                ),
+            ),
+        )
+        plan = QueryPlan(
+            question="最近一次巡查的坑槽数量",
+            nodes=(
+                PlanNode(id="q1", spec=source),
+                PlanNode(id="q2", spec=target, depends_on=("q1",)),
+            ),
+        )
+
+        issue = query_plan_input_binding_issue(plan, registry)
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue.code, "input_row_order_missing")
+
+    def test_single_value_binding_requires_one_row_from_multi_row_source(self):
+        registry = CapabilityRegistry.load()
+        source = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="top_groups",
+            metrics=("count",),
+            dimensions=("route_name", "up_or_down"),
+            filters=(),
+            output_projection=("route_name", "up_or_down", "count"),
+            order_by=({"field": "count", "direction": "desc"},),
+            limit=10,
+            required_assertions=(),
+        )
+        target = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("up_or_down", "pile_segment_1000m"),
+            filters=(),
+            output_projection=("up_or_down", "pile_segment_1000m", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="route_name",
+                    to_field="route_name",
+                    op="=",
+                ),
+            ),
+        )
+        plan = QueryPlan(
+            question="统计高发路线和方向组合里的常见桩号段",
+            nodes=(
+                PlanNode(id="q1", spec=source),
+                PlanNode(id="q2", spec=target, depends_on=("q1",)),
+            ),
+        )
+
+        issue = query_plan_input_binding_issue(plan, registry)
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(
+            issue.code,
+            "input_single_value_requires_row_index",
+        )
+
+    def test_paired_multi_row_bindings_do_not_become_independent_cross_product(self):
+        registry = CapabilityRegistry.load()
+        source = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="top_groups",
+            metrics=("count",),
+            dimensions=("route_name", "up_or_down"),
+            filters=(),
+            output_projection=("route_name", "up_or_down", "count"),
+            order_by=({"field": "count", "direction": "desc"},),
+            limit=10,
+            required_assertions=(),
+        )
+        target = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("route_name", "up_or_down", "pile_segment_1000m"),
+            filters=(),
+            output_projection=(
+                "route_name",
+                "up_or_down",
+                "pile_segment_1000m",
+                "count",
+            ),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="route_name",
+                    to_field="route_name",
+                    op="in",
+                ),
+                InputBinding(
+                    from_node="q1",
+                    from_field="up_or_down",
+                    to_field="up_or_down",
+                    op="in",
+                ),
+            ),
+        )
+        plan = QueryPlan(
+            question="统计高发路线和方向组合里的常见桩号段",
+            nodes=(
+                PlanNode(id="q1", spec=source),
+                PlanNode(id="q2", spec=target, depends_on=("q1",)),
+            ),
+        )
+
+        issue = query_plan_input_binding_issue(plan, registry)
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue.code, "input_composite_rows_unsupported")
+
+    def test_dependency_rejects_field_not_produced_by_upstream(self):
+        registry = CapabilityRegistry.load()
+        source = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=("collection_time",),
+            order_by=({"field": "collection_time", "direction": "desc"},),
+            limit=1,
+            required_assertions=(),
+        )
+        target = QuerySpec(
+            id="q2",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            input_bindings=(
+                InputBinding(
+                    from_node="q1",
+                    from_field="patrol_number",
+                    to_field="patrol_number",
+                    op="=",
+                ),
+            ),
+        )
+        plan = QueryPlan(
+            question="最近一次巡查的坑槽数量",
+            nodes=(
+                PlanNode(id="q1", spec=source),
+                PlanNode(id="q2", spec=target, depends_on=("q1",)),
+            ),
+        )
+
+        issue = query_plan_input_binding_issue(plan, registry)
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue.code, "input_field_not_produced")
+
     @patch("app.query.analysis.chat_json")
     def test_day_trend_requires_calendar_day_dimension(self, chat_json):
         invalid = {
@@ -507,7 +988,7 @@ class QueryPlanningTests(unittest.TestCase):
         self.assertEqual(len(plan.nodes), 2)
 
     @patch("app.query.analysis.chat_json")
-    def test_unavailable_severity_field_cannot_fall_back_to_all_diseases(
+    def test_severity_field_cannot_fall_back_to_all_diseases(
         self,
         chat_json,
     ):
@@ -536,8 +1017,8 @@ class QueryPlanningTests(unittest.TestCase):
         }
 
         with self.assertRaisesRegex(
-            QuerySpecUnsupported,
-            "全部为空",
+            QuerySpecError,
+            "damage_type",
         ):
             analyze_single_turn(
                 "找出严重等级病害最多的前5条路线",
@@ -549,11 +1030,11 @@ class QueryPlanningTests(unittest.TestCase):
             )
 
     @patch("app.query.analysis.chat_json")
-    def test_severity_evidence_rejects_legacy_damage_type_field(
+    def test_severity_evidence_accepts_authoritative_damage_type_field(
         self,
         chat_json,
     ):
-        invalid = {
+        chat_json.return_value = {
             "final_goal": "严重病害最多的路线",
             "intent_family": "top_groups",
             "views": [
@@ -575,16 +1056,6 @@ class QueryPlanningTests(unittest.TestCase):
                 }
             ],
         }
-        corrected = {
-            **invalid,
-            "views": [
-                {
-                    **invalid["views"][0],
-                    "dimensions": ["history_damage_interval"],
-                }
-            ],
-        }
-        chat_json.side_effect = [invalid, corrected]
 
         plan = analyze_single_turn(
             "按严重等级统计病害数量",
@@ -594,12 +1065,11 @@ class QueryPlanningTests(unittest.TestCase):
             subject="disease",
         )
 
-        self.assertEqual(chat_json.call_count, 2)
-        self.assertIn(
-            "history_damage_interval",
+        self.assertEqual(chat_json.call_count, 1)
+        self.assertEqual(
             plan.nodes[0].spec.dimensions,
+            ("damage_type",),
         )
-        self.assertNotIn("damage_type", plan.nodes[0].spec.dimensions)
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
@@ -636,9 +1106,89 @@ class QueryPlanningTests(unittest.TestCase):
         self.assertEqual(len(plan.nodes), 2)
         self.assertEqual(plan.nodes[1].node_type, "post_calc")
         self.assertEqual(plan.nodes[1].depends_on, ("q1",))
-        self.assertIn(
+        self.assertNotIn(
             "analysis_only",
             plan.nodes[1].spec.required_assertions,
+        )
+        self.assertEqual(
+            plan.nodes[1].spec.calculation.tool,
+            "calculate_series",
+        )
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_trend_post_calc_uses_declared_series_operands(
+        self,
+        chat_json,
+        _resolve,
+    ):
+        chat_json.return_value = {
+            "final_goal": "按月分析病害数量趋势",
+            "intent_family": "trend",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "按月统计病害数量",
+                    "subject": "disease",
+                    "view": "trend",
+                    "metrics": ["count"],
+                    "dimensions": ["month"],
+                    "filters": [],
+                    "output_projection": ["month", "count"],
+                    "order_by": [
+                        {"field": "month", "direction": "asc"}
+                    ],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                },
+                {
+                    "id": "trend",
+                    "action": "post_calc",
+                    "question": "基于月度序列说明变化趋势",
+                    "subject": "disease",
+                    "view": "trend",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["analysis_only"],
+                    "depends_on": ["q1"],
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "长沙－芷江高速公路最近三个月的病害数量变化趋势如何？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+        )
+
+        post_calc = plan.nodes[-1]
+        self.assertIsNotNone(post_calc.spec.calculation)
+        self.assertEqual(
+            post_calc.spec.calculation.tool,
+            "calculate_series",
+        )
+        self.assertNotIn(
+            "analysis_only",
+            post_calc.spec.required_assertions,
+        )
+        operands = {
+            item.name: item for item in post_calc.spec.calculation.operands
+        }
+        self.assertEqual(
+            operands["labels"].source,
+            {"node": "q1", "field": "month"},
+        )
+        self.assertEqual(
+            operands["values"].source,
+            {"node": "q1", "field": "count"},
         )
 
     @patch("app.query.analysis.resolve_value")
@@ -680,6 +1230,66 @@ class QueryPlanningTests(unittest.TestCase):
         self.assertEqual(plan.nodes[-1].node_type, "post_calc")
         self.assertEqual(plan.nodes[-1].spec.view, "trend")
         self.assertEqual(plan.nodes[-1].depends_on, ("q1",))
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_raw_time_trend_dimension_defaults_to_registered_month_axis(
+        self,
+        chat_json,
+        _resolve,
+    ):
+        chat_json.return_value = {
+            "final_goal": "最近三个月病害数量趋势",
+            "intent_family": "trend",
+            "answer_operation": "trend",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "统计最近三个月病害数量",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["collection_time"],
+                    "filters": [],
+                    "output_projection": ["collection_time", "count"],
+                    "order_by": [
+                        {"field": "collection_time", "direction": "asc"}
+                    ],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "长沙－芷江高速公路最近三个月的病害数量变化趋势如何？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+            registry=CapabilityRegistry.load(),
+        )
+
+        data = plan.nodes[0]
+        self.assertEqual(data.spec.view, "trend")
+        self.assertEqual(data.spec.dimensions, ("month",))
+        self.assertEqual(data.spec.output_projection, ("month", "count"))
+        self.assertEqual(
+            data.spec.order_by,
+            ({"field": "month", "direction": "asc"},),
+        )
+        series = plan.nodes[-1]
+        self.assertEqual(series.spec.calculation.tool, "calculate_series")
+        operands = {
+            item.name: item for item in series.spec.calculation.operands
+        }
+        self.assertEqual(
+            operands["labels"].source,
+            {"node": "q1", "field": "month"},
+        )
 
     @patch("app.query.analysis.resolve_value")
     @patch("app.query.analysis.chat_json")
@@ -737,6 +1347,108 @@ class QueryPlanningTests(unittest.TestCase):
 
         self.assertEqual(len(plan.nodes), 2)
         self.assertEqual(plan.nodes[1].spec.view, "trend")
+
+    @patch("app.query.analysis.chat_json")
+    def test_analysis_only_post_calc_uses_explanatory_data_shape(self, chat_json):
+        chat_json.return_value = {
+            "final_goal": "比较两个月热点位置变化",
+            "intent_family": "analysis",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "统计两个月各自的高发桩号段",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["month", "pile_segment_1000m"],
+                    "filters": [],
+                    "output_projection": [
+                        "month",
+                        "pile_segment_1000m",
+                        "count",
+                    ],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                },
+                {
+                    "id": "p1",
+                    "action": "post_calc",
+                    "question": "比较两个月热点位置是否变化",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["analysis_only"],
+                    "depends_on": ["q1"],
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "比较这两个月病害热点位置有没有变化",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            registry=CapabilityRegistry.load(),
+        )
+
+        self.assertEqual(plan.nodes[-1].node_type, "post_calc")
+        self.assertEqual(plan.nodes[-1].spec.view, "data")
+
+    @patch("app.query.analysis.chat_json")
+    def test_segment_label_is_not_accompanied_by_fake_boundary_columns(
+        self,
+        chat_json,
+    ):
+        chat_json.return_value = {
+            "final_goal": "列出1公里桩号分段内病害数量最高的三段",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "按1公里桩号分段统计病害数量",
+                    "subject": "disease",
+                    "view": "top_groups",
+                    "metrics": ["count"],
+                    "dimensions": ["pile_segment_1000m"],
+                    "filters": [],
+                    "output_projection": [
+                        "pile_segment_1000m",
+                        "start_pile",
+                        "end_pile",
+                        "count",
+                    ],
+                    "order_by": [
+                        {"field": "count", "direction": "desc"}
+                    ],
+                    "limit": 3,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                }
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "列出病害最多的前三个公里段",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+        )
+
+        spec = plan.nodes[0].spec
+        self.assertEqual(spec.dimensions, ("pile_segment_1000m",))
+        self.assertEqual(
+            spec.output_projection,
+            ("pile_segment_1000m", "count"),
+        )
 
     @patch("app.query.analysis.chat_json")
     def test_auxiliary_subject_is_allowed_when_final_subject_matches(
@@ -808,6 +1520,64 @@ class QueryPlanningTests(unittest.TestCase):
 
         self.assertEqual(plan.nodes[0].spec.subject, "patrol")
         self.assertEqual(plan.nodes[-1].spec.subject, "disease")
+
+    @patch("app.query.analysis.chat_json")
+    def test_recent_window_disease_plan_gets_real_patrol_batch_axis(
+        self,
+        chat_json,
+    ):
+        chat_json.return_value = {
+            "final_goal": "统计最近五次巡查中的网状裂缝数量",
+            "intent_family": "distribution",
+            "views": [
+                {
+                    "id": "counts",
+                    "action": "query_data",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count"],
+                    "dimensions": ["patrol_number"],
+                    "filters": [
+                        {
+                            "field": "problem_type_name",
+                            "op": "=",
+                            "raw_value": "网状裂缝",
+                        }
+                    ],
+                    "output_projection": ["patrol_number", "count"],
+                    "order_by": [],
+                    "limit": 5,
+                    "required_assertions": [
+                        "preserve_user_scope",
+                        "recent_window",
+                    ],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "最近五次巡查，网裂的数量是不是在增加？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+        )
+
+        batches, counts = plan.nodes
+        self.assertEqual(batches.spec.subject, "patrol")
+        self.assertEqual(batches.spec.limit, 5)
+        self.assertEqual(
+            batches.spec.order_by,
+            ({"field": "create_time", "direction": "desc"},),
+        )
+        self.assertIsNone(counts.spec.limit)
+        self.assertEqual(counts.depends_on, (batches.id,))
+        self.assertEqual(
+            counts.spec.input_bindings[0].from_field,
+            "patrol_number",
+        )
 
     @patch("app.query.analysis.chat_json")
     def test_trend_intent_repairs_missing_terminal_analysis(self, chat_json):
@@ -1057,6 +1827,108 @@ class QueryPlanningTests(unittest.TestCase):
         self.assertEqual(operands["values"].source["node"], "counts")
 
     @patch("app.query.analysis.chat_json")
+    def test_recent_window_trend_is_split_into_batches_counts_and_series(
+        self,
+        chat_json,
+    ):
+        chat_json.return_value = {
+            "final_goal": "分析最近5次巡查的坑槽数量变化",
+            "intent_family": "trend",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "disease",
+                    "view": "trend",
+                    "metrics": ["count"],
+                    "dimensions": ["patrol_number", "collection_time"],
+                    "filters": [
+                        {
+                            "field": "problem_type_name",
+                            "op": "=",
+                            "raw_value": "坑槽",
+                        }
+                    ],
+                    "output_projection": [
+                        "patrol_number",
+                        "collection_time",
+                        "count",
+                    ],
+                    "order_by": [
+                        {"field": "create_time", "direction": "asc"}
+                    ],
+                    "limit": 5,
+                    "required_assertions": [
+                        "preserve_user_scope",
+                        "recent_window",
+                    ],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "q2",
+                    "action": "post_calc",
+                    "subject": "disease",
+                    "view": "trend",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["analysis_only"],
+                    "depends_on": ["q1"],
+                    "inputs": [],
+                    "calculation": {
+                        "tool": "calculate_series",
+                        "operation": "subtract",
+                        "operands": [
+                            {
+                                "name": "labels",
+                                "source": {
+                                    "node": "q1",
+                                    "field": "patrol_number",
+                                },
+                            },
+                            {
+                                "name": "values",
+                                "source": {
+                                    "node": "q1",
+                                    "field": "count",
+                                },
+                            },
+                        ],
+                        "precision": 0,
+                    },
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "坑槽在最近5次巡查的数量变化",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+        )
+
+        batches, counts, series = plan.nodes
+        self.assertEqual(batches.spec.subject, "patrol")
+        self.assertEqual(counts.spec.view, "distribution")
+        self.assertEqual(counts.spec.dimensions, ("patrol_number",))
+        self.assertEqual(counts.spec.order_by, ())
+        self.assertEqual(series.spec.view, "trend")
+        self.assertNotIn(
+            "analysis_only",
+            series.spec.required_assertions,
+        )
+        operands = {
+            item.name: item for item in series.spec.calculation.operands
+        }
+        self.assertEqual(operands["labels"].source["node"], batches.id)
+        self.assertEqual(operands["values"].source["node"], counts.id)
+
+    @patch("app.query.analysis.chat_json")
     def test_limited_list_requires_order_before_execution(self, chat_json):
         chat_json.return_value = {
             "final_goal": "最近5次巡查",
@@ -1109,9 +1981,9 @@ class QueryPlanningTests(unittest.TestCase):
                     "subject": "patrol",
                     "view": "list",
                     "metrics": [],
-                    "dimensions": ["vehicle_id"],
+                    "dimensions": ["not_a_real_field"],
                     "filters": [],
-                    "output_projection": ["vehicle_id"],
+                    "output_projection": ["not_a_real_field"],
                     "order_by": [],
                     "limit": 500,
                     "required_assertions": [],
@@ -1786,3 +2658,80 @@ class QueryPlanningTests(unittest.TestCase):
         self.assertEqual(len(plan.nodes), 2)
         self.assertEqual(plan.nodes[1].node_type, "post_calc")
         self.assertEqual(plan.nodes[1].depends_on, ("q1",))
+
+    @patch("app.query.analysis.resolve_value")
+    @patch("app.query.analysis.chat_json")
+    def test_internal_dependency_placeholder_is_normalized_to_input_binding(
+        self,
+        chat_json,
+        resolve_value,
+    ):
+        chat_json.return_value = {
+            "final_goal": "先找主要路线，再统计该路线未识别病害",
+            "intent_family": "analysis",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "按路线统计未识别病害数量并取第一名",
+                    "subject": "disease",
+                    "view": "top_groups",
+                    "metrics": ["count"],
+                    "dimensions": ["route_name"],
+                    "filters": [],
+                    "output_projection": ["route_name", "count"],
+                    "order_by": [{"field": "count", "direction": "desc"}],
+                    "limit": 1,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "q2",
+                    "action": "query_data",
+                    "question": "统计该路线未识别病害数量",
+                    "subject": "disease",
+                    "view": "count",
+                    "metrics": ["count"],
+                    "dimensions": [],
+                    "filters": [
+                        {
+                            "field": "route_name",
+                            "op": "=",
+                            "raw_value": "DEPENDS_ON_q1_route_name",
+                        }
+                    ],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": ["q1"],
+                    "inputs": [],
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "AI认不出来的病害主要集中在哪条路上？有多少处？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            subject="disease",
+            registry=CapabilityRegistry.load(),
+        )
+
+        downstream = plan.nodes[1]
+        self.assertEqual(downstream.depends_on, ("q1",))
+        self.assertEqual(downstream.spec.filters, ())
+        self.assertEqual(
+            downstream.spec.input_bindings,
+            (
+                type(downstream.spec.input_bindings[0])(
+                    from_node="q1",
+                    from_field="route_name",
+                    to_field="route_name",
+                    op="=",
+                ),
+            ),
+        )
+        resolve_value.assert_not_called()

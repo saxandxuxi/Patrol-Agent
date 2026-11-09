@@ -7,38 +7,16 @@ from app.query.service import (
     _default_wren_executor,
     _simple_spec_mdl,
 )
-from app.services import nl2sql
 
 
 class CompilerAuthorityTests(unittest.TestCase):
+    @patch("app.query.service.compile_spec_mdl", return_value="MDL")
     @patch("app.query.service.wren_engine.compile_mdl_sql_verbose", return_value=("SELECT 1", ""))
-    @patch("app.query.service.sql_engine.generate_mdl_sql", return_value="MDL")
-    @patch("app.query.service.nl2sql.retrieve_query_context", return_value={})
-    @patch("app.query.service.wren_engine.mdl_context", return_value="models")
-    @patch("app.query.service.nl2sql.select_tables", return_value=set())
-    @patch("app.query.service.nl2sql.build_query_plan")
-    def test_queryspec_filters_override_plan_hallucinations(
+    def test_wren_compiles_the_frozen_queryspec_only(
         self,
-        build_plan,
-        _select_tables,
-        _mdl_context,
-        _retrieve,
-        generate_sql,
         compile_sql,
+        compile_spec,
     ):
-        build_plan.return_value = {
-            "kind": "mysql",
-            "message": "统计第三季度不同病害在不同道路上的新增情况",
-            "subject": "disease",
-            "shape": "distribution",
-            "required_conditions": [],
-            "slots": {
-                "semantic_conditions": [
-                    {"field": "route_name", "op": "is_null", "value": None}
-                ],
-                "semantic_metrics": ["count"],
-            },
-        }
         spec = QuerySpec(
             id="q1",
             kind="mysql",
@@ -67,21 +45,10 @@ class CompilerAuthorityTests(unittest.TestCase):
             question="统计第三季度不同病害在不同道路上的新增情况",
         )
 
-        _default_wren_executor(spec)
+        self.assertEqual(_default_wren_executor(spec), "SELECT 1")
 
-        mdl_sql = compile_sql.call_args.args[1]
-        self.assertNotIn("route_name IS NULL", mdl_sql)
-        self.assertIn(
-            "disease.collection_time >= '2026-07-01 00:00:00'",
-            mdl_sql,
-        )
-        self.assertIn(
-            "disease.collection_time < '2026-10-01 00:00:00'",
-            mdl_sql,
-        )
-        self.assertIn("2026-07-01", mdl_sql)
-        build_plan.assert_not_called()
-        generate_sql.assert_not_called()
+        compile_spec.assert_called_once_with(spec)
+        compile_sql.assert_called_once_with("mysql", "MDL")
 
     @patch("app.query.service.sql_engine.execute_sql", return_value={"columns": [], "rows": []})
     def test_execution_uses_source_aware_sql_boundary(self, execute_sql):
@@ -95,22 +62,6 @@ class CompilerAuthorityTests(unittest.TestCase):
             "SELECT 1",
             question="统计第三季度新增病害",
         )
-
-    def test_patrol_route_list_does_not_add_disease_count(self):
-        sql = nl2sql.simple_patrol_route_list_mdl(
-            {
-                "kind": "mysql",
-                "route_scope_from_patrol": True,
-                "shape": "list",
-                "required_conditions": [],
-                "slots": {},
-            }
-        )
-        self.assertIsNotNone(sql)
-        self.assertNotIn("disease", sql.lower())
-        self.assertNotIn("病害数量", sql)
-        self.assertIn("r.short_name IS NOT NULL", sql)
-        self.assertIn("r.short_name NOT IN ('未知路线')", sql)
 
     def test_effective_length_sum_uses_calculated_field_in_where_clause(self):
         spec = QuerySpec(

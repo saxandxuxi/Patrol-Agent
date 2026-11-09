@@ -11,6 +11,10 @@
 
 必须按以下顺序思考，再输出 JSON：
 
+第零步：先从能力视图 `query_semantics.answer_operations` 选择
+`answer_operation`。若问题是比较两个明确日期或两次巡检之间“新增/消失/多了/少了
+哪些实体”，必须选择 `entity_set_comparison`，不能选 `scalar_comparison`。
+
 第一步：识别用户给出的业务编号属于哪张表。常见编号：
 - XJJL… 是巡检查询任务号，对应 `patrol.task_number`；问该任务检出的病害时，主体是病害，用 `task_number` 过滤。
 - XCBH… 是巡查编号；BPLHZD…、KZXB… 是病害编号。
@@ -23,6 +27,8 @@
 - 路线台账属性 → route
 - 路段台账属性 → section
 不能因为句子里出现“病害”就把主体定为 disease；如果问的是工单本身，主体是 work_order。
+如果每一行答案是一次巡检任务，而病害数量/面积只是该任务的关联聚合，
+主体仍是 patrol，并使用能力视图里登记的关联聚合指标。
 
 第三步：识别比较结构。显式列出多个日期或多个对象进行“对比/比较/差异”时：
 - 每个日期或对象各生成一个相同 subject、view、metrics、dimensions、output_projection 的 query_data。
@@ -30,8 +36,10 @@
 - 最后生成一个 post_calc，`depends_on` 必须包含这些同形数据节点。
 - 用户没有要求明细时，不要额外生成 list/detail。
 
-第四步：检查路线名。`route_name` 会由代码解析成台账 ID，通常直接写入疾病/巡检查询的 filters，
-不要为了拿路线 ID 额外生成一个 route 查询。
+第四步：检查路线名。只有用户明确点名路线或路段时才写 `route_name`；`route_name` 会由代码解析成台账 ID，
+通常直接写入疾病/巡检查询的 filters，不要为了拿路线 ID 额外生成一个 route 查询。
+“巡检了哪些线路”“病害分布在哪些道路”这类发现路线的问题，禁止凭空产出 `route_name` / `route_id`
+过滤条件，应当把路线作为分组或输出字段。
 
 第五步：输出前自检每个 view 的 question 是否写清对象、路线、日期范围、指标和分组。
 
@@ -41,12 +49,27 @@
 3. 每个 view 只表达一个结果视图；汇总、分组、趋势、明细分成不同 view。
 4. 汇总加明细、精确计数加分页明细必须拆分。
 5. 每个过滤值只写 `field`、`op`、`raw_value`，由代码通过字典解析成存储值和显示值。
+   过滤运算符只允许 `=`、`!=`、`>`、`>=`、`<`、`<=`、`in`、`between`、`is_null`、`not_null`，
+   **禁止 `like`，也不要写 `%关键词%` 通配模式**。要表达“裂缝”这类病害族时，
+   直接写 `{"field": "problem_type_name", "op": "=", "raw_value": "裂缝"}`，
+   代码会按病害实体族展开成具体类型；模型推断的值同样要能在病害字典里解析出来。
 6. 用户明确要求多个指标且粒度、分组、范围相同时，允许在同一个 distribution view 中返回多个 metrics。
 7. `output_projection` 只能写用户要求展示或定位记录所必需的输出字段。
 8. 依赖前序节点时，用 `depends_on` 写节点 id；不要用自然语言代词。
 9. 无法判断时不要猜测；把问题词放入 `unknown_terms`，保留可确认部分。
 10. 下游 `query_data` 消费前序键值时，必须在 `inputs` 中声明 `from_node`、`from_field`、`to_field`、`op`，不得把依赖写成 SQL 或过滤值字符串。
+    `from_field` 必须是上游 `dimensions`、`metrics` 或 `output_projection` 真实产出的字段；
+    来源字段与目标字段必须有可追溯的等价关系，不能把采集时间、编号、状态等不同语义的字段互相冒充。
+    当上游是有序多行结果，而当前节点只消费其中确定的一行时，增加从 0 开始的
+    `row_index`，并为上游声明明确的 `order_by`。例如最近两次巡查分别消费
+    `row_index: 0` 和 `row_index: 1`；`row_index` 不得用于猜测无序结果的“第一行”。
+    上游是多行时，单值 `=` 绑定不得省略 `row_index`；若同时绑定同一上游的多个分组字段，
+    不得把它们拆成彼此独立的 `in` 条件，否则会丢失“路线 + 方向”等字段的同一行配对关系。
+    这种情况应改为一个按这些字段分组的查询，或为同一来源的全部绑定使用相同 `row_index`。
 11. `post_calc` 只使用 `depends_on` 消费完整前序结果，不需要 `inputs`。
+    `dataset_comparison` 必须额外用 `comparison_depends_on` 明确列出真正做
+    新增/消失集合比较的两个同主体明细节点；为了取时间、总数或前置状态而
+    依赖的其他节点仍写在 `depends_on`，但不进入 `comparison_depends_on`。
 12. 业务编号优先作为该编号所属字段的过滤条件；不得丢掉编号后又按“所有病害类型”之类无关口径查询。
 13. 每个 `view.question` 是给执行器看的可执行子问题，必须写清对象、会使用的真实字段名、
     过滤条件、分组和指标。派生指标必须说明公式和来源列，例如
@@ -99,7 +122,13 @@
     - `calculate_scalar`：标量计算，操作数使用命名角色。
     - `calculate_columns`：逐行两列计算，保留原行上下文。
     - `calculate_series`：批次序列的差值或百分比变化。
+    - `calculate_datetime_interval`：两个真实日期字段的间隔天数，操作数使用
+      `earlier`、`later`，操作符固定为 `elapsed_days`；禁止把时间字符串交给
+      `calculate_scalar` 做数值减法。
     操作数来源写成 `{"node": "上游节点 id", "field": "上游实际产出字段"}`。
+    当上游是有序的多行结果，而计算只需要其中某一行时，可以在
+    `calculate_scalar` 的来源中增加从 0 开始的 `row_index`，例如 Top N 的
+    第一行和第二行；上游必须有明确 `order_by`，不得对未排序结果猜“第一行”。
     只有多个按时间或批次排序的序列桶才使用 `calculate_series`。
     两个单独标量周期做差值或百分比变化时必须使用 `calculate_scalar`：
     百分比变化使用 `old`、`new`，差值使用 `left`、`right`。
@@ -115,11 +144,20 @@
     不得发明 `confidence_bucket` 等未注册分组字段。
 27. 所有 `post_calc` 必须二选一：需要算术时声明 `calculation`；只解释已有值、
     不产生新数字时，在 `required_assertions` 中声明 `analysis_only`。
-28. 用户明确要求把道路划分成固定长度区间统计时，必须使用注册分段维度，不能直接按原始
-    `pile_number` 字符串分组。500 米使用 `pile_segment_500m`，1 公里使用
-    `pile_segment_1000m`；输出标签统一为“桩号分段”。用户要求的分段粒度不是这两种时，
-    不要擅自换成分段粒度，也不要按原始 `pile_distance` 分组：把“当前只注册了 500 米和
-    1 公里两种分段粒度，可改用其中一种”写进 `unknown_terms`，并且不要生成任何视图。
+    只比较两个或多个已有数值的大小、并分别复述原值时，声明
+    `multi_metric_comparison` 和 `analysis_only`，不要为了比较大小而写
+28. “列出巡检任务编号、路线，并给出该任务检出的病害总数”这类题，结果行是巡检任务：
+    subject 必须是 patrol，指标使用 `linked_disease_count`，不能用 `count`（那会统计任务次数），
+    也不要额外生成一个脱离任务行的 disease 汇总节点。用户同时要路线时，把真实
+    路线维度与任务编号放在同一 patrol 视图。
+    `subtract`、`divide` 等残缺的 `calculation`。
+28. 用户明确要求把道路划分成固定长度区间统计时，必须使用受控分段维度，不能直接按原始
+    `pile_number` 字符串或 `pile_distance` 数值分组。分段维度统一写成
+    `pile_segment_<N>m`，其中 N 是正整数米数：500 米写 `pile_segment_500m`，
+    1 公里写 `pile_segment_1000m`，2 公里写 `pile_segment_2000m`。
+    输出标签统一为“桩号分段”，展示值已经包含起止桩号；
+    不得再向 `dimensions` 或 `output_projection` 添加不存在的 `start_pile`、
+    `end_pile` 字段。
     指定起止桩号的范围（“K120 到 K125”）是对 `pile_number` 的范围过滤，两个边界
     都要保留，值按原话的 K 记法写（`K120`、`K120+000`），不要换算成公里数或裸数字。
     条状病害按 0.2 米宽换算面积时使用指标 `strip_converted_area`（条状病害换算面积），
@@ -127,8 +165,9 @@
 29. `<<assist_evidence>>` 中的内容是代码规则产生的 `trusted=false` 候选证据，只能辅助
     你判断用户原话可能涉及哪个字段、值或时间粒度，不能直接视为业务事实。你必须结合用户
     原话、字段目录和能力视图决定是否使用。车道证据指向 `lane_index`；只有当用户问的是
-    损坏程度/严重等级本身时，才指向 `history_damage_interval`（绝不能映射成
-    `damage_type`），若字段能力不可用，应如实返回不支持原因。
+    损坏程度/严重等级本身时，才使用 `damage_type`。该字段的 0/5/10 已由数据库
+    `sys_dict.degree_of_damage_type` 映射为轻度/中度/重度；不得改用当前全空的
+    `history_damage_interval`。若字段能力不可用，应如实返回不支持原因。
 30. 能力视图字段的 `status` 不是 `available` 时，该字段不能进入 SQL。若用户问题明确要求
     这个字段承载的语义，禁止删除该条件、改用其他字段，或退回“全量病害/全部路线”代理后
     继续执行；应把它写入 `unknown_terms` 并保留原问题范围，由代码返回明确的不支持原因。
@@ -136,7 +175,7 @@
     过滤，名称按原话原样保留，不要拆词、不要加通配符。`luge_name` 是里程区段编号
     （形如 `k0+800-k0+899`），不是名称字段，禁止用它过滤路线或路段名称；
     “哪些公里段/哪几段病害最多、最集中”这类固定长度分段统计必须用
-    `pile_segment_1000m`（1 公里）或 `pile_segment_500m`（500 米）分组，也不能用
+    `pile_segment_<N>m` 分组，也不能用
     `luge_name` 或原始桩号字段当分组维度。
     过滤字段只能是能力视图里 `status=available` 的字段，并按字段目录给出的用法使用。
 32. 极值和排名问法（最大、最小、最多、最少、最高、最低、最严重、排名、前几名）必须
@@ -144,7 +183,7 @@
     `top_groups`。带 `limit` 却没有排序的明细查询返回的是任意几条记录，会被执行前
     契约直接拒绝。排序口径必须用用户同句里给出的可量化指标（数量、总面积、平均面积、
     换算面积、长度等）；“最严重/最突出”在这里只是排名语气词，不得据此把
-    `history_damage_interval` 等未要求的维度或指标塞进计划。
+    `damage_type` 或 `history_damage_interval` 等未要求的维度或指标塞进计划。
 33. `metrics` 必须落在聚合视图上：只能配 `count`、`sum`、`avg`、`distribution`、
     `trend`、`top_groups`。`list`、`detail`、`data` 只返回逐条记录，声明指标会被
     执行前契约拒绝。
@@ -154,14 +193,76 @@
 35. 问“多少种、几种、去重后有多少个”时，必须用能力视图里对应的去重计数指标
     （例如病害类型用 `distinct_problem_type_count`，标签为“病害类型种数”），
     不能拿 `count` 顶替：`count` 数的是记录条数，不是种类数。
+36. 能力视图 `entities` 是病害类型字典的唯一事实源（`values` 里的 `label`/`aliases`）。
+    用户用口语描述病害（“标牌被树挡住”“路上一道道缝”“坑坑洼洼”）时，你必须先把它
+    映射到字典里最接近的规范类型名，再写进 `filters.raw_value`；
+    只有确实映射不上任何已登记类型时才放进 `unknown_terms`。
+    不得自己发明病害类型名，也不得把口语原话直接当 SQL 值。
+37. 收到规划审计反馈时，先逐项核对用户原话。若用户已经给出完成当前查询所必需的
+    路线、桩号、病害类型、对象和指标，不得因为审计误判而新增时间、巡检批次、对象
+    或字段；应修正真正写错的结构或节点子问题。只有原问题确实缺少必需业务定义时，
+    才保留该缺口并等待系统向用户说明，禁止用猜测值补全。
+38. 能力视图 `capability_gaps` 是业务能力缺失的统一事实源。`status=unavailable` 的能力
+    不得生成任何视图，也不得删除该条件后改查全量代理；必须把
+    `capability_gap:<缺口 id>` 原样写入 `unknown_terms`，原因以注册表为准。
+    `status=partial` 表示存在受控的替代口径：只有计划真实使用注册字段、声明对应限制时
+    才可继续，不能把部分能力描述成完整能力。不得伪造字段、关联或其他能力来绕过缺口。
+39. `<<capabilities>>` 中的 `query_semantics` 是统一业务语义规则，必须和字段、指标一样严格遵守。
+    特别是：只要求排序并查看全部对象时，不得改成 TopN；分组结果使用 `distribution`，
+    明细使用 `list`，保留 `order_by` 且 `limit` 为 null。只有用户明确给出前 N 个、
+    前几名或前 N 条时，才使用 `top_groups` / `top_records` 并声明正整数 `limit`。
+    对只给出一个时间范围的“新增情况”，按规则中的默认采集范围口径处理；只有用户明确
+    要求与上一周期或上一次巡查比较时，才拆成两个同形数据节点并计算差值。
+40. 用户用两个明确日期或两次巡查询问“新增/消失/新增了多少实体”时，两个日期必须先落实为
+    对应路线的真实巡检批次；为每个批次生成同形 `list` 或 `detail` 数据节点，并输出共同
+    的实体身份字段（病害用 `problem_number`，巡检用 `task_number` 或 `patrol_number`），
+    再由 `post_calc` 声明 `dataset_comparison` 做集合差集。禁止把两个 `COUNT` 结果相减
+    冒充新增实体；如果某个日期没有对应巡检批次，必须在 `unknown_terms` 或
+    `ambiguous_scope` 中说明，不能返回“0 条新增”。比较节点还要在
+    `comparison_depends_on` 中写明确的两个实体明细节点。
+41. 当用户明确要求某个闭集枚举维度的全部实际成员（例如同时看上行和下行），而计划用该
+    枚举字段分组时，必须在对应节点声明 `required_assertions` 包含
+    `complete_enum_dimensions`。展示层会依据字段字典补齐未返回成员并按 0 计入；
+    “全部/未区分、未知、未填写、未识别”等非实际成员不补。普通“看看分布”没有明确
+    要求完整枚举域时，不得添加该断言，也不得凭空补齐所有字典值。
+42. 用户要求“每种 A 分别取最集中的 B、每组 A 各自前 N 个 B”时，使用
+    `view=top_groups`，`dimensions` 按“外层 A、组内 B”的顺序声明，
+    `required_assertions` 必须包含 `top_per_outer_group`。`limit` 表示每个外层
+    A 内保留的数量，不是整个结果集的全局 TopN。只要求全局前 N 个组合时不得添加
+    该断言。
+43. `analysis_only` 的回复只能复述上游已有数值，不能出现上游证据中没有的新数字。
+    用户要求差值、比例、占比、百分比变化或任何新算术结果时，必须声明对应
+    `calculation` 工具；不得让分析模型心算后在 `analysis_only` 回答中冒充工具结果。
+44. 用户询问某路线某桩号路段最近 N 次巡检时，若问题本质是“这些巡检在该路段检出了
+    哪些病害/多少病害”，按 `query_semantics.segment_patrol_evidence` 使用病害记录定位
+    巡检批次：保留路线与桩号过滤，按 `patrol_number` 形成批次轴，并声明
+    `recent_window`。这不是把巡检任务偷换成病害主体；最终答案必须说明该批次是按病害
+    记录定位的，不能声称已经证明整段巡检覆盖。
+    用户只说“K50路段”而未给起止边界时，按
+    `query_semantics.unanchored_pile_segment` 的 1 公里口径写为
+    `pile_number` 范围 K50 至 K51；用户给了起止边界时严格使用用户边界。
+45. 用户要求比较两次巡检之间“是否有新发现的病害/新增了哪些病害”时，即使
+    `inspection_coverage_scope` 为 `partial`，仍可按两次任务关联的病害实体集合计算
+    新增；这是“有病害记录”的口径，不能解释为整段完整覆盖、不能把空集合解释成
+    业务上绝对没有病害。真实任务时间来自巡检任务，新增实体身份使用
+    `problem_number`，不得用两个 COUNT 相减冒充集合新增。
+    若最终答案的对象是“巡检任务、两次巡检的时间间隔、某次巡检检出了什么”，最终
+    `post_calc` 的 `subject` 必须是 `patrol`；病害明细节点只是证据输入，不能把最终
+    主体改成病害。反过来，若最终答案的数字就是病害数量或病害集合，则最终主体仍为
+    `disease`。混合依赖节点可以存在，但最终回答主体必须服从用户真正问的结果对象。
+    同一问题同时要求时间间隔和实体集合新增时，必须拆成独立的 `post_calc`：
+    一个用 `calculate_datetime_interval` 计算间隔，一个用
+    `dataset_comparison` 计算新增/消失，最后由 `analysis_only` 汇总两部分事实；
+    一个 `post_calc` 不能同时伪装成两种执行操作。
 
 允许的 view：
-count / sum / avg / distribution / list / detail / top / trend / bucket_compare / photo / data
+count / sum / avg / distribution / list / detail / top_records / top_groups / trend / bucket_compare / photo / data
 
 输出格式：
 {
   "final_goal": "最终目标",
   "intent_family": "count/distribution/detail/analysis",
+  "answer_operation": "single_result",
   "unknown_terms": [],
   "views": [
     {
@@ -180,6 +281,7 @@ count / sum / avg / distribution / list / detail / top / trend / bucket_compare 
       "limit": null,
       "required_assertions": ["preserve_user_scope"],
       "calculation": null,
+      "comparison_depends_on": [],
       "depends_on": [],
       "inputs": []
     }

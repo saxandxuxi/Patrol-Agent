@@ -67,17 +67,36 @@ metrics:
       unit: km
       allowed_views: [count, distribution, top_groups]
       requires_join: [route]
+      # 路线长度只由路线决定；当同一结果内只有一条且数值一致时，
+      # 可传播到缺失的枚举分组（如某方向 0 处），不能凭空补 0。
+      propagate_across_groups: true
   patrol:
     count:
       expression: COUNT(*)
       label: 数量
       unit: 次
       allowed_views: [count, distribution, top_groups, trend]
+    # 结果行仍是一次巡检任务，病害数量只是该任务关联病害的聚合；
+    # 不能把 patrol.count（任务次数）冒充病害检出数。
+    linked_disease_count:
+      expression: COUNT(DISTINCT {disease}.id)
+      label: 任务关联病害数
+      unit: 处
+      allowed_views: [count, distribution, top_groups, trend]
+      requires_join: [disease]
     patrol_mileage:
-      expression: SUM({alias}.patrol_mileage)
+      # 数据库中的 patrol_mileage 存的是米，指标对外统一输出公里。
+      expression: SUM({alias}.patrol_mileage) / 1000.0
       label: 巡检里程
       unit: km
       allowed_views: [count, distribution, top_groups, trend]
+  _field_metric_generation:
+    # 自动生成的 SUM/AVG/MIN/MAX 必须沿用字段的物理单位换算，不能因为换了一个
+    # 指标 ID 就绕过显式指标的单位口径。
+    patrol:
+      patrol_mileage:
+        divisor: "1000.0"
+        unit: km
   _lexicon:
     metric_expressions:
     - fallback_words:

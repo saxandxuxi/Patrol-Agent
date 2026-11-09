@@ -13,6 +13,37 @@ fields:
       physical_table: ai_problem
       physical_column: up_or_down
       enum_key: ai_problem.up_or_down
+    categories_type:
+      # 编码用于过滤，中文标签用于展示；两者不能混用。
+      expression: disease.category_name
+      filter_expression: disease.categories_type
+      label: 病害大类
+      roles: [code, dimension, output]
+      physical_table: ai_problem
+      physical_column: categories_type
+      enum_key: ai_problem.categories_type
+    category_name:
+      expression: disease.category_name
+      filter_expression: disease.categories_type
+      label: 病害大类
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: categories_type
+      enum_key: ai_problem.categories_type
+    damage_type:
+      expression: >-
+        CASE disease.damage_type
+        WHEN '0' THEN '轻度'
+        WHEN '5' THEN '中度'
+        WHEN '10' THEN '重度'
+        ELSE COALESCE(NULLIF(disease.damage_type, ''), '未填写')
+        END
+      filter_expression: disease.damage_type
+      label: 损坏程度
+      roles: [code, dimension, output]
+      physical_table: ai_problem
+      physical_column: damage_type
+      enum_key: ai_problem.damage_type
     route_length_km:
       expression: route.route_length_km
       label: 路线长度
@@ -37,3 +68,55 @@ fields:
       physical_column: tech_grade
       requires_join: [section]
       enum_key: basic_facilities_sections.tech_grade
+  patrol:
+    # 巡检查询里的"设备编号/设备"沿用与病害台账同一套设备编号值
+    # （ai_problem.device_code 与 ai_maintain_patrol.equipment_id 是同一批值）；
+    # ai_maintain_patrol.device_code 这一列在库里全为 NULL，只留在物理目录里，
+    # 不能作为业务字段的落点。
+    device_code:
+      expression: patrol.equipment_id
+      label: 设备编号
+      roles: [code, dimension]
+      physical_table: ai_maintain_patrol
+      physical_column: equipment_id
+    equipment_id:
+      expression: patrol.equipment_id
+      label: 设备id
+      roles: [code, dimension]
+      physical_table: ai_maintain_patrol
+      physical_column: equipment_id
+    collection_time:
+      expression: patrol.create_time
+      label: 巡检时间
+      roles: [time, dimension]
+      physical_table: ai_maintain_patrol
+      physical_column: create_time
+    route_name:
+      expression: route.short_name
+      label: 路线名称
+      roles: [dimension, output]
+      physical_table: basic_facilities_routes
+      physical_column: short_name
+      requires_join: [patrol_route, route]
+    routes_id:
+      expression: patrol_route.routes_id
+      label: 路线ID
+      roles: [code, dimension, output]
+      physical_table: ai_maintain_routes_patrol
+      physical_column: routes_id
+      requires_join: [patrol_route]
+    pile_number:
+      expression: disease.pile_number
+      label: 桩号
+      roles: [code, dimension]
+      physical_table: ai_problem
+      physical_column: pile_number
+      requires_join: [disease]
+    pile_distance:
+      expression: disease.pile_distance
+      label: 解析桩号米数
+      unit: m
+      roles: [numeric]
+      physical_table: ai_problem
+      physical_column: pile_distance
+      requires_join: [disease]

@@ -3,6 +3,7 @@ import unittest
 from app.query.capability_registry import CapabilityRegistry
 from app.query.contracts import QuerySpec
 from app.query.shape_contracts import (
+    canonical_view,
     normalize_top_view,
     validate_shape_contract,
 )
@@ -112,7 +113,53 @@ class ShapeContractTests(unittest.TestCase):
         )
         self.assertEqual(issue_codes(spec), ("missing_dimensions",))
 
+    def test_missing_top_limit_explains_ordered_complete_result(self):
+        spec = top_spec(
+            view="top_groups",
+            metrics=("count",),
+            dimensions=("route_name",),
+            output_projection=(),
+            order_by=(order("count"),),
+            limit=None,
+        )
+        issues = validate_shape_contract(spec, CapabilityRegistry.load())
+
+        self.assertEqual(
+            tuple(issue.code for issue in issues),
+            ("missing_limit",),
+        )
+        self.assertIn("distribution", issues[0].reason)
+        self.assertIn("查看全部对象", issues[0].reason)
+
     def test_unknown_view_is_rejected(self):
         spec = top_spec(view="not_a_view")
         self.assertEqual(issue_codes(spec), ("unsupported_view",))
+
+    def test_distribution_without_dimensions_normalizes_to_aggregate(self):
+        """没有分组维度的"分布"就是一行总量：数量 + 总长度按聚合视图执行。
+
+        模型偶尔把"多少处 + 加起来多长"写成 distribution，执行前契约以前会
+        直接判"分布必须声明分组维度"，把有数据的问题整条拦死。
+        """
+
+        self.assertEqual(
+            canonical_view(
+                "distribution",
+                ("count", "sum_effective_disease_length"),
+                (),
+                "query_data",
+            ),
+            "count",
+        )
+
+    def test_distribution_with_dimensions_stays_distribution(self):
+        self.assertEqual(
+            canonical_view(
+                "distribution",
+                ("count",),
+                ("route_name",),
+                "query_data",
+            ),
+            "distribution",
+        )
 

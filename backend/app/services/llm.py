@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import time
 from typing import Any
 
@@ -9,6 +8,7 @@ import httpx
 
 from ..store import get_default_model
 from ..config import settings
+from .llm_json import parse_json_lenient
 from .logging_service import log_error, log_event
 
 
@@ -166,15 +166,24 @@ def chat_detail(
             log_error("llm", "provider_prefix_stripped", RuntimeError(model_name))
             model = {**model, "model": bare}
         model_name = str(model.get("model") or bare)
-    if provider == "moonshot" or "kimi-k2" in model_name:
+    model_name_lower = model_name.lower()
+    if provider == "moonshot" or "kimi-k2" in model_name_lower:
         temperature = 1
-    if ("glm-4.6" in model_name or "kimi-k2" in model_name) and (max_tokens or 0) and max_tokens < 256:
+    if (
+        "glm-4.6" in model_name_lower
+        and (max_tokens or 0)
+        and max_tokens < 256
+    ):
         max_tokens = 256
     max_tokens = max_tokens or settings.llm_max_tokens
+    # Kimi K2 的 reasoning_content 与最终正文共用输出预算。实测 1024～4096
+    # 时常出现“思考了 2000～10000 字、content 为空”，JSON 裁判因此失败。
+    if "kimi-k2" in model_name_lower:
+        max_tokens = max(max_tokens, 8192)
     # DeepSeek reasoner 的长 reasoning 和最终正文共用响应预算。复杂 QuerySpec
     # 在 1024 tokens 下会只返回 reasoning_content、content 为空，表现为
     # "模型没有返回合法 JSON"。给最终正文留出可完成 JSON 的固定下限。
-    if "reasoner" in model_name.lower():
+    if "reasoner" in model_name_lower:
         max_tokens = max(max_tokens, 4096)
     payload = {
         "model": model_name,
@@ -237,10 +246,68 @@ def chat_detail(
 
 
 def _post(model: dict[str, Any], payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+    retryable_statuses = {408, 429, 500, 502, 503, 504}
+    max_attempts = 3
     with httpx.Client(timeout=settings.llm_timeout_seconds) as client:
-        resp = client.post(_endpoint(model["base_url"]), json=payload, headers=headers)
-        resp.raise_for_status()
-        return resp.json()
+        for attempt in range(max_attempts):
+            try:
+                resp = client.post(
+                    _endpoint(model["base_url"]),
+                    json=payload,
+                    headers=headers,
+                )
+            except httpx.TransportError as exc:
+                if attempt + 1 >= max_attempts:
+                    raise RuntimeError(
+                        f"HTTP network error after {max_attempts} attempts: {exc}"
+                    ) from exc
+                delay = min(8, 2**attempt)
+                log_event(
+                    "llm",
+                    "WARNING",
+                    "post_retry",
+                    reason=type(exc).__name__,
+                    attempt=attempt + 1,
+                    delay_seconds=delay,
+                )
+                time.sleep(delay)
+                continue
+            if not resp.is_error:
+                return resp.json()
+            if (
+                resp.status_code in retryable_statuses
+                and attempt + 1 < max_attempts
+            ):
+                retry_after = str(resp.headers.get("Retry-After") or "").strip()
+                try:
+                    delay = float(retry_after) if retry_after else 2**attempt
+                except ValueError:
+                    delay = 2**attempt
+                delay = max(0.0, min(delay, 30.0))
+                log_event(
+                    "llm",
+                    "WARNING",
+                    "post_retry",
+                    reason=f"HTTP {resp.status_code}",
+                    attempt=attempt + 1,
+                    delay_seconds=delay,
+                )
+                time.sleep(delay)
+                continue
+            detail = resp.text.strip()
+            try:
+                body = resp.json()
+                error = body.get("error") if isinstance(body, dict) else None
+                if isinstance(error, dict):
+                    code = str(error.get("code") or "").strip()
+                    message = str(error.get("message") or "").strip()
+                    detail = ": ".join(item for item in (code, message) if item)
+            except ValueError:
+                pass
+            raise RuntimeError(
+                f"HTTP {resp.status_code}: {detail[:500]}"
+            )
+    raise RuntimeError("LLM request failed without a response")
 
 
 def chat_json(
@@ -256,7 +323,7 @@ def chat_json(
         max_tokens=max_tokens,
     ).strip()
     text = text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    data = _parse_json_lenient(text, allow_list=allow_list)
+    data = parse_json_lenient(text, allow_list=allow_list)
     if data is not None:
         return data
     # 模型偶尔会吐出坏 JSON（字符串里有裸引号/换行/中文引号），实测这一条就把
@@ -278,33 +345,10 @@ def chat_json(
         max_tokens=max_tokens,
     ).strip()
     retry = retry.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    data = _parse_json_lenient(retry, allow_list=allow_list)
+    data = parse_json_lenient(retry, allow_list=allow_list)
     if data is not None:
         return data
     raise LLMError(f"模型没有返回合法 JSON：{text[:200]}")
-
-
-def _parse_json_lenient(
-    text: str, allow_list: bool = False
-) -> dict[str, Any] | list[Any] | None:
-    """宽松解析：整段 → 截取第一个 { 到最后一个 } → strict=False（容忍串内换行）→ 去尾逗号。"""
-    candidates = [text]
-    start, end = text.find("{"), text.rfind("}")
-    if start >= 0 and end > start:
-        candidates.append(text[start : end + 1])
-    for candidate in candidates:
-        if not candidate:
-            continue
-        for payload in (candidate, re.sub(r",\s*([}\]])", r"\1", candidate)):
-            for strict in (True, False):
-                try:
-                    data = json.loads(payload, strict=strict)
-                except (json.JSONDecodeError, ValueError):
-                    continue
-                if isinstance(data, dict) or (allow_list and isinstance(data, list)):
-                    return data
-    return None
-
 
 def test_connection(model: dict[str, Any]) -> dict[str, str]:
     reply = chat(

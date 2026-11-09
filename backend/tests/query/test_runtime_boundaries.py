@@ -52,6 +52,36 @@ class RuntimeBoundaryTests(unittest.TestCase):
         payload = post.call_args.args[1]
         self.assertGreaterEqual(payload["max_tokens"], 4096)
 
+    @patch("app.services.llm._post")
+    def test_kimi_reasoning_model_gets_enough_tokens_for_json_content(
+        self,
+        post,
+    ):
+        post.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "{}",
+                        "reasoning_content": "reasoning",
+                    }
+                }
+            ]
+        }
+
+        llm.chat(
+            [{"role": "user", "content": "只输出 JSON"}],
+            model={
+                "api_key": "test",
+                "base_url": "https://example.test",
+                "model": "kimi-k2.6",
+                "provider": "moonshot",
+            },
+            max_tokens=1024,
+        )
+
+        payload = post.call_args.args[1]
+        self.assertGreaterEqual(payload["max_tokens"], 8192)
+
     def test_success_trace_is_safe_on_gbk_console(self):
         buffer = io.BytesIO()
         stream = io.TextIOWrapper(buffer, encoding="gbk")
@@ -182,6 +212,58 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertTrue(result["accepted"])
         self.assertIn("两组均无匹配记录", result["reply"])
+
+    def test_comparison_aligns_display_columns_with_empty_logical_projection(self):
+        spec = {
+            "output_projection": (
+                "problem_number",
+                "problem_type_name",
+                "pile_number",
+                "route_name",
+                "collection_time",
+            )
+        }
+        result = compare_datasets(
+            [
+                {
+                    "spec": spec,
+                    "columns": list(spec["output_projection"]),
+                    "rows": [],
+                },
+                {
+                    "spec": spec,
+                    "field_labels": {
+                        "problem_number": "病害编号",
+                        "problem_type_name": "病害类型",
+                        "pile_number": "桩号",
+                        "route_name": "路线名称",
+                        "collection_time": "采集时间",
+                    },
+                    "columns": [
+                        "病害编号",
+                        "病害类型",
+                        "桩号",
+                        "路线名称",
+                        "采集时间",
+                    ],
+                    "rows": [
+                        {
+                            "病害编号": "TZXB1",
+                            "病害类型": "条状修补",
+                            "桩号": "k50+010",
+                            "路线名称": "长沙－芷江高速公路",
+                            "采集时间": "2026-10-31 10:00:00",
+                        }
+                    ],
+                },
+            ],
+        )
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result["accepted"])
+        self.assertIn("新增 1", result["reply"])
+        self.assertEqual(result["rows"][0]["差异类型"], "新增")
+        self.assertIn("TZXB1", result["rows"][0]["病害编号"])
 
     def test_react_analysis_receives_all_prior_row_sets(self):
         blackboard = react_agent.ReactBlackboard(

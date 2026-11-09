@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 
 from .capability_registry import CapabilityRegistry
 from .contracts import QuerySpec, SUPPORTED_QUERY_VIEWS
+from .pile_segments import is_pile_segment_field
 
 
 _VIEW_ALIASES = {
@@ -35,6 +36,7 @@ _ANALYSIS_VIEW_ALIASES = frozenset(
 # 这几个视图返回逐条记录，不聚合。声明了指标还落在这些视图上，
 # 指标会被编译器静默丢掉（用户要“总面积”，拿到的却是明细行）。
 _RECORD_VIEWS = frozenset({"list", "detail", "data"})
+_SEGMENT_IMPLIED_OUTPUTS = frozenset({"start_pile", "end_pile"})
 
 
 def canonical_view(
@@ -55,6 +57,12 @@ def canonical_view(
         return "count" if metrics else "list"
     if view in _RECORD_VIEWS and metrics and node_type != "post_calc":
         return "distribution" if dimensions else "count"
+    if view == "distribution" and metrics and not dimensions:
+        # 没有分组维度的"分布"就是一行全局聚合（多少处、总面积、总长度），
+        # 与 count/sum/avg 视图同义。模型写 distribution 时按聚合视图执行，
+        # 不再用"分布必须声明分组维度"把整问拦死；用户真要分组时，
+        # 审计（audit_query_plan）仍会按"计划没回答分布问题"打回重排。
+        return "count"
     return view
 
 
@@ -75,6 +83,50 @@ def normalize_top_view(spec: QuerySpec) -> QuerySpec:
     return replace(
         spec,
         view="top_groups" if spec.metrics else "top_records",
+    )
+
+
+def normalize_post_calc_shape(spec: QuerySpec) -> QuerySpec:
+    """Keep explanatory post-calc nodes on the executable data contract."""
+
+    if (
+        spec.calculation is None
+        and "analysis_only" in spec.required_assertions
+        and spec.view not in {"data", "trend"}
+    ):
+        return replace(spec, view="data")
+    return spec
+
+
+def normalize_segment_projection(spec: QuerySpec) -> QuerySpec:
+    """Use the segment label's built-in boundaries instead of fake columns."""
+
+    segment_dimensions = {
+        _base_field(field)
+        for field in spec.dimensions
+        if is_pile_segment_field(field)
+    }
+    if not segment_dimensions:
+        return spec
+    dimensions = tuple(
+        field
+        for field in spec.dimensions
+        if _base_field(field) not in _SEGMENT_IMPLIED_OUTPUTS
+    )
+    output_projection = tuple(
+        field
+        for field in spec.output_projection
+        if _base_field(field) not in _SEGMENT_IMPLIED_OUTPUTS
+    )
+    if (
+        dimensions == spec.dimensions
+        and output_projection == spec.output_projection
+    ):
+        return spec
+    return replace(
+        spec,
+        dimensions=dimensions,
+        output_projection=output_projection,
     )
 
 
@@ -126,6 +178,17 @@ def validate_shape_contract(
             ),
         )
     issues: list[ContractIssue] = []
+    if (
+        "top_per_outer_group" in spec.required_assertions
+        and spec.view != "top_groups"
+    ):
+        issues.append(
+            _issue(
+                spec,
+                "top_per_outer_group_requires_top_groups",
+                "top_per_outer_group 只能用于 top_groups 视图",
+            )
+        )
     if spec.view == "top_records":
         if spec.metrics:
             issues.append(
@@ -174,6 +237,18 @@ def validate_shape_contract(
                         )
                     )
     elif spec.view == "top_groups":
+        if (
+            "top_per_outer_group" in spec.required_assertions
+            and len(spec.dimensions) < 2
+        ):
+            issues.append(
+                _issue(
+                    spec,
+                    "missing_outer_group_dimension",
+                    "top_per_outer_group 必须按“外层分组维度、组内排名维度”"
+                    "至少声明两个维度",
+                )
+            )
         if not spec.metrics:
             issues.append(
                 _issue(
@@ -213,7 +288,11 @@ def validate_shape_contract(
             _issue(
                 spec,
                 "missing_limit",
-                "TopN 查询必须声明正整数 limit",
+                (
+                    "TopN 查询必须声明正整数 limit；如果用户只是要求按指标"
+                    "排序并查看全部对象，应使用 distribution 或 list，"
+                    "保留 order_by 且不要设置 limit"
+                ),
             )
         )
     return tuple(issues)

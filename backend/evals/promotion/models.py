@@ -11,6 +11,7 @@ class ExamCase:
     question: str
     focus: str = ""
     source: str = "fresh"
+    coverage_slot: str = ""
 
 
 @dataclass(frozen=True)

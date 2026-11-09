@@ -6,6 +6,83 @@ from typing import Any
 from ..numbers import as_decimal
 
 
+def _base_field(value: Any) -> str:
+    return str(value or "").rsplit(".", 1)[-1]
+
+
+def _projected_fields(dependency: dict[str, Any]) -> list[str]:
+    spec = dependency.get("spec")
+    if not isinstance(spec, dict):
+        return []
+    return list(
+        dict.fromkeys(
+            _base_field(field)
+            for field in (
+                *spec.get("dimensions", ()),
+                *spec.get("metrics", ()),
+                *spec.get("output_projection", ()),
+            )
+            if _base_field(field)
+        )
+    )
+
+
+def _canonical_dataset(
+    dependency: dict[str, Any],
+) -> tuple[list[str], list[dict[str, Any]], dict[str, str]]:
+    """把展示列对齐回 QuerySpec 的逻辑字段。
+
+    空结果集经常没有物理列名，而非空结果集只有中文展示列名。差集必须按
+    `problem_number` 这类逻辑身份比较，不能让结果是否为空改变字段身份。
+    """
+
+    rows = [
+        dict(row)
+        for row in dependency.get("rows") or []
+        if isinstance(row, dict) and row
+    ]
+    labels = dependency.get("field_labels")
+    labels = labels if isinstance(labels, dict) else {}
+    display_to_field = {
+        str(display): _base_field(field)
+        for field, display in labels.items()
+        if str(display).strip() and _base_field(field)
+    }
+    field_to_display = {
+        _base_field(field): str(display)
+        for field, display in labels.items()
+        if str(display).strip() and _base_field(field)
+    }
+    raw_columns = (
+        list(rows[0])
+        if rows
+        else [str(item) for item in dependency.get("columns") or []]
+    )
+    columns = [
+        display_to_field.get(str(column), _base_field(column))
+        for column in raw_columns
+        if _base_field(column)
+    ]
+    for field in _projected_fields(dependency):
+        if field not in columns:
+            columns.append(field)
+    canonical_rows = []
+    for row in rows:
+        canonical_rows.append(
+            {
+                display_to_field.get(
+                    str(column),
+                    _base_field(column),
+                ): value
+                for column, value in row.items()
+                if _base_field(column)
+            }
+        )
+    for column, field in display_to_field.items():
+        field_to_display.setdefault(field, column)
+    return columns, canonical_rows, field_to_display
+
+
 def compare_datasets(
     dependencies: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
@@ -16,26 +93,8 @@ def compare_datasets(
     ]
     if len(candidates) < 2:
         return None
-    left_rows = [
-        dict(row)
-        for row in candidates[0].get("rows") or []
-        if isinstance(row, dict) and row
-    ]
-    right_rows = [
-        dict(row)
-        for row in candidates[1].get("rows") or []
-        if isinstance(row, dict) and row
-    ]
-    left_columns = (
-        list(left_rows[0])
-        if left_rows
-        else [str(item) for item in candidates[0].get("columns") or []]
-    )
-    right_columns = (
-        list(right_rows[0])
-        if right_rows
-        else [str(item) for item in candidates[1].get("columns") or []]
-    )
+    left_columns, left_rows, left_labels = _canonical_dataset(candidates[0])
+    right_columns, right_rows, right_labels = _canonical_dataset(candidates[1])
     common_columns = [
         column for column in left_columns if column in right_columns
     ]
@@ -88,7 +147,9 @@ def compare_datasets(
     for key in added:
         output_rows.append(
             {
-                key_column: key,
+                left_labels.get(key_column)
+                or right_labels.get(key_column)
+                or key_column: key,
                 "差异类型": "新增",
                 "字段": "",
                 "第一组": "",
@@ -102,7 +163,9 @@ def compare_datasets(
     for key in removed:
         output_rows.append(
             {
-                key_column: key,
+                left_labels.get(key_column)
+                or right_labels.get(key_column)
+                or key_column: key,
                 "差异类型": "缺失",
                 "字段": "",
                 "第一组": json.dumps(
@@ -124,15 +187,26 @@ def compare_datasets(
             changed += 1
             output_rows.append(
                 {
-                    key_column: key,
+                    left_labels.get(key_column)
+                    or right_labels.get(key_column)
+                    or key_column: key,
                     "差异类型": "字段变化",
-                    "字段": column,
+                    "字段": (
+                        left_labels.get(column)
+                        or right_labels.get(column)
+                        or column
+                    ),
                     "第一组": before,
                     "第二组": after,
                 }
             )
+    key_label = (
+        left_labels.get(key_column)
+        or right_labels.get(key_column)
+        or key_column
+    )
     reply = (
-        f"按“{key_column}”匹配两组数据："
+        f"按“{key_label}”匹配两组数据："
         f"新增 {len(added)}，缺失 {len(removed)}，字段变化 {changed}"
     )
     if not output_rows:
@@ -143,7 +217,7 @@ def compare_datasets(
         "engine": "post_calc",
         "accepted": True,
         "columns": [
-            key_column,
+            key_label,
             "差异类型",
             "字段",
             "第一组",

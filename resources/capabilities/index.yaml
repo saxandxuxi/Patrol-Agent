@@ -16,6 +16,7 @@ files:
   - time_buckets.yaml
   - result_words.yaml
   - repair_policy.yaml
+  - capability_gaps.yaml
   - templates.yaml
   - calculators.yaml
   - preset_bindings.yaml

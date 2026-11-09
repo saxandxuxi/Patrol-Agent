@@ -15,6 +15,7 @@ class CapabilityConfigGuardTests(unittest.TestCase):
             "expand_problem_types",
             "expand_problem_type_filters",
             "_CODE_FIELDS",
+            "_DISPLAY_STORAGE_PAIRS",
         )
         offenders = []
         for path in APP_ROOT.rglob("*.py"):

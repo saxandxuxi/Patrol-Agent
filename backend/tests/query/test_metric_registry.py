@@ -39,6 +39,23 @@ class MetricRegistryTests(unittest.TestCase):
         self.assertIn("sum_area", names)
         self.assertIn("avg_area", names)
 
+    def test_auto_mileage_metrics_share_the_registered_km_conversion(self):
+        """自动指标不能绕过显式指标的单位换算。
+
+        patrol_mileage 在数据库里以米存储，对外指标统一使用公里。
+        """
+
+        metrics = self.registry.snapshot.metrics["patrol"]
+        for metric_id in (
+            "sum_patrol_mileage",
+            "avg_patrol_mileage",
+            "min_patrol_mileage",
+            "max_patrol_mileage",
+        ):
+            metric = metrics[metric_id]
+            self.assertIn("/ 1000.0", metric.expression)
+            self.assertEqual(metric.unit, "km")
+
     def test_planner_view_exposes_metric_and_derived_metric_contracts(self):
         view = self.registry.planner_view("disease", FieldReachSet()).to_prompt_dict()
 

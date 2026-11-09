@@ -51,7 +51,7 @@ def load() -> dict[str, Any]:
             stored.get("confirm_before_query", settings.confirm_before_query)
         ),
         "single_turn_compiler_enabled": bool(
-            stored.get("single_turn_compiler_enabled", False)
+            stored.get("single_turn_compiler_enabled", True)
         ),
         "reflect_check": bool(
             stored.get("reflect_check", settings.reflect_check_enabled)

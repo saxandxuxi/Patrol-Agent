@@ -172,7 +172,11 @@ def _terms(text: str) -> set[str]:
     发明的叫法）同样有效。
     """
     lowered = str(text or "").lower()
-    tokens: set[str] = set(re.findall(r"[a-z0-9_]{2,}", lowered))
+    tokens: set[str] = {
+        token
+        for token in re.findall(r"[a-z0-9_]{2,}", lowered)
+        if not token.isdigit()
+    }
     for chunk in re.findall(r"[\u4e00-\u9fff]+", lowered):
         for size in (2, 3):
             if len(chunk) < size:

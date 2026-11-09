@@ -2993,7 +2993,7 @@ _SUBJECT_BY_TABLE = {
     "ai_work_order": "work_order",
     "maintenance_work_order": "work_order",
 }
-# GROUP BY 的列 → 语义分组维度（和 prompts/query_semantic.md 的 group_by 取值对齐）
+# GROUP BY 的列 → 语义分组维度（和 QuerySpec 的分组字段取值对齐）
 _GROUP_BY_NAMES = {
     "damage_type": "damage_type",
     "problem_type": "damage_type",

@@ -59,6 +59,7 @@ repair_policy:
   calculation_type_mismatch: *calculation_repair
   calculation_zero_denominator: *calculation_repair
   calculation_output_invalid: *calculation_repair
+  analysis_only_new_numeric_value: *calculation_repair
   missing_dependency:
     candidates:
     - ask_user

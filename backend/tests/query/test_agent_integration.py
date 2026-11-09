@@ -137,6 +137,43 @@ class AgentIntegrationTests(unittest.TestCase):
         self.assertEqual(result["attempts"], 1)
         self.assertIn("前5条明细", result["reply"])
 
+    @patch("app.routers.chat.save_result")
+    @patch("app.query.review_repair.repair_review_evidence")
+    def test_review_reject_saves_a_new_result_for_the_workbench(
+        self,
+        repair,
+        save_result,
+    ):
+        token = self._issue_review_token()
+        repair.return_value = ReviewRepairResult(
+            answer=AnswerPackage(
+                "已重新规划并返回前5条明细",
+                (
+                    {
+                        "node_id": "q1",
+                        "question": "按长度取前5条明细",
+                        "status": "accepted",
+                        "engine": "wren",
+                        "columns": ["病害编号"],
+                        "rows": [{"病害编号": "P1"}],
+                        "sql": "SELECT problem_number FROM ai_problem LIMIT 5",
+                    },
+                ),
+            ),
+            attempts=1,
+        )
+
+        result = query_review(
+            QueryReviewRequest(review_token=token, decision="reject")
+        )
+
+        self.assertTrue(result["result_id"])
+        self.assertEqual(result["sections"][0]["rows"][0]["病害编号"], "P1")
+        save_result.assert_called_once()
+        saved_id, saved_payload = save_result.call_args.args
+        self.assertEqual(saved_id, result["result_id"])
+        self.assertEqual(saved_payload["sections"], result["sections"])
+
     def test_review_token_cannot_be_consumed_twice(self):
         token = self._issue_review_token()
         query_review(QueryReviewRequest(review_token=token, decision="reject"))
@@ -151,19 +188,55 @@ class AgentIntegrationTests(unittest.TestCase):
             "review_token_consumed",
         )
 
+    @patch("app.services.agent.capabilities.has_pending", return_value=True)
+    @patch("app.query.service.pending_confirmation", return_value=None)
+    @patch(
+        "app.services.agent.chat_settings.load",
+        return_value={"single_turn_compiler_enabled": True},
+    )
+    def test_single_turn_compiler_rejects_legacy_capability_token(
+        self,
+        _settings,
+        _single_turn_pending,
+        _capability_pending,
+    ):
+        payload = agent._maybe_single_turn_compiler(
+            "我想查看各车道的病害热力图分布",
+            choose_token="legacy-capability-token",
+            capability_id="candidate-1",
+            slot_values={},
+        )
+
+        self.assertEqual(payload["source"], "error")
+        self.assertEqual(
+            payload["process"]["steps"][0]["failure_code"],
+            "legacy_query_chain_disabled",
+        )
+
     @patch("app.services.agent._persist_conversation_turn")
     @patch("app.services.agent.chat_settings.load", return_value={"single_turn_compiler_enabled": False})
+    @patch("app.services.agent.intent_service.classify_intent", return_value="data")
     @patch("app.query.service.start_single_turn")
-    def test_disabled_flag_never_calls_single_turn_service(
+    def test_disabled_flag_fails_closed_instead_of_running_legacy_flow(
         self,
         start,
+        _intent,
         _settings,
         _persist,
     ):
-        with patch.object(agent, "_handle_message", return_value={"reply": "legacy"}):
+        with patch.object(
+            agent,
+            "_handle_message",
+            side_effect=AssertionError("legacy flow must not run"),
+        ):
             payload = agent.handle_message("泛油有多少处？", session_id="s1")
+
         start.assert_not_called()
-        self.assertEqual(payload["reply"], "legacy")
+        self.assertEqual(payload["source"], "error")
+        self.assertEqual(
+            payload["process"]["steps"][0]["failure_code"],
+            "single_turn_compiler_disabled",
+        )
 
     @patch("app.services.agent._persist_conversation_turn")
     @patch("app.services.agent.intent_service.classify_intent", return_value="data")
@@ -292,6 +365,58 @@ class AgentIntegrationTests(unittest.TestCase):
         )
 
     @patch("app.services.agent._persist_conversation_turn")
+    @patch("app.services.agent.intent_service.classify_intent", return_value="data")
+    @patch(
+        "app.services.agent.chat_settings.load",
+        return_value={"single_turn_compiler_enabled": True},
+    )
+    @patch("app.query.service.start_single_turn")
+    def test_expected_blocked_dependent_is_not_top_level_system_error(
+        self,
+        start,
+        _settings,
+        _intent,
+        _persist,
+    ):
+        start.return_value = TurnStart(
+            plan=count_plan(),
+            answer=AnswerPackage(
+                "路线在该日期没有对应巡检批次；依赖它的对比已停止。",
+                (
+                    {
+                        "node_id": "q1",
+                        "question": "查询第一次巡检批次",
+                        "type": "data",
+                        "status": "unsupported",
+                        "failure_code": "patrol_batch_not_resolved",
+                        "answer": "路线在该日期没有对应巡检批次。",
+                    },
+                    {
+                        "node_id": "q2",
+                        "question": "对比两次巡检",
+                        "type": "post_calc",
+                        "status": "blocked",
+                        "failure_code": "dependency_failed",
+                        "depends_on": ["q1"],
+                        "answer": "依赖的前置结果不完整，已停止执行。",
+                    },
+                ),
+            ),
+        )
+
+        payload = agent.handle_message("对比两次巡检", session_id="s1")
+
+        self.assertNotIn("error", payload)
+        self.assertEqual(
+            payload["process"]["steps"][0]["failure_code"],
+            "patrol_batch_not_resolved",
+        )
+        self.assertEqual(
+            payload["process"]["steps"][1]["failure_code"],
+            "dependency_failed",
+        )
+
+    @patch("app.services.agent._persist_conversation_turn")
     @patch("app.services.agent.nl2sql.verify_answer")
     @patch("app.services.agent.intent_service.classify_intent", return_value="data")
     @patch(
@@ -363,6 +488,60 @@ class AgentIntegrationTests(unittest.TestCase):
             "q1",
         )
         self.assertIn("聚合值", payload["review_gate"]["reason"])
+
+    @patch("app.services.agent._persist_conversation_turn")
+    @patch("app.services.agent.nl2sql.verify_answer")
+    @patch("app.services.agent.intent_service.classify_intent", return_value="data")
+    @patch(
+        "app.services.agent.chat_settings.load",
+        return_value={
+            "single_turn_compiler_enabled": True,
+            "reflect_check": True,
+        },
+    )
+    @patch("app.query.service.start_single_turn")
+    def test_reflect_check_uses_the_current_section_question_and_answer(
+        self,
+        start,
+        _settings,
+        _intent,
+        verify_answer,
+        _persist,
+    ):
+        verify_answer.return_value = {
+            "correct": True,
+            "issue_type": "none",
+            "reason": "",
+        }
+        section_question = "统计长度不超过2米的病害总数"
+        section_answer = "共 14781处"
+        start.return_value = TurnStart(
+            plan=count_plan(),
+            answer=AnswerPackage(
+                "共 14781处；按病害类型分布见结果工作台",
+                (
+                    {
+                        "node_id": "q1",
+                        "question": section_question,
+                        "answer": section_answer,
+                        "status": "accepted",
+                        "sql": "SELECT COUNT(*) FROM ai_problem",
+                        "columns": ["病害数量"],
+                        "rows": [{"病害数量": "14781"}],
+                    },
+                ),
+            ),
+        )
+
+        agent.handle_message(
+            "病害长度不超过 2 米的有多少处？分别是什么病害？",
+            session_id="s1",
+        )
+
+        args, kwargs = verify_answer.call_args
+        self.assertEqual(args[0], section_question)
+        self.assertEqual(args[2]["reply"], section_answer)
+        self.assertEqual(kwargs["reply"], section_answer)
 
     @patch("app.services.agent._persist_conversation_turn")
     @patch(

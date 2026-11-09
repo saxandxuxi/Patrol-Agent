@@ -1,5 +1,7 @@
 import unittest
+from unittest.mock import patch
 
+from app.services import preset_lib
 from app.query.template_sources import contract_from_builtin, contract_from_preset
 
 
@@ -36,3 +38,52 @@ class TemplateSourceTests(unittest.TestCase):
         self.assertEqual(contract.fixed_conditions[0].display_value, "泛油")
         self.assertEqual(contract.fixed_conditions[0].storage_value, "泛油")
         self.assertEqual(contract.fixed_conditions[0].source, "template_fixed")
+
+    def test_patrol_times_preset_uses_patrol_creation_time(self):
+        query = preset_lib.query_by_id("patrol_times")
+        sql, reason = preset_lib.bind(
+            query,
+            {
+                "route_id": "__ALL__",
+                "date_granularity": "day",
+                "date_from": "2026-11-02",
+                "date_to": "2026-11-02",
+            },
+        )
+
+        self.assertEqual(reason, "")
+        self.assertIsNotNone(sql)
+        self.assertIn("t.create_time >=", sql)
+        self.assertIn("t.create_time <", sql)
+        self.assertNotIn("p.collection_time", sql)
+        self.assertNotIn("ai_problem p", sql)
+
+    def test_patrol_times_preset_uses_task_route_relation(self):
+        query = preset_lib.query_by_id("patrol_times")
+        original_options_for = preset_lib.options_for
+
+        def fake_options(name, spec):
+            if name == "route_id":
+                return [{"label": "路线1", "value": "route-1"}]
+            return original_options_for(name, spec)
+
+        with patch.object(
+            preset_lib,
+            "options_for",
+            side_effect=fake_options,
+        ):
+            sql, reason = preset_lib.bind(
+                query,
+                {
+                    "route_id": "route-1",
+                    "date_granularity": "day",
+                    "date_from": "2026-11-02",
+                    "date_to": "2026-11-02",
+                },
+            )
+
+        self.assertEqual(reason, "")
+        self.assertIsNotNone(sql)
+        self.assertIn("ai_maintain_routes_patrol", sql)
+        self.assertIn("pr.routes_id = 'route-1'", sql)
+        self.assertNotIn("p.routes_id", sql)

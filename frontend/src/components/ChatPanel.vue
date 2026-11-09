@@ -957,11 +957,8 @@ async function decideReview(msg, decision) {
     if (decision === 'accept') {
       ElMessage.success('已按你的判断保留这次结果')
     } else if (out?.reply) {
-      result.value = {
-        reply: out.reply,
-        sections: out.sections || [],
-        review_gate: out.review_gate || null,
-      }
+      result.value = out
+      activeResultId.value = out.result_id || ''
       messages.value.push({
         role: 'assistant',
         content: out.reply,
@@ -969,12 +966,12 @@ async function decideReview(msg, decision) {
         elapsed_ms: 0,
         references: [],
         thinking: '',
-        result_id: '',
-        reviewable: false,
+        result_id: out.result_id || '',
+        reviewable: Boolean(out.reviewable),
         choices: [],
         asked: msg.asked || '',
         workflow_events: [],
-        process: null,
+        process: out.process || null,
         review_gate: out.review_gate || null,
       })
       if (out.accepted) {

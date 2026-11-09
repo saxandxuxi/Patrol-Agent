@@ -1,4 +1,30 @@
 enums:
+  ai_problem.categories_type:
+    table: ai_problem
+    column: categories_type
+    label: 病害大类
+    source: sys_dict.disease_categories
+    values:
+      "0":
+        label: 路面病害
+      "5":
+        label: 路基病害
+      "10":
+        label: 沿路设施
+      "15":
+        label: 交安事件
+  ai_problem.damage_type:
+    table: ai_problem
+    column: damage_type
+    label: 损坏程度
+    source: sys_dict.degree_of_damage_type
+    values:
+      "0":
+        label: 轻度
+      "5":
+        label: 中度
+      "10":
+        label: 重度
   ai_problem.up_or_down:
     table: ai_problem
     column: up_or_down

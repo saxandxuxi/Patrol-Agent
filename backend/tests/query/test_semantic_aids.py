@@ -1,7 +1,9 @@
 import unittest
 from unittest.mock import patch
 
-from app.query.analysis import analyze_single_turn
+from app.query.analysis import _assist_field_issue, analyze_single_turn
+from app.query.capability_registry import CapabilityRegistry
+from app.query.contracts import QuerySpec
 from app.query.fields import FieldReachSet, PhysicalSchemaView
 from app.query.service import start_single_turn
 from app.query.values import resolve_value
@@ -22,7 +24,7 @@ class SemanticAidTests(unittest.TestCase):
         self.assertFalse(lane.trusted)
         self.assertEqual(lane.source, "code_rule")
 
-    def test_severity_maps_to_damage_interval_not_damage_type(self):
+    def test_severity_maps_to_authoritative_damage_type_dictionary(self):
         evidence = detect_evidence(
             "最近一次巡检检出“严重”等级病害最多的路线"
         )
@@ -32,11 +34,14 @@ class SemanticAidTests(unittest.TestCase):
 
         self.assertEqual(
             severity.candidate_field,
-            "history_damage_interval",
+            "damage_type",
         )
         self.assertNotEqual(severity.candidate_field, "problem_type_name")
         self.assertFalse(severity.trusted)
-        self.assertIn("damage_type", severity.discouraged_fields)
+        self.assertIn(
+            "history_damage_interval",
+            severity.discouraged_fields,
+        )
         self.assertTrue(severity.requires_field)
 
     def test_time_granularity_evidence_covers_year_week_month_day(self):
@@ -153,6 +158,109 @@ class SemanticAidTests(unittest.TestCase):
         self.assertIn("group_by_disease_type", ids)
         self.assertIn("metric_count", ids)
         self.assertIn("metric_total_area", ids)
+
+    def test_mixed_surface_type_and_grade_keeps_both_dimensions(self):
+        question = (
+            "2026年11月，在沥青混凝土路面和水泥混凝土路面上，"
+            "分别检出了多少处一级公路和二级公路的病害？"
+            "请按路面类型和公路等级交叉统计病害数量。"
+        )
+        evidence = detect_evidence(question)
+        fields = {item.candidate_field for item in evidence}
+
+        self.assertIn("road_surface_type", fields)
+        self.assertIn("tech_grade", fields)
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("road_surface_type", "tech_grade"),
+            filters=(),
+            output_projection=("road_surface_type", "tech_grade", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question=question,
+        )
+
+        issue = _assist_field_issue(
+            [spec],
+            [item.to_dict() for item in evidence],
+            CapabilityRegistry.load(),
+            {spec.id: "query_data"},
+        )
+
+        self.assertFalse(issue)
+
+    def test_shared_dimension_phrase_keeps_both_independent_fields(self):
+        question = (
+            "2026年11月，上海-昆明高速按公路技术等级和路面类型"
+            "统计病害处数。"
+        )
+        evidence = detect_evidence(question)
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("tech_grade", "road_surface_type"),
+            filters=(),
+            output_projection=("tech_grade", "road_surface_type", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question=question,
+        )
+
+        issue = _assist_field_issue(
+            [spec],
+            [item.to_dict() for item in evidence],
+            CapabilityRegistry.load(),
+            {spec.id: "query_data"},
+        )
+
+        self.assertFalse(issue)
+
+    def test_grade_only_question_still_rejects_surface_type_field(self):
+        question = "统计一级公路和二级公路的病害数量"
+        evidence = detect_evidence(question)
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("road_surface_type",),
+            filters=(),
+            output_projection=("road_surface_type", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question=question,
+        )
+
+        issue = _assist_field_issue(
+            [spec],
+            [item.to_dict() for item in evidence],
+            CapabilityRegistry.load(),
+            {spec.id: "query_data"},
+        )
+
+        self.assertIn("road_surface_type", issue)
+        self.assertIn("tech_grade", issue)
+
+    def test_top_n_ordinal_is_untrusted_structural_evidence(self):
+        evidence = detect_evidence(
+            "长沙绕城查一下前四类病害，数量和平均面积都给我。"
+        )
+        top_n = next(item for item in evidence if item.rule_id == "top_n")
+
+        self.assertEqual(top_n.candidate_type, "top_n")
+        self.assertEqual(top_n.candidate_value, "4")
+        self.assertFalse(top_n.trusted)
 
     def test_two_explicit_dates_and_comparison_are_evidence(self):
         evidence = detect_evidence(

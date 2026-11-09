@@ -10,6 +10,8 @@ from .contracts import (
     VerificationIssue,
     VerificationReport,
 )
+from .empty_results import aggregate_result_is_empty
+from .result_projection import result_field_map
 
 
 SemanticChecker = Callable[
@@ -63,13 +65,11 @@ def verify_deterministic(
             "detail",
         }
     )
-    # 台账里这个范围本来就有数据（覆盖已核对过），只是这次窗口内没有记录：
-    # 那是“0 条”这个事实，不是数据缺失，不能拦住依赖它的步骤。
-    scoped_empty = (
-        observation.rows_fetched == 0
-        and bool(spec.filters)
-        and scope_has_records
-    )
+    # 台账里这个范围本来就有数据（覆盖已核对过），只是这次筛选范围内没有记录：
+    # 既包括 0 行明细，也包括聚合查询返回 1 行 0/NULL（COUNT 无匹配、
+    # SUM/AVG 无有效数值）。那是“0 条/无有效数值”这个事实，不是指标损坏，
+    # 不能拦住依赖它的步骤。
+    scoped_empty = bool(spec.filters) and scope_has_records
     if observation.rows_fetched == 0 and not (bounded_empty or scoped_empty):
         issues.append(
             VerificationIssue(
@@ -120,6 +120,34 @@ def verify_deterministic(
         "avg",
         "top_groups",
     }:
+        if spec.metrics and observation.rows_fetched > 0:
+            observed_columns = observation.columns or next(
+                (
+                    tuple(row.keys())
+                    for row in observation.preview_rows[:1]
+                    if isinstance(row, dict)
+                ),
+                (),
+            )
+            field_map = result_field_map(spec, observed_columns)
+            missing_metrics = [
+                str(metric)
+                for metric in spec.metrics
+                if str(metric).rsplit(".", 1)[-1] not in field_map
+            ]
+            if missing_metrics:
+                issues.append(
+                    VerificationIssue(
+                        code="missing_metric_columns",
+                        message=(
+                            "查询结果缺少请求的指标列："
+                            + "、".join(missing_metrics)
+                        ),
+                        node_id=spec.id,
+                        stage="fact",
+                        evidence={"missing_metrics": missing_metrics},
+                    )
+                )
         label_columns = [
             key
             for key in observation.columns
@@ -160,7 +188,13 @@ def verify_deterministic(
             for row in observation.preview_rows[:10]
             for value in row.values()
         )
-        if observation.rows_fetched > 0 and not numeric:
+        aggregate_empty = aggregate_result_is_empty(spec, observation)
+        if (
+            observation.rows_fetched > 0
+            and not numeric
+            and not scoped_empty
+            and not aggregate_empty
+        ):
             null_like = any(
                 str(value or "").strip().upper() in {"", "NULL", "NONE"}
                 for row in observation.preview_rows[:10]

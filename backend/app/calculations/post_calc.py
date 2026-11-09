@@ -9,6 +9,7 @@ from .executor import (
     execute_calculation,
     request_from_task,
 )
+from ..query.contracts import post_calc_has_executable_body
 from ..services import react_repair
 
 
@@ -29,9 +30,17 @@ def execute_post_calc(
         return _failure_payload(failure)
     if request is not None:
         return execute_calculation(task, request, normalized_results)
+    dependency_ids = [
+        str(item) for item in task.get("depends_on") or ()
+    ]
+    comparison_ids = [
+        str(item)
+        for item in task.get("comparison_depends_on") or ()
+    ]
+    selected_ids = comparison_ids or dependency_ids
     dependencies = [
         normalized_results[str(item)]
-        for item in task.get("depends_on") or ()
+        for item in selected_ids
         if str(item) in normalized_results
     ]
     if (
@@ -44,9 +53,7 @@ def execute_post_calc(
         comparison = compare_datasets(dependencies)
         if comparison:
             return comparison
-    if "analysis_only" not in {
-        str(item) for item in task.get("required_assertions") or ()
-    }:
+    if not post_calc_has_executable_body(task.get("required_assertions")):
         failure = react_repair.build_failure(
             "calculation_required",
             stage="post_calc",
@@ -72,14 +79,23 @@ def execute_post_calc(
     )
     if analyzed.get("accepted"):
         return analyzed
+    failure_code = str(
+        analyzed.get("failure_code") or "post_calc_empty"
+    )
     failure = react_repair.build_failure(
-        "post_calc_empty",
+        failure_code,
         stage="post_calc",
-        reason="后置计算没有返回可用结果",
+        reason=str(
+            analyzed.get("failure_reason")
+            or "后置计算没有返回可用结果"
+        ),
         evidence={
             "step_id": task.get("id"),
             "step_question": str(task.get("question") or ""),
             "depends_on": list(task.get("depends_on") or []),
+            "ungrounded_numbers": list(
+                analyzed.get("ungrounded_numbers") or []
+            ),
         },
     )
     return _failure_payload(failure)

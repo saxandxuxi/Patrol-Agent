@@ -24,6 +24,21 @@ SUPPORTED_QUERY_VIEWS = (
     "data",
 )
 
+# post_calc 节点不声明 calculation 时，执行器只认这几类"解释已有值"的断言。
+# 规划期审计必须和这里保持一致，否则计划能过审计、却在执行期才报 calculation_required。
+POST_CALC_EXPLAIN_ASSERTIONS = frozenset(
+    {"analysis_only", "dataset_comparison", "multi_metric_comparison"}
+)
+
+
+def post_calc_has_executable_body(assertions: Any) -> bool:
+    """post_calc 不声明 calculation 时，是否声明了执行器认识的解释型断言。"""
+    return bool(
+        POST_CALC_EXPLAIN_ASSERTIONS.intersection(
+            str(item) for item in (assertions or ())
+        )
+    )
+
 
 class QuerySpecError(ValueError):
     """Raised when model output cannot become a trustworthy QuerySpec."""
@@ -61,6 +76,7 @@ class InputBinding:
     from_field: str
     to_field: str
     op: str = "in"
+    row_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +86,7 @@ class IntentContract:
     intent_family: str
     final_goal: str
     unknown_terms: tuple[str, ...] = ()
+    answer_operation: str = ""
 
 
 @dataclass(frozen=True)
@@ -88,6 +105,7 @@ class QuerySpec:
     question: str = ""
     input_bindings: tuple[InputBinding, ...] = ()
     calculation: CalculationRequest | None = None
+    comparison_depends_on: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -186,9 +204,11 @@ def scope_hash(spec: QuerySpec) -> str:
                 "from_field": item.from_field,
                 "to_field": item.to_field,
                 "op": item.op,
+                "row_index": item.row_index,
             }
             for item in spec.input_bindings
         ],
+        "comparison_depends_on": list(spec.comparison_depends_on),
     }
     payload = json.dumps(
         scope,
@@ -217,9 +237,11 @@ def immutable_scope_hash(spec: QuerySpec) -> str:
                 "from_field": item.from_field,
                 "to_field": item.to_field,
                 "op": item.op,
+                "row_index": item.row_index,
             }
             for item in spec.input_bindings
         ],
+        "comparison_depends_on": list(spec.comparison_depends_on),
     }
     payload = json.dumps(
         scope,

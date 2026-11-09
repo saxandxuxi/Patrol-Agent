@@ -360,9 +360,6 @@ templates:
     title: 数据画像
     source: generic
   fields:
-    disease.damage_type:
-      status: unavailable
-      reason: damage_type 是历史遗留的损坏程度代码，缺少可靠枚举标签，不能用于严重程度判断
     disease.history_damage_interval:
       status: unavailable
       reason: 历史损坏程度字段当前全部为空，无法按严重程度筛选或分组

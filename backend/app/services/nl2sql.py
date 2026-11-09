@@ -102,6 +102,7 @@ from . import query_rewrite
 from . import schema_catalog
 from .db import DatabaseError, db_manager
 from .llm import LLMError, chat, chat_json, role_model, sql_model
+from .legacy_query_chain import raise_disabled
 from .logging_service import log_error, log_event
 from .rag import (
     RAGError,
@@ -1538,7 +1539,7 @@ def verify_answer(
             prompts.messages(
                 "verify_answer",
                 question=question,
-                sql=sql[:2000],
+                sql=sql,
                 columns=json.dumps(columns, ensure_ascii=False)[:400],
                 rows=json.dumps(rows, ensure_ascii=False, default=str)[:1200],
                 final_reply=reply_text or "（无）",
@@ -1712,6 +1713,7 @@ def refine_question(
     只补口径（按什么分组、算什么指标），不改用户原始意图、不加用户没提的条件。
     改写丢了用户说过的实体就作废（复用 _lost_entities），返回空串让调用方用原问题。
     """
+    raise_disabled("optimize_question")
     rows = (result.get("rows") or [])[:10]
     optimization_scope = question_optimization_context(
         question,
@@ -1769,6 +1771,7 @@ def expand_question_for_planning(question: str) -> dict[str, Any] | None:
     返回值本身是带来源的中间对象：原始问题来自用户原话，扩写问题明确标记为问题优化器产出。
     下游规划/模板只能消费 ``question``，诊断与回归可以同时核对 ``original_question``。
     """
+    raise_disabled("optimize_question")
     original = str(question or "").strip()
     if not original:
         return None
@@ -2160,6 +2163,7 @@ def parse_semantics(
 
     失败/超时返回 {}，调用方自动退回规则结果——语义解析是增强，不是必经之路。
     """
+    raise_disabled("query_semantic")
     key = message.strip()
     if not key:
         return {}
@@ -2378,6 +2382,7 @@ def build_query_plan(message: str, kind: str = "mysql") -> dict[str, Any]:
     用户自己再问一遍），每次都白花 0.5~1 秒的连库。
     缓存 5 分钟、上限 200 条；命中时返回深拷贝，避免调用方改到缓存对象。
     """
+    raise_disabled("query_semantic")
     key = (
         str(message or "").strip(),
         str(kind or "mysql"),
@@ -6504,7 +6509,7 @@ def _local_example_text(
 
 _TABLE_SELECT_CACHE: dict[str, list[str]] = {}
 
-# 语义层判的"主体"→ MDL 模型名（主体枚举来自 prompts/query_semantic.md）
+# 旧语义层判定的"主体"→ MDL 模型名；该入口已停用，仅为历史模板分析保留映射。
 _SUBJECT_MODELS: dict[str, str] = {
     "disease": "disease",
     "route": "route",
@@ -6528,6 +6533,7 @@ def select_tables(
     后面的表和字段直接消失——冷门字段问不出来就是这个原因）。所以先选表、再只把小范围
     字段给写 SQL 的模型。选不出来的（LLM 不可用）返回空集合 = 不做过滤，退回老行为。
     """
+    raise_disabled("table_selector")
     # PG 也要走选表：以前直接返回空集，PG 侧就永远拿不到"小范围字段"，模型只能看见
     # 一整坨 schema，还容易把倾斜监测点当成"系统里没有这张表"。
     if kind not in {"mysql", "postgresql"}:

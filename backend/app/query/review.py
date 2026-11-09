@@ -103,6 +103,9 @@ def serialize_query_spec(spec: Any) -> dict[str, Any]:
         "required_assertions": list(spec.required_assertions),
         "question": spec.question,
         "input_bindings": [asdict(item) for item in spec.input_bindings],
+        "comparison_depends_on": list(
+            getattr(spec, "comparison_depends_on", ())
+        ),
         "calculation": (
             asdict(calculation)
             if calculation is not None and is_dataclass(calculation)

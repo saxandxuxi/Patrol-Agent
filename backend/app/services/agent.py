@@ -4252,13 +4252,9 @@ def _single_turn_compiler_payload(turn: Any, ticket_token: str = "") -> dict[str
     if turn.answer is not None:
         sections = list(turn.answer.sections)
         process = _compiler_process(sections, turn.plan.question)
-        failures = [
-            str(step.get("error") or "")
-            for step in process["steps"]
-            if step.get("error")
-            and str(step.get("status") or "")
-            in {"error", "failed", "blocked", "repairable"}
-        ]
+        from ..query.section_status import execution_failure_reasons
+
+        failures = execution_failure_reasons(sections)
         payload = {
             "reply": turn.answer.text,
             "source": "single_turn_compiler",
@@ -4284,17 +4280,23 @@ def _single_turn_compiler_payload(turn: Any, ticket_token: str = "") -> dict[str
                     or not section.get("sql")
                 ):
                     continue
+                section_question = str(
+                    section.get("question") or turn.plan.question
+                )
+                section_reply = str(
+                    section.get("answer") or turn.answer.text
+                )
                 verdict = nl2sql.verify_answer(
-                    turn.plan.question,
+                    section_question,
                     str(section.get("sql") or ""),
                     {
                         "columns": section.get("columns") or [],
                         "rows": section.get("rows")
                         or section.get("preview_rows")
                         or [],
-                        "reply": turn.answer.text,
+                        "reply": section_reply,
                     },
-                    reply=turn.answer.text,
+                    reply=section_reply,
                 )
                 if verdict.get("correct", True):
                     continue
@@ -4374,13 +4376,26 @@ def _maybe_single_turn_compiler(
     capability_id: str | None,
     slot_values: dict[str, str] | None,
 ) -> dict[str, Any] | None:
-    if not bool(chat_settings.load().get("single_turn_compiler_enabled", False)):
+    if not bool(chat_settings.load().get("single_turn_compiler_enabled", True)):
+        intent = intent_service.classify_intent(message)
+        if choose_token or intent in {"data", "analysis", "composite"}:
+            return _single_turn_failure_payload(
+                message,
+                "single_turn_compiler_disabled",
+                "旧查询链路已停用。请先在模型设置中启用新版单轮查询编译器。",
+            )
         return None
     from app.query import service as single_turn_service
 
     if choose_token:
         pending = single_turn_service.pending_confirmation(choose_token)
         if pending is None or pending.candidate_set is None:
+            if capabilities.has_pending(choose_token):
+                return _single_turn_failure_payload(
+                    message,
+                    "legacy_query_chain_disabled",
+                    "这张确认卡来自已停用的旧查询链路，不能再执行。请重新发送问题，系统会按新版查询口径生成确认卡。",
+                )
             log_event(
                 "agent",
                 "WARNING",

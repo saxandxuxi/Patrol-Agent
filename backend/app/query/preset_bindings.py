@@ -28,12 +28,30 @@ def preset_parameter_name(field: str) -> str:
     )
 
 
+def is_derived_parameter(field: str) -> bool:
+    normalized = _base_field(field)
+    return normalized in {
+        str(item)
+        for item in _config().get("derived_parameters") or ()
+    }
+
+
+def _time_granularity(spec: Any) -> str:
+    for dimension in getattr(spec, "dimensions", ()) or ():
+        field = _base_field(dimension)
+        for granularity in ("day", "week", "month", "quarter", "year"):
+            if field == granularity or field.endswith(f"_{granularity}"):
+                return granularity
+    return "day"
+
+
 def _date_part(value: Any) -> str:
     return str(value or "").strip()[:10]
 
 
 def values_from_spec(spec: Any) -> dict[str, str]:
     values: dict[str, str] = {}
+    values["date_granularity"] = _time_granularity(spec)
     if spec.limit is not None:
         values[preset_parameter_name("limit")] = str(spec.limit)
     time_fields = set(_config().get("time_fields") or ())
@@ -64,7 +82,6 @@ def values_from_spec(spec: Any) -> dict[str, str]:
         day = _date_part(time_equals)
         values.update(
             {
-                "date_granularity": "day",
                 "date_from": day,
                 "date_to": day,
             }
@@ -80,7 +97,6 @@ def values_from_spec(spec: Any) -> dict[str, str]:
             end = _date_part(time_upper[0])
         values.update(
             {
-                "date_granularity": "day",
                 "date_from": start,
                 "date_to": end,
             }

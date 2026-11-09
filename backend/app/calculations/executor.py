@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from .columns import calculate_columns
+from .datetime_interval import calculate_datetime_interval
 from .domain.analysis import analyze_evidence
 from .domain.rendering import render_calculation
 from .evidence import compact_table_evidence, row_with_group_labels
@@ -81,6 +82,59 @@ def _operand_caption(source: dict[str, Any]) -> str:
     return str(source.get("question") or "").strip()
 
 
+def _selected_row_source(
+    source: dict[str, Any],
+    operand: CalculationOperand,
+) -> tuple[dict[str, Any] | None, str]:
+    raw_index = operand.source.get("row_index")
+    if raw_index is None:
+        return source, ""
+    if isinstance(raw_index, bool) or not isinstance(raw_index, int):
+        return None, "row_index 必须是从 0 开始的整数"
+    rows = [
+        row
+        for row in source.get("rows") or []
+        if isinstance(row, dict)
+    ]
+    if raw_index < 0 or raw_index >= len(rows):
+        return (
+            None,
+            f"row_index={raw_index} 超出上游结果范围（共 {len(rows)} 行）",
+        )
+    row = rows[raw_index]
+    metric_label = field_label(
+        source,
+        str(operand.source.get("field") or ""),
+    )
+    spec = source.get("spec")
+    dimensions = (
+        tuple(spec.get("dimensions") or ())
+        if isinstance(spec, Mapping)
+        else ()
+    )
+    if dimensions:
+        group_labels = {
+            label: row[label]
+            for field in dimensions
+            if (label := field_label(source, str(field))) in row
+            and row[label] not in (None, "")
+        }
+    else:
+        # 没有结构元数据时只把非数值列当作分组条件。面积、长度等其他
+        # 数值指标是同一行的并列指标，不能混进“路线 A、70”这样的操作数名称。
+        group_labels = {
+            str(key): value
+            for key, value in row.items()
+            if str(key) != metric_label
+            and value not in (None, "")
+            and as_decimal(value) is None
+        }
+    selected = dict(source)
+    selected["rows"] = [row]
+    selected["group_labels"] = group_labels
+    return selected, ""
+
+
 def request_from_task(task: dict[str, Any]) -> CalculationRequest | None:
     value = task.get("calculation")
     if "calculation" in task and value is not None and not isinstance(
@@ -98,6 +152,7 @@ def input_shape(tool: str) -> str:
         "calculate_scalar": "scalar_list",
         "calculate_columns": "rows",
         "calculate_series": "series",
+        "calculate_datetime_interval": "temporal_scalar_list",
     }.get(tool, "")
 
 
@@ -105,7 +160,9 @@ def calculation_failure(
     result: Any,
     task: dict[str, Any],
     request: CalculationRequest,
+    operand_labels: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
+    labels = operand_labels or {}
     evidence = {
         "tool": request.tool,
         "operation": request.operation,
@@ -115,6 +172,11 @@ def calculation_failure(
                 "name": item.name,
                 "value": json_value(item.value),
                 "source": dict(item.source),
+                **(
+                    {"label": str(labels[item.name])}
+                    if item.name in labels
+                    else {}
+                ),
             }
             for item in request.operands
         ],
@@ -143,6 +205,43 @@ def calculation_failure(
         "columns": [],
         "rows": [],
     }
+
+
+def _temporal_operand(
+    source: dict[str, Any] | None,
+    operand: CalculationOperand,
+) -> tuple[Any, str, str]:
+    if source is None:
+        return (
+            None,
+            "",
+            f"缺少上游节点 {operand.source.get('node')}",
+        )
+    selected, source_error = _selected_row_source(source, operand)
+    if selected is None:
+        return None, "", source_error
+    rows = [
+        row
+        for row in selected.get("rows") or []
+        if isinstance(row, dict)
+    ]
+    if len(rows) != 1:
+        return (
+            None,
+            "",
+            "日期差计算的操作数必须从上游结果中确定唯一一行",
+        )
+    field = field_label(
+        selected,
+        str(operand.source.get("field") or ""),
+    )
+    if field not in rows[0]:
+        return (
+            None,
+            "",
+            f"日期字段 {field} 不在上游结果中",
+        )
+    return rows[0].get(field), _operand_caption(selected), ""
 
 
 def execute_calculation(
@@ -175,24 +274,84 @@ def execute_calculation(
                         task,
                         request,
                     )
+                selected_source, source_error = _selected_row_source(
+                    source,
+                    operand,
+                )
+                if selected_source is None:
+                    return calculation_failure(
+                        calculate_scalar(
+                            CalculationRequest(
+                                tool=request.tool,
+                                operation=request.operation,
+                                operands=(),
+                            )
+                        ).failure(
+                            "calculation_operand_missing",
+                            source_error,
+                            operand=operand.name,
+                        ),
+                        task,
+                        request,
+                    )
                 resolved.append(
                     CalculationOperand(
                         name=operand.name,
                         value=numeric_value(
-                            source,
+                            selected_source,
                             field_label(
-                                source,
+                                selected_source,
                                 str(operand.source.get("field") or ""),
                             ),
                         ),
                     )
                 )
-                caption = _operand_caption(source)
+                caption = _operand_caption(selected_source)
                 if caption:
                     operand_labels[operand.name] = caption
             else:
                 resolved.append(operand)
         result = calculate_scalar(
+            CalculationRequest(
+                tool=request.tool,
+                operation=request.operation,
+                operands=tuple(resolved),
+                output=request.output,
+                precision=request.precision,
+            )
+        )
+    elif request.tool == "calculate_datetime_interval":
+        resolved: list[CalculationOperand] = []
+        for operand in request.operands:
+            if not operand.source:
+                resolved.append(operand)
+                continue
+            value, caption, source_error = _temporal_operand(
+                results.get(str(operand.source.get("node") or "")),
+                operand,
+            )
+            if source_error:
+                return calculation_failure(
+                    calculate_datetime_interval(
+                        CalculationRequest(
+                            tool=request.tool,
+                            operation=request.operation,
+                            operands=(),
+                        )
+                    ).failure(
+                        "calculation_operand_missing",
+                        source_error,
+                        operand=operand.name,
+                    ),
+                    task,
+                    request,
+                )
+            resolved.append(
+                CalculationOperand(name=operand.name, value=value)
+            )
+            if caption:
+                operand_labels[operand.name] = caption
+        result = calculate_datetime_interval(
             CalculationRequest(
                 tool=request.tool,
                 operation=request.operation,
@@ -344,7 +503,12 @@ def execute_calculation(
             request,
         )
     if not result.accepted:
-        return calculation_failure(result, task, request)
+        return calculation_failure(
+            result,
+            task,
+            request,
+            operand_labels,
+        )
     payload = result_payload(result)
     if request.output is not None:
         payload["calculation"]["output"] = {
@@ -370,7 +534,11 @@ def execute_calculation(
         output_label,
         operand_labels or None,
     )
-    if request.tool in {"calculate_scalar", "calculate_series"}:
+    if request.tool in {
+        "calculate_scalar",
+        "calculate_series",
+        "calculate_datetime_interval",
+    }:
         analysis = {
             "reply": fallback_reply,
             "source": "calc",
@@ -398,7 +566,9 @@ def execute_calculation(
                     "row_count": len(output_rows),
                 },
                 "required_assertions": list(
-                    task.get("required_assertions") or []
+                    item
+                    for item in task.get("required_assertions") or []
+                    if str(item) != "analysis_only"
                 ),
                 "declared_metrics": list(task.get("metrics") or []),
             },

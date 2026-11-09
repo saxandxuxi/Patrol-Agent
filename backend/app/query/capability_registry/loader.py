@@ -29,6 +29,7 @@ _FILE_ROOT_KEYS = {
     "time_buckets.yaml": "time_buckets",
     "result_words.yaml": "result_words",
     "repair_policy.yaml": "repair_policy",
+    "capability_gaps.yaml": "capability_gaps",
     "templates.yaml": "templates",
     "calculators.yaml": "calculators",
 }

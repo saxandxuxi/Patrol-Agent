@@ -91,10 +91,21 @@ def run_case(
     verification_status = str(
         (payload.get("verification") or {}).get("status") or ""
     )
-    hard_failure = bool(
+    correct_unsupported = (
+        verdict.get("accepted") is True
+        and str(verdict.get("verdict") or "") == "correct_unsupported"
+    )
+    runtime_failure = bool(
         payload.get("error")
-        or section_statuses & {"blocked", "error", "failed", "repairable"}
-        or verification_status in {"blocked", "error", "failed", "repairable"}
+        or section_statuses & {"error", "failed", "repairable", "ambiguous"}
+        or verification_status in {"error", "failed", "repairable", "ambiguous"}
+    )
+    hard_failure = runtime_failure or bool(
+        not correct_unsupported
+        and (
+            "blocked" in section_statuses
+            or verification_status == "blocked"
+        )
     )
     accepted = (
         verdict.get("accepted") is True

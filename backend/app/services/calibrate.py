@@ -37,23 +37,28 @@ def _query(sql: str) -> list[dict[str, Any]]:
         return []
 
 
-def route_facts(route_id: str) -> dict[str, Any]:
+def route_facts(route_ref: str) -> dict[str, Any]:
     """一条路线的台账信息 + 实际病害数据范围（5 分钟缓存）。"""
-    key = f"route:{route_id}"
+    key = f"route:{route_ref}"
     cached = _facts_cache.get(key)
     if cached and time.time() - cached[0] < _FACTS_TTL_SECONDS:
         return cached[1]
 
+    safe_ref = route_ref.replace("'", "''")
     # 台账 + 路段合成**一条** JOIN（库在 SSH 隧道后面，每多一次往返 ≈0.35s）：
     # 原来要 3 次往返，现在 2 次；剩下的冷启动成本由启动预热 `warm_cache()` 兜掉。
     # 注意 db_manager 的所有查询共用一把锁（paramiko 通道复用），并行查询没有收益。
     ledger = (_query(
-        "SELECT r.short_name, r.start_num, r.end_num, r.distance, r.lane_count, "
+        "SELECT r.id AS route_id, r.short_name, r.start_num, r.end_num, r.distance, r.lane_count, "
         "s.start_meter_total, s.end_meter_total, s.tech_grade, s.surface_type, s.surface_width "
         "FROM basic_facilities_routes r "
         "LEFT JOIN basic_facilities_sections s ON s.route_id = r.id AND s.del_flag = 0 "
-        f"WHERE r.id = '{route_id}' LIMIT 1"
+        "WHERE r.del_flag = 0 AND ("
+        f"r.id = '{safe_ref}' OR r.short_name = '{safe_ref}' OR "
+        f"r.full_name = '{safe_ref}' OR r.code = '{safe_ref}'"
+        ") LIMIT 1"
     ) or [{}])[0]
+    route_id = str(ledger.get("route_id") or route_ref)
     data = (_query(
         "SELECT MIN(p.pile_distance) AS min_pile, MAX(p.pile_distance) AS max_pile, "
         "MIN(p.collection_time) AS min_time, MAX(p.collection_time) AS max_time, COUNT(*) AS cnt "
@@ -62,6 +67,7 @@ def route_facts(route_id: str) -> dict[str, Any]:
     route, section = ledger, ledger
 
     facts = {
+        "route_id": route_id,
         "route": route.get("short_name"),
         "ledger_start": route.get("start_num"),
         "ledger_end": route.get("end_num"),

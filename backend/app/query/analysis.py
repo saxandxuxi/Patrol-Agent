@@ -8,6 +8,7 @@ from typing import Any
 
 from ..services import prompts
 from ..services.llm import LLMError, chat_json, role_model
+from ..services.logging_service import console_json
 from ..calculations.models import (
     CalculationOperand,
     CalculationOutput,
@@ -17,6 +18,11 @@ from ..calculations.operations import roles_for_tool
 from ..semantic_aids import canonical_field, detect_evidence
 from .audit import audit_query_plan
 from .capability_registry import CapabilityIssue, CapabilityRegistry
+from .comparison_contract import (
+    complete_dataset_comparison_dependencies,
+    dataset_comparison_contract_issue,
+    normalize_dataset_comparison_order,
+)
 from .contracts import (
     InputBinding,
     IntentContract,
@@ -27,11 +33,25 @@ from .contracts import (
     QuerySpecError,
     QuerySpecUnsupported,
     ValueBinding,
+    post_calc_has_executable_body,
 )
 from .fields import FieldReachSet, OutputProjection, PhysicalSchemaView
-from .periods import normalize_named_period_window
+from .input_bindings import query_plan_input_binding_issue
+from .periods import dedupe_equivalent_filters, normalize_named_period_window
+from .patrol_windows import complete_recent_window_plan
 from .planner import build_query_plan
-from .shape_contracts import canonical_view, normalize_top_view
+from .scalar_sources import complete_scalar_source_selections
+from .semantic_operations import (
+    answer_operation_catalog,
+    semantic_operation_audit_issue,
+    semantic_operation_contract_issue,
+)
+from .shape_contracts import (
+    canonical_view,
+    normalize_post_calc_shape,
+    normalize_segment_projection,
+    normalize_top_view,
+)
 from .spec_mdl import UnsupportedQuerySpec, compile_spec_mdl
 from .validator import validate_query_spec
 from .values import resolve_value
@@ -89,6 +109,16 @@ def _metric_tuple(value: Any) -> tuple[str, ...]:
         if metric and metric not in result:
             result.append(metric)
     return tuple(result)
+
+
+def _row_index(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise QuerySpecError("inputs.row_index 必须是从 0 开始的整数")
+    if value < 0:
+        raise QuerySpecError("inputs.row_index 不能小于 0")
+    return value
 
 
 _METRIC_ALIASES = {
@@ -191,6 +221,7 @@ def _canonicalize_input_bindings(specs: list[QuerySpec]) -> None:
                     from_field=from_field,
                     to_field=to_field,
                     op=item.op,
+                    row_index=item.row_index,
                 )
             )
         specs[index] = QuerySpec(
@@ -198,10 +229,100 @@ def _canonicalize_input_bindings(specs: list[QuerySpec]) -> None:
         )
 
 
+def _dependency_placeholder_binding(
+    raw_value: Any,
+    target_field: str,
+    op: str,
+    node_ids: set[str],
+) -> InputBinding | None:
+    """把模型误写进过滤值的内部依赖标记恢复成类型化输入绑定。
+
+    这不是从自然语言猜业务语义，而是修复 QuerySpec 的内部数据连接：
+    `DEPENDS_ON_q1_route_name` 明确指向 q1 的 route_name。代码只接受已
+    声明节点 id 的完整保留标记；任何其他同前缀字符串仍明确拒绝。
+    """
+
+    if not isinstance(raw_value, str):
+        return None
+    text = raw_value.strip()
+    prefix = "DEPENDS_ON_"
+    if not text.startswith(prefix):
+        return None
+    for node_id in sorted(node_ids, key=len, reverse=True):
+        marker = f"{prefix}{node_id}_"
+        if not text.startswith(marker):
+            continue
+        from_field = canonical_field(text[len(marker):])
+        if not from_field:
+            break
+        return InputBinding(
+            from_node=node_id,
+            from_field=from_field,
+            to_field=canonical_field(target_field),
+            op=op,
+        )
+    raise QuerySpecError(
+        "内部依赖占位符格式无效；下游节点必须在 inputs 中声明 "
+        "from_node、from_field、to_field 和 op，不能把依赖写进过滤值。"
+    )
+
+
+def _normalize_terminal_answer_subject(
+    plan: QueryPlan,
+    subject: str,
+) -> QueryPlan:
+    """让不落 SQL 的最终 post_calc 服从语义层确定的回答对象。"""
+    if not subject:
+        return plan
+    consumed = {
+        dependency
+        for node in plan.nodes
+        for dependency in node.depends_on
+    }
+    consumed.update(
+        binding.from_node
+        for node in plan.nodes
+        for binding in node.spec.input_bindings
+    )
+    nodes = []
+    changed = False
+    for node in plan.nodes:
+        if (
+            node.id not in consumed
+            and node.node_type == "post_calc"
+            and node.spec.subject != subject
+        ):
+            node = replace(
+                node,
+                spec=replace(node.spec, subject=subject),
+            )
+            changed = True
+        nodes.append(node)
+    return replace(plan, nodes=tuple(nodes)) if changed else plan
+
+
 def _plan_subject_issue(plan: QueryPlan, subject: str) -> str:
     if not subject:
         return ""
     nodes_by_id = {node.id: node for node in plan.nodes}
+
+    def depends_on_subject(node_id: str, seen: set[str] | None = None) -> bool:
+        visited = seen or set()
+        if node_id in visited:
+            return False
+        visited.add(node_id)
+        node = nodes_by_id.get(node_id)
+        if node is None:
+            return False
+        return any(
+            dependency in nodes_by_id
+            and (
+                nodes_by_id[dependency].spec.subject == subject
+                or depends_on_subject(dependency, visited)
+            )
+            for dependency in node.depends_on
+        )
+
     consumed = {
         dependency
         for node in plan.nodes
@@ -225,6 +346,10 @@ def _plan_subject_issue(plan: QueryPlan, subject: str) -> str:
             if len(dependency_subjects) == 1:
                 effective_subject = next(iter(dependency_subjects))
         if effective_subject != subject:
+            # 混合明细题的最终节点可以先取巡检查询结果、再下钻病害。
+            # 只要它确实依赖已确定主体链上的节点，就不是模型换了用户问题。
+            if depends_on_subject(node.id):
+                continue
             return (
                 f"最终回答主体 {effective_subject} 与已确定主体 {subject} 不一致"
             )
@@ -334,6 +459,84 @@ def _unavailable_assist_reason(
     return ""
 
 
+def _declared_capability_gap_reason(
+    terms: tuple[str, ...],
+    registry: CapabilityRegistry | None,
+    *,
+    include_partial: bool = False,
+) -> str:
+    if registry is None:
+        return ""
+    reasons: list[str] = []
+    allowed_statuses = {"unavailable", "lookup_required"}
+    if include_partial:
+        allowed_statuses.add("partial")
+    for term in terms:
+        text = str(term or "").strip()
+        prefix = "capability_gap:"
+        if not text.startswith(prefix):
+            continue
+        gap_id = text[len(prefix):].strip()
+        raw = registry.snapshot.capability_gaps.get(gap_id)
+        if not isinstance(raw, Mapping):
+            matched_field = False
+            for subject_fields in registry.snapshot.fields.values():
+                field = subject_fields.get(gap_id)
+                if field is None or field.status not in {
+                    "unavailable",
+                    "lookup_required",
+                }:
+                    continue
+                reason = "当前数据能力不支持：" + (
+                    field.unavailable_reason or "字段能力不可用"
+                )
+                if reason not in reasons:
+                    reasons.append(reason)
+                matched_field = True
+                break
+            if matched_field:
+                continue
+            allowed = "；".join(
+                f"{registered_id}：{reason}"
+                for registered_id, registered in (
+                    registry.snapshot.capability_gaps.items()
+                )
+                if isinstance(registered, Mapping)
+                and (
+                    reason := str(registered.get("reason") or "").strip()
+                )
+            )
+            raise QuerySpecError(
+                f"未知能力缺口 id：{gap_id or text}；"
+                "只能使用当前能力视图中登记的能力缺口"
+                + (f"。可用能力缺口：{allowed}" if allowed else "")
+            )
+        status = str(raw.get("status") or "unavailable").strip()
+        if status not in allowed_statuses:
+            continue
+        reason = str(raw.get("reason") or "").strip()
+        detail = "当前数据能力不支持：" + (
+            reason or f"能力缺口 {gap_id} 尚未补齐"
+        )
+        if detail not in reasons:
+            reasons.append(detail)
+    return "；".join(reasons)
+
+
+def _has_independent_field_support(
+    field: str,
+    source_evidence: dict[str, Any],
+    evidence: list[dict[str, Any]],
+) -> bool:
+    # A compound phrase can independently request several dimensions.
+    # Structured evidence, not disjoint character spans, establishes support.
+    return any(
+        item is not source_evidence
+        and canonical_field(str(item.get("candidate_field") or "")) == field
+        for item in evidence
+    )
+
+
 def _assist_field_issue(
     specs: list[QuerySpec],
     evidence: list[dict[str, Any]],
@@ -394,7 +597,15 @@ def _assist_field_issue(
             discouraged = {
                 str(field) for field in item.get("discouraged_fields") or ()
             }
-            used = discouraged.intersection(used_fields)
+            used = {
+                field
+                for field in discouraged.intersection(used_fields)
+                if not _has_independent_field_support(
+                    field,
+                    item,
+                    evidence,
+                )
+            }
             if not used:
                 continue
             return (
@@ -523,6 +734,8 @@ def _complete_trend_dependencies(plan: QueryPlan) -> QueryPlan:
 def _complete_trend_analysis(
     plan: QueryPlan,
     intent_family: str = "",
+    registry: CapabilityRegistry | None = None,
+    assist_evidence: tuple[Any, ...] = (),
 ) -> QueryPlan:
     trend_data = [
         node
@@ -537,6 +750,81 @@ def _complete_trend_analysis(
         ]
     if not trend_data:
         return plan
+    data_nodes = [
+        node for node in plan.nodes if node.node_type == "query_data"
+    ]
+    explicit_granularity = any(
+        str(item.get("candidate_type") or "") == "time_granularity"
+        for item in assist_evidence
+    )
+    default_time_dimension = ""
+    if registry is not None:
+        trend_contract = (
+            registry.snapshot.query_shapes.get("planner_semantics", {})
+            .get("answer_operations", {})
+            .get("trend", {})
+        )
+        candidate = str(
+            trend_contract.get("default_time_dimension") or ""
+            if isinstance(trend_contract, Mapping)
+            else ""
+        ).strip()
+        registered = set(
+            registry.snapshot.query_shapes.get("semantic", {})
+            .get("group_by", ())
+        )
+        if candidate and candidate in registered:
+            default_time_dimension = candidate
+    if len(data_nodes) == 1 and not explicit_granularity and default_time_dimension:
+        data = data_nodes[0]
+        dimensions = tuple(
+            default_time_dimension
+            if str(field).rsplit(".", 1)[-1] in {"collection_time", "create_time"}
+            else str(field)
+            for field in data.spec.dimensions
+        )
+        if dimensions != data.spec.dimensions:
+            order_by = tuple(
+                {
+                    **item,
+                    "field": (
+                        default_time_dimension
+                        if str(item.get("field") or "").rsplit(".", 1)[-1]
+                        in {"collection_time", "create_time"}
+                        else item.get("field")
+                    ),
+                }
+                for item in data.spec.order_by
+                if isinstance(item, Mapping)
+            )
+            output_projection = tuple(
+                default_time_dimension
+                if str(field).rsplit(".", 1)[-1]
+                in {"collection_time", "create_time"}
+                else str(field)
+                for field in data.spec.output_projection
+            )
+            if not order_by:
+                order_by = (
+                    {"field": default_time_dimension, "direction": "asc"},
+                )
+            repaired_data = replace(
+                data,
+                spec=replace(
+                    data.spec,
+                    view="trend",
+                    dimensions=dimensions,
+                    output_projection=output_projection,
+                    order_by=order_by,
+                ),
+            )
+            plan = replace(
+                plan,
+                nodes=tuple(
+                    repaired_data if node.id == data.id else node
+                    for node in plan.nodes
+                ),
+            )
     trend_ids = {node.id for node in trend_data}
     for node in plan.nodes:
         if (
@@ -602,6 +890,74 @@ def _complete_trend_calculation(plan: QueryPlan) -> QueryPlan:
     data_nodes = [
         node for node in plan.nodes if node.node_type == "query_data"
     ]
+    if len(data_nodes) == 1:
+        data = data_nodes[0]
+        label_field = next(iter(data.spec.dimensions), "")
+        value_field = next(iter(data.spec.metrics), "")
+        if not label_field or not value_field:
+            return plan
+        nodes = []
+        changed = False
+        for node in plan.nodes:
+            if (
+                node.node_type != "post_calc"
+                or node.spec.view != "trend"
+                or data.id not in node.depends_on
+            ):
+                nodes.append(node)
+                continue
+            calculation = node.spec.calculation
+            if calculation is not None and calculation.tool != "calculate_series":
+                nodes.append(node)
+                continue
+            calculation = CalculationRequest(
+                tool="calculate_series",
+                operation="subtract",
+                operands=(
+                    CalculationOperand(
+                        name="labels",
+                        source={"node": data.id, "field": label_field},
+                    ),
+                    CalculationOperand(
+                        name="values",
+                        source={"node": data.id, "field": value_field},
+                    ),
+                ),
+                output=(
+                    calculation.output
+                    if calculation is not None
+                    else None
+                ),
+                precision=(
+                    calculation.precision
+                    if calculation is not None
+                    else 6
+                ),
+            )
+            nodes.append(
+                replace(
+                    node,
+                    spec=replace(
+                        node.spec,
+                        calculation=calculation,
+                        required_assertions=tuple(
+                            assertion
+                            for assertion in node.spec.required_assertions
+                            if assertion != "analysis_only"
+                        ),
+                    ),
+                )
+            )
+            changed = True
+        return (
+            QueryPlan(
+                question=plan.question,
+                nodes=tuple(nodes),
+                response_mode=plan.response_mode,
+            )
+            if changed
+            else plan
+        )
     if len(data_nodes) < 2:
         return plan
     batch_node = next(
@@ -664,7 +1020,15 @@ def _complete_trend_calculation(plan: QueryPlan) -> QueryPlan:
             )
             node = replace(
                 node,
-                spec=replace(node.spec, calculation=calculation),
+                spec=replace(
+                    node.spec,
+                    calculation=calculation,
+                    required_assertions=tuple(
+                        assertion
+                        for assertion in node.spec.required_assertions
+                        if assertion != "analysis_only"
+                    ),
+                ),
             )
         nodes.append(node)
     return QueryPlan(
@@ -864,7 +1228,7 @@ def _analyze_once(
             question=original,
             kind=kind,
             current_date=datetime.now().strftime("%Y-%m-%d"),
-            capabilities=_text_context(planner_view, limit=24000),
+            capabilities=_text_context(planner_view, limit=32000),
             schema=_text_context(
                 sorted(
                     (table, column)
@@ -902,7 +1266,14 @@ def _analyze_once(
         intent_family=str(data.get("intent_family") or "").strip(),
         final_goal=str(data.get("final_goal") or original).strip(),
         unknown_terms=_string_tuple(data.get("unknown_terms")),
+        answer_operation=str(data.get("answer_operation") or "").strip(),
     )
+    declared_gap = _declared_capability_gap_reason(
+        contract.unknown_terms,
+        registry,
+    )
+    if declared_gap:
+        raise QuerySpecUnsupported(declared_gap)
     specs: list[QuerySpec] = []
     dependencies: dict[str, tuple[str, ...]] = {}
     node_types: dict[str, str] = {}
@@ -913,25 +1284,62 @@ def _analyze_once(
         unavailable = _unavailable_assist_reason(assist_evidence, registry)
         if unavailable:
             raise QuerySpecUnsupported(unavailable)
+        declared_gap = _declared_capability_gap_reason(
+            contract.unknown_terms,
+            registry,
+            include_partial=True,
+        )
+        if declared_gap:
+            raise QuerySpecUnsupported(declared_gap)
         if contract.unknown_terms:
             # 规划器按契约把"当前能力覆盖不到什么"写进了 unknown_terms
             # （例如只注册了 500 米 / 1 公里两种分段粒度），要原样作为
             # 不支持原因返回，而不是暴露"缺少 views"这种内部错误。
-            raise QuerySpecUnsupported("；".join(contract.unknown_terms))
+            terms = [
+                str(item).strip()
+                for item in contract.unknown_terms
+                if str(item).strip()
+            ]
+            detail = "；".join(terms)
+            if not any(mark in detail for mark in "，。；：,.;:"):
+                # 裸词（例如口语病害名）不能原样回显成答案：说清"没匹配上"，
+                # 让用户改用台账里登记的名称。
+                detail = (
+                    f"没有找到与“{'、'.join(terms)}”匹配的可用字段或病害类型，"
+                    "请改用台账里登记的名称再问一次"
+                )
+            raise QuerySpecUnsupported(detail)
         raise QuerySpecError("QuerySpec 缺少 views")
+    declared_node_ids = {
+        str(raw.get("id") or f"q{index}").strip()
+        for index, raw in enumerate(raw_views, 1)
+        if isinstance(raw, dict)
+    }
     for index, raw in enumerate(raw_views, 1):
         if not isinstance(raw, dict):
             continue
         spec_id = str(raw.get("id") or f"q{index}").strip()
         selected_subject = str(raw.get("subject") or subject or "disease").strip()
         filters = []
+        placeholder_bindings: list[InputBinding] = []
         for item in raw.get("filters") or []:
             if not isinstance(item, dict):
                 raise QuerySpecError("过滤条件必须是对象")
+            filter_field = str(item.get("field") or "")
+            filter_op = str(item.get("op") or "=")
+            placeholder = _dependency_placeholder_binding(
+                item.get("raw_value", item.get("value")),
+                filter_field,
+                filter_op,
+                declared_node_ids,
+            )
+            if placeholder is not None:
+                placeholder_bindings.append(placeholder)
+                continue
             filters.append(
                 resolve_value(
-                    str(item.get("field") or ""),
-                    str(item.get("op") or "="),
+                    filter_field,
+                    filter_op,
                     item.get("raw_value", item.get("value")),
                     original,
                     kind,
@@ -983,8 +1391,31 @@ def _analyze_once(
                     from_field=str(item.get("from_field") or "").strip(),
                     to_field=str(item.get("to_field") or "").strip(),
                     op=str(item.get("op") or "in").strip(),
+                    row_index=_row_index(item.get("row_index")),
                 )
             )
+        seen_bindings = {
+            (
+                item.from_node,
+                item.from_field,
+                item.to_field,
+                item.op,
+                item.row_index,
+            )
+            for item in input_bindings
+        }
+        for item in placeholder_bindings:
+            key = (
+                item.from_node,
+                item.from_field,
+                item.to_field,
+                item.op,
+                item.row_index,
+            )
+            if key in seen_bindings:
+                continue
+            input_bindings.append(item)
+            seen_bindings.add(key)
         raw_calculation = raw.get("calculation")
         if raw_calculation is not None and not isinstance(
             raw_calculation,
@@ -1018,13 +1449,24 @@ def _analyze_once(
             question=str(raw.get("question") or original).strip(),
             input_bindings=tuple(input_bindings),
             calculation=calculation,
+            comparison_depends_on=_string_tuple(
+                raw.get("comparison_depends_on")
+            ),
         )
+        normalized_spec = normalize_segment_projection(normalized_spec)
         specs.append(
             normalize_top_view(normalized_spec)
             if node_type == "query_data"
-            else normalized_spec
+            else normalize_post_calc_shape(normalized_spec)
         )
-        dependencies[spec_id] = _string_tuple(raw.get("depends_on"))
+        dependencies[spec_id] = tuple(
+            dict.fromkeys(
+                (
+                    *_string_tuple(raw.get("depends_on")),
+                    *(item.from_node for item in placeholder_bindings),
+                )
+            )
+        )
         node_types[spec_id] = node_type
     _canonicalize_input_bindings(specs)
     assist_issue = _assist_field_issue(
@@ -1048,6 +1490,7 @@ def _analyze_once(
             else "data"
         ),
     )
+    plan = complete_scalar_source_selections(plan)
     requires_order = any(
         str(item.get("candidate_type") or "") == "order_hint"
         for item in assist_evidence
@@ -1060,7 +1503,13 @@ def _analyze_once(
             extreme_issue = _spec_extreme_order_issue(spec, node_types)
             if extreme_issue:
                 raise QuerySpecError(extreme_issue)
-    plan = _complete_trend_analysis(plan, contract.intent_family)
+    plan = complete_recent_window_plan(plan, registry)
+    plan = _complete_trend_analysis(
+        plan,
+        contract.intent_family,
+        registry,
+        assist_evidence,
+    )
     plan = _complete_trend_dependencies(plan)
     plan = _complete_trend_calculation(plan)
     plan = _complete_scalar_metric_comparisons(plan, registry)
@@ -1074,6 +1523,11 @@ def _analyze_once(
         ],
         datetime.now(),
     )
+    plan = dedupe_equivalent_filters(plan)
+    if registry is not None:
+        plan = complete_dataset_comparison_dependencies(plan, registry)
+        plan = normalize_dataset_comparison_order(plan)
+    plan = _normalize_terminal_answer_subject(plan, subject)
     subject_issue = _plan_subject_issue(plan, subject)
     if subject_issue:
         raise QuerySpecError(subject_issue)
@@ -1083,6 +1537,40 @@ def _analyze_once(
     shaping_issue = _plan_shaping_issue(plan, contract.intent_family)
     if shaping_issue:
         raise QuerySpecError(shaping_issue)
+    operation_issue = semantic_operation_contract_issue(
+        plan,
+        contract.answer_operation,
+        registry,
+    )
+    if operation_issue:
+        console_json(
+            "[query][operation_rejected] ",
+            {
+                "question": original,
+                "answer_operation": contract.answer_operation,
+                "failure_code": operation_issue.code,
+                "reason": operation_issue.reason,
+                "nodes": [
+                    {
+                        "id": node.id,
+                        "type": node.node_type,
+                        "subject": node.spec.subject,
+                        "view": node.spec.view,
+                        "metrics": list(node.spec.metrics),
+                        "dimensions": list(node.spec.dimensions),
+                        "depends_on": list(node.depends_on),
+                        "comparison_depends_on": list(
+                            node.spec.comparison_depends_on
+                        ),
+                        "question": node.spec.question,
+                    }
+                    for node in plan.nodes
+                ],
+            },
+        )
+        raise QuerySpecError(
+            "查询操作契约不成立：" + operation_issue.reason
+        )
     return plan
 
 
@@ -1145,13 +1633,14 @@ def _apply_audit_patches(plan: QueryPlan, verdict: dict[str, Any]) -> QueryPlan:
                 tuple(values.get("dimensions") or ()),
                 node.node_type,
             )
+        normalized_spec = normalize_segment_projection(QuerySpec(**values))
         nodes.append(
             node.__class__(
                 id=node.id,
                 spec=(
-                    normalize_top_view(QuerySpec(**values))
+                    normalize_top_view(normalized_spec)
                     if node.node_type == "query_data"
-                    else QuerySpec(**values)
+                    else normalize_post_calc_shape(normalized_spec)
                 ),
                 depends_on=node.depends_on,
                 node_type=node.node_type,
@@ -1364,28 +1853,30 @@ def _query_plan_calculation_issue(
     nodes_by_id = {node.id: node for node in plan.nodes}
     for node in plan.nodes:
         calculation = node.spec.calculation
-        if calculation is None:
-            continue
         if node.node_type != "post_calc":
+            if calculation is None:
+                continue
             return CapabilityIssue(
                 code="calculation_output_invalid",
                 original_value=node.id,
                 reason="calculation 只能用于 post_calc 节点",
                 node_id=node.id,
             )
-        if (
-            calculation is None
-            and "analysis_only" not in node.spec.required_assertions
+        if calculation is None and not post_calc_has_executable_body(
+            node.spec.required_assertions
         ):
             return CapabilityIssue(
                 code="calculation_required",
                 original_value=node.id,
                 reason=(
                     "post_calc 必须声明 calculation 工具和参数；"
-                    "只解释已有值时声明 analysis_only"
+                    "只解释已有值时声明 analysis_only、dataset_comparison 或 "
+                    "multi_metric_comparison"
                 ),
                 suggested_repair=(
-                    "使用 calculate_scalar、calculate_columns 或 calculate_series。"
+                    "需要算术时使用 calculate_scalar、calculate_columns、"
+                    "calculate_series 或 calculate_datetime_interval；"
+                    "只解释已有值时声明 analysis_only。"
                 ),
                 node_id=node.id,
             )
@@ -1467,6 +1958,43 @@ def _query_plan_calculation_issue(
             if operand.source:
                 source_node = str(operand.source.get("node") or "")
                 source_field = str(operand.source.get("field") or "")
+                row_index = operand.source.get("row_index")
+                if row_index is not None:
+                    if calculation.tool not in {
+                        "calculate_scalar",
+                        "calculate_datetime_interval",
+                    }:
+                        return CapabilityIssue(
+                            code="calculation_operand_missing",
+                            original_value=operand.name,
+                            reason=(
+                                "row_index 只适用于标量或日期差计算"
+                                "从有序结果中选择单个值"
+                            ),
+                            node_id=node.id,
+                        )
+                    if (
+                        isinstance(row_index, bool)
+                        or not isinstance(row_index, int)
+                        or row_index < 0
+                    ):
+                        return CapabilityIssue(
+                            code="calculation_operand_missing",
+                            original_value=operand.name,
+                            reason="row_index 必须是从 0 开始的行号",
+                            node_id=node.id,
+                        )
+                    upstream = nodes_by_id.get(source_node)
+                    if upstream is None or not upstream.spec.order_by:
+                        return CapabilityIssue(
+                            code="calculation_operand_missing",
+                            original_value=operand.name,
+                            reason=(
+                                "row_index 只能选择带显式 order_by 的上游结果，"
+                                "否则“第一行/第二行”没有确定含义"
+                            ),
+                            node_id=node.id,
+                        )
                 if (
                     source_node not in produced
                     or source_field not in produced[source_node]
@@ -1499,6 +2027,89 @@ def _query_plan_calculation_issue(
                             "dependency_node_ids": list(node.depends_on),
                         },
                     )
+                source_key = (
+                    source_node,
+                    source_field,
+                    row_index,
+                )
+                duplicate_scalar_source = (
+                    calculation.tool == "calculate_scalar"
+                    and sum(
+                        1
+                        for other in calculation.operands
+                        if other.source
+                        and (
+                            str(other.source.get("node") or ""),
+                            str(other.source.get("field") or ""),
+                            other.source.get("row_index"),
+                        )
+                        == source_key
+                    )
+                    > 1
+                )
+                if (
+                    calculation.tool == "calculate_scalar"
+                    and not duplicate_scalar_source
+                ):
+                    upstream = nodes_by_id.get(source_node)
+                    metric_fields = (
+                        {
+                            str(item).rsplit(".", 1)[-1]
+                            for item in upstream.spec.metrics
+                        }
+                        if upstream is not None
+                        else set()
+                    )
+                    source_field_name = source_field.rsplit(".", 1)[-1]
+                    if source_field_name not in metric_fields:
+                        return CapabilityIssue(
+                            code="calculation_type_mismatch",
+                            original_value=operand.name,
+                            reason=(
+                                f"来源 {source_node}.{source_field} "
+                                "是分组或展示字段，不是数值指标"
+                            ),
+                            suggested_repair=(
+                                "标量计算只能引用 count/sum/avg 标量视图的数值"
+                                "指标；分组结果请给数值指标加 row_index，"
+                                "并为上游声明明确的 order_by。"
+                            ),
+                            node_id=node.id,
+                            evidence={
+                                "operand": operand.name,
+                                "source_node": source_node,
+                                "source_field": source_field,
+                                "available_metrics": sorted(metric_fields),
+                                "suggested_scalar_metric": "count",
+                            },
+                        )
+                    scalar_view = (
+                        upstream is not None
+                        and upstream.spec.view in {"count", "sum", "avg"}
+                        and not upstream.spec.dimensions
+                    )
+                    if row_index is None and not scalar_view:
+                        return CapabilityIssue(
+                            code="calculation_type_mismatch",
+                            original_value=operand.name,
+                            reason=(
+                                f"来源 {source_node}.{source_field} 位于分组结果中，"
+                                "未提供 row_index，不能当作单个数值"
+                            ),
+                            suggested_repair=(
+                                "增加无分组的 count/sum/avg 标量节点，或给分组数值"
+                                "指标指定 row_index 并让上游 order_by 确定行序。"
+                            ),
+                            node_id=node.id,
+                            evidence={
+                                "operand": operand.name,
+                                "source_node": source_node,
+                                "source_field": source_field,
+                                "source_view": upstream.spec.view,
+                                "source_dimensions": list(upstream.spec.dimensions),
+                                "suggested_scalar_metric": "count",
+                            },
+                        )
             elif operand.value is None:
                 return CapabilityIssue(
                     code="calculation_operand_missing",
@@ -1510,10 +2121,38 @@ def _query_plan_calculation_issue(
             (
                 str(operand.source.get("node") or ""),
                 str(operand.source.get("field") or ""),
+                operand.source.get("row_index"),
             )
             for operand in calculation.operands
             if operand.source
         ]
+        source_nodes = {source_node for source_node, _, _ in source_keys}
+        unused_dependencies = [
+            dependency
+            for dependency in node.depends_on
+            if dependency not in source_nodes
+        ]
+        if unused_dependencies:
+            return CapabilityIssue(
+                code="calculation_dependency_unused",
+                original_value=calculation.operation,
+                reason=(
+                    "计算声明了依赖但未消费："
+                    + "、".join(unused_dependencies)
+                ),
+                allowed_values=tuple(node.depends_on),
+                suggested_repair=(
+                    "让 calculation 的操作数覆盖每个可比较分支；"
+                    "若每个分支都需要独立比例，先为每个分支生成计算节点，"
+                    "再由一个 post_calc 比较这些结果。"
+                ),
+                node_id=node.id,
+                evidence={
+                    "declared_dependencies": list(node.depends_on),
+                    "calculation_source_nodes": sorted(source_nodes),
+                    "unused_dependencies": unused_dependencies,
+                },
+            )
         same_source_group_share = (
             calculation.tool == "calculate_columns"
             and calculation.operation == "percentage_share"
@@ -1708,7 +2347,20 @@ def _ambiguity_message(issues: list[Any]) -> str:
             reasons.append(reason)
     if reasons:
         return "；".join(reasons[:2])
-    return "请补充具体时间范围、巡检批次、比较对象或所需字段。"
+    return ""
+
+
+def _audit_failure_message(issues: list[Any]) -> str:
+    reasons: list[str] = []
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        reason = str(issue.get("reason") or "").strip()
+        if reason and reason not in reasons:
+            reasons.append(reason)
+    if reasons:
+        return "独立规划审计发现计划仍不完整：" + "；".join(reasons[:3])
+    return "独立规划审计未通过，但没有说明具体缺口；本次查询没有执行。"
 
 
 def analyze_single_turn(
@@ -1723,6 +2375,7 @@ def analyze_single_turn(
     planning_feedback: str = "",
 ) -> QueryPlan:
     feedback = str(planning_feedback or "")
+    audit_evidence = detect_evidence(str(question or "").strip(), kind)
     for attempt in range(3):
         try:
             plan = _analyze_once(
@@ -1758,6 +2411,10 @@ def analyze_single_turn(
         if not audit:
             return plan
         compile_issue = _query_plan_field_issue(plan, registry)
+        if compile_issue is None and registry is not None:
+            compile_issue = query_plan_input_binding_issue(plan, registry)
+        if compile_issue is None and registry is not None:
+            compile_issue = dataset_comparison_contract_issue(plan, registry)
         if compile_issue is None:
             compile_issue = _query_plan_compile_error(plan)
         if compile_issue is None:
@@ -1795,7 +2452,35 @@ def analyze_single_turn(
             raise QuerySpecError(
                 "当前数据能力不支持：" + compile_issue.reason
             )
-        verdict = audit_query_plan(str(question or "").strip(), plan)
+        verdict = audit_query_plan(
+            str(question or "").strip(),
+            plan,
+            assist_evidence=audit_evidence,
+            answer_operations=answer_operation_catalog(registry),
+        )
+        operation_issue = semantic_operation_audit_issue(
+            plan,
+            verdict,
+            registry,
+        )
+        if operation_issue:
+            feedback = json.dumps(
+                {
+                    **operation_issue.to_feedback(),
+                    "independent_audit_operation": str(
+                        verdict.get("answer_operation") or ""
+                    ),
+                },
+                ensure_ascii=False,
+                default=str,
+            )
+            if attempt < 2:
+                continue
+            raise QuerySpecError(
+                "独立语义审计认定这一步是实体集合比较，"
+                "但计划没有提供可执行的集合差集结构："
+                + operation_issue.reason
+            )
         if verdict.get("complete") is True:
             return plan
         post_calc_ids = {
@@ -1859,18 +2544,35 @@ def analyze_single_turn(
             else:
                 if _query_plan_compiles(plan) and not _query_plan_compiles(patched):
                     return plan
-                repaired = audit_query_plan(str(question or "").strip(), patched)
+                repaired = audit_query_plan(
+                    str(question or "").strip(),
+                    patched,
+                    assist_evidence=audit_evidence,
+                    answer_operations=answer_operation_catalog(registry),
+                )
+                operation_issue = semantic_operation_audit_issue(
+                    patched,
+                    repaired,
+                    registry,
+                )
+                if operation_issue:
+                    verdict = {
+                        **repaired,
+                        "complete": False,
+                        "issues": [operation_issue.to_feedback()],
+                    }
+                    continue
                 if repaired.get("complete") is True:
                     return patched
                 verdict = repaired
         issues = verdict.get("issues") or []
-        feedback = json.dumps(issues, ensure_ascii=False, default=str)
-        if any(
-            isinstance(item, dict)
-            and str(item.get("code") or "") == "ambiguous_scope"
-            for item in issues
-        ):
-            raise QuerySpecAmbiguity(_ambiguity_message(issues))
-    raise QuerySpecAmbiguity(
-        _ambiguity_message(issues)
-    )
+        feedback = (
+            "上一轮 QuerySpec 未通过独立规划审计。只在用户原问题和现有字段、"
+            "字典允许的范围内补齐或修正；不得猜测时间、巡检批次、比较对象、"
+            "字段或枚举。审计问题："
+            + json.dumps(issues, ensure_ascii=False, default=str)
+        )
+    ambiguity = _ambiguity_message(issues)
+    if ambiguity:
+        raise QuerySpecAmbiguity(ambiguity)
+    raise QuerySpecError(_audit_failure_message(issues))

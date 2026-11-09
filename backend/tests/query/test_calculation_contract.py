@@ -164,6 +164,67 @@ class CalculationContractTests(unittest.TestCase):
             ("custom_ratio",),
         )
 
+    def test_multi_metric_comparison_can_explain_existing_scalars(self):
+        first = QuerySpec(
+            id="left_count",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="统计第一种病害数量",
+        )
+        second = QuerySpec(
+            id="right_count",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="统计第二种病害数量",
+        )
+        comparison = QuerySpec(
+            id="compare",
+            kind="mysql",
+            subject="disease",
+            view="data",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("multi_metric_comparison",),
+            question="比较两个已有数量，说明哪个更多并列出各自数值",
+        )
+        plan = QueryPlan(
+            question="比较两个已有数量",
+            nodes=(
+                PlanNode(id="left_count", spec=first),
+                PlanNode(id="right_count", spec=second),
+                PlanNode(
+                    id="compare",
+                    spec=comparison,
+                    depends_on=("left_count", "right_count"),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+
+        issue = _query_plan_calculation_issue(plan, self.registry)
+
+        self.assertIsNone(issue)
+
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
     @patch("app.query.analysis.chat_json")
     def test_calculation_source_must_be_produced_by_dependency(
@@ -347,6 +408,352 @@ class CalculationContractTests(unittest.TestCase):
         self.assertIsNotNone(issue)
         self.assertEqual(issue.code, "calculation_operand_missing")
         self.assertIn("相同的上游来源", issue.reason)
+
+    def test_calculation_must_consume_every_declared_dependency(self):
+        from app.calculations.models import CalculationRequest
+
+        def scalar_source(node_id: str) -> QuerySpec:
+            return QuerySpec(
+                id=node_id,
+                kind="mysql",
+                subject="disease",
+                view="count",
+                metrics=("count", "sum"),
+                dimensions=(),
+                filters=(),
+                output_projection=("count", "sum"),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="方向病害数量与面积",
+            )
+
+        calculation = CalculationRequest.from_dict(
+            {
+                "tool": "calculate_scalar",
+                "operation": "divide",
+                "operands": [
+                    {
+                        "name": "numerator",
+                        "source": {"node": "up", "field": "count"},
+                    },
+                    {
+                        "name": "denominator",
+                        "source": {"node": "up", "field": "sum"},
+                    },
+                ],
+            }
+        )
+        post = QuerySpec(
+            id="compare",
+            kind="mysql",
+            subject="disease",
+            view="data",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("multi_metric_comparison",),
+            question="比较上行和下行",
+            calculation=calculation,
+        )
+        plan = QueryPlan(
+            question="比较上行和下行病害集中程度",
+            nodes=(
+                PlanNode(id="up", spec=scalar_source("up")),
+                PlanNode(id="down", spec=scalar_source("down")),
+                PlanNode(
+                    id="compare",
+                    spec=post,
+                    depends_on=("up", "down"),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+
+        issue = _query_plan_calculation_issue(plan, self.registry)
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue.code, "calculation_dependency_unused")
+        self.assertEqual(issue.node_id, "compare")
+        self.assertIn("down", issue.reason)
+
+    def test_scalar_calculation_can_select_distinct_rows_from_ordered_source(self):
+        from app.calculations.models import CalculationRequest
+
+        source = QuerySpec(
+            id="routes",
+            kind="mysql",
+            subject="disease",
+            view="top_groups",
+            metrics=("count",),
+            dimensions=("route_name",),
+            filters=(),
+            output_projection=("route_name", "count"),
+            order_by=({"field": "count", "direction": "desc"},),
+            limit=2,
+            required_assertions=(),
+            question="全路网病害数量前两条路线",
+        )
+        calculation = CalculationRequest.from_dict(
+            {
+                "tool": "calculate_scalar",
+                "operation": "subtract",
+                "operands": [
+                    {
+                        "name": "left",
+                        "source": {
+                            "node": "routes",
+                            "field": "count",
+                            "row_index": 0,
+                        },
+                    },
+                    {
+                        "name": "right",
+                        "source": {
+                            "node": "routes",
+                            "field": "count",
+                            "row_index": 1,
+                        },
+                    },
+                ],
+            }
+        )
+        post = QuerySpec(
+            id="gap",
+            kind="mysql",
+            subject="disease",
+            view="data",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="第一条路线比第二条多多少处",
+            calculation=calculation,
+        )
+        plan = QueryPlan(
+            question="全路网病害最多的两条路相差多少",
+            nodes=(
+                PlanNode(id="routes", spec=source),
+                PlanNode(
+                    id="gap",
+                    spec=post,
+                    depends_on=("routes",),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+
+        issue = _query_plan_calculation_issue(plan, self.registry)
+
+        self.assertIsNone(issue)
+
+    @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
+    @patch("app.query.analysis.chat_json")
+    def test_scalar_comparison_completes_single_row_group_sources(
+        self,
+        chat_json,
+        _audit,
+    ):
+        payload = {
+            "final_goal": "比较两条路线的病害数量",
+            "intent_family": "analysis",
+            "answer_operation": "scalar_comparison",
+            "unknown_terms": [],
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "统计长沙－芷江高速的病害数量与面积",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count", "total_area"],
+                    "dimensions": ["route_name"],
+                    "filters": [
+                        {
+                            "field": "route_name",
+                            "op": "=",
+                            "raw_value": "长沙－芷江高速",
+                        }
+                    ],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "q2",
+                    "action": "query_data",
+                    "question": "统计怀化绕城高速的病害数量与面积",
+                    "subject": "disease",
+                    "view": "distribution",
+                    "metrics": ["count", "total_area"],
+                    "dimensions": ["route_name"],
+                    "filters": [
+                        {
+                            "field": "route_name",
+                            "op": "=",
+                            "raw_value": "怀化绕城高速",
+                        }
+                    ],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "compare",
+                    "action": "post_calc",
+                    "question": "比较两条路的病害数量差值",
+                    "subject": "disease",
+                    "view": "data",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["multi_metric_comparison"],
+                    "depends_on": ["q1", "q2"],
+                    "inputs": [],
+                    "calculation": {
+                        "tool": "calculate_scalar",
+                        "operation": "subtract",
+                        "operands": [
+                            {
+                                "name": "left",
+                                "source": {
+                                    "node": "q1",
+                                    "field": "count",
+                                },
+                            },
+                            {
+                                "name": "right",
+                                "source": {
+                                    "node": "q2",
+                                    "field": "count",
+                                },
+                            },
+                        ],
+                        "output": {
+                            "name": "count_difference",
+                            "label": "病害数量差值",
+                            "unit": "处",
+                        },
+                        "precision": 0,
+                    },
+                },
+            ],
+        }
+        chat_json.return_value = payload
+
+        plan = analyze_single_turn(
+            "比较长沙－芷江高速和怀化绕城高速的病害数量",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+            registry=self.registry,
+            subject="disease",
+        )
+
+        by_id = {node.id: node for node in plan.nodes}
+        self.assertEqual(
+            by_id["q1"].spec.order_by,
+            ({"field": "route_name", "direction": "asc"},),
+        )
+        self.assertEqual(
+            by_id["q2"].spec.order_by,
+            ({"field": "route_name", "direction": "asc"},),
+        )
+        operands = by_id["compare"].spec.calculation.operands
+        self.assertEqual(
+            [item.source.get("row_index") for item in operands],
+            [0, 0],
+        )
+        self.assertIsNone(
+            _query_plan_calculation_issue(plan, self.registry)
+        )
+
+    def test_scalar_calculation_rejects_grouping_key_as_denominator(self):
+        from app.calculations.models import CalculationRequest
+
+        source = QuerySpec(
+            id="tasks",
+            kind="mysql",
+            subject="patrol",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("patrol_number",),
+            filters=(),
+            output_projection=("patrol_number", "count"),
+            order_by=(),
+            limit=50,
+            required_assertions=(),
+            question="列出设备执行过的任务",
+        )
+        calculation = CalculationRequest.from_dict(
+            {
+                "tool": "calculate_scalar",
+                "operation": "divide",
+                "operands": [
+                    {
+                        "name": "numerator",
+                        "value": 1,
+                    },
+                    {
+                        "name": "denominator",
+                        "source": {
+                            "node": "tasks",
+                            "field": "patrol_number",
+                        },
+                    },
+                ],
+            }
+        )
+        post = QuerySpec(
+            id="average",
+            kind="mysql",
+            subject="patrol",
+            view="data",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="计算平均每次任务检出的病害数量",
+            calculation=calculation,
+        )
+        plan = QueryPlan(
+            question="统计设备第三季度平均每次任务检出的病害数量",
+            nodes=(
+                PlanNode(id="tasks", spec=source),
+                PlanNode(
+                    id="average",
+                    spec=post,
+                    depends_on=("tasks",),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+
+        issue = _query_plan_calculation_issue(plan, self.registry)
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue.code, "calculation_type_mismatch")
+        self.assertIn("count", issue.suggested_repair)
+        self.assertIn("分组", issue.reason)
 
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
     @patch("app.query.analysis.chat_json")

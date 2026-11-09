@@ -2,12 +2,57 @@ import unittest
 from unittest.mock import patch
 
 from app.query.analysis import analyze_single_turn
-from app.query.contracts import QuerySpecAmbiguity
+from app.query.contracts import QuerySpecAmbiguity, QuerySpecError
 from app.query.fields import FieldReachSet, PhysicalSchemaView
 from app.services.llm import LLMError
 
 
 class QueryAuditTests(unittest.TestCase):
+    @patch("app.query.analysis.audit_query_plan")
+    @patch("app.query.analysis.chat_json")
+    def test_audit_receives_untrusted_top_n_evidence(
+        self,
+        chat_json,
+        audit,
+    ):
+        chat_json.return_value = {
+            "final_goal": "路线内前四类病害",
+            "intent_family": "count",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "disease",
+                    "view": "count",
+                    "metrics": ["count", "average_area"],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        audit.return_value = {"complete": True, "issues": []}
+
+        analyze_single_turn(
+            "长沙绕城查一下前四类病害，数量和平均面积都给我。",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+        )
+
+        evidence = audit.call_args.kwargs["assist_evidence"]
+        top_n = next(
+            item for item in evidence if item.rule_id == "top_n"
+        )
+        self.assertEqual(top_n.candidate_value, "4")
+        self.assertFalse(top_n.trusted)
+
     @patch("app.query.analysis._analyze_once")
     def test_invalid_llm_json_gets_one_feedback_retry(self, analyze_once):
         from tests.query.factories import count_plan
@@ -404,6 +449,84 @@ class QueryAuditTests(unittest.TestCase):
         self.assertIn("时间范围", str(raised.exception))
         self.assertIn("巡检批次", str(raised.exception))
         self.assertNotIn("\"code\"", str(raised.exception))
+
+    @patch("app.query.analysis.audit_query_plan")
+    @patch("app.query.analysis._analyze_once")
+    def test_ambiguous_scope_is_fed_back_before_requesting_user(
+        self,
+        analyze_once,
+        audit,
+    ):
+        """审计口径问题必须先交给规划器重排，不能首轮直接拒绝用户。"""
+
+        from tests.query.factories import count_plan
+
+        analyze_once.side_effect = [count_plan(), count_plan()]
+        audit.side_effect = [
+            {
+                "complete": False,
+                "issues": [
+                    {
+                        "code": "ambiguous_scope",
+                        "node_id": "q1",
+                        "reason": "计划没有在子问题中写明用户已经给出的路线和桩号范围",
+                        "repair_hint": "保留原范围并补全节点问题，不要新增时间条件",
+                    }
+                ],
+            },
+            {"complete": True, "issues": []},
+        ]
+
+        plan = analyze_single_turn(
+            "长芷高速K400到K410有没有网状裂缝？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+        )
+
+        self.assertEqual(len(plan.nodes), 1)
+        self.assertEqual(analyze_once.call_count, 2)
+        feedback = analyze_once.call_args_list[1].args[-1]
+        self.assertIn("ambiguous_scope", feedback)
+        self.assertIn("不要新增时间条件", feedback)
+
+    @patch("app.query.analysis.audit_query_plan")
+    @patch("app.query.analysis._analyze_once")
+    def test_non_ambiguous_audit_failure_is_not_reported_as_missing_scope(
+        self,
+        analyze_once,
+        audit,
+    ):
+        """审计说计划缺结构时，不能伪装成让用户补时间或批次的歧义提示。"""
+
+        from tests.query.factories import count_plan
+
+        analyze_once.side_effect = [count_plan(), count_plan(), count_plan()]
+        audit.return_value = {
+            "complete": False,
+            "issues": [
+                {
+                    "code": "missing_metric",
+                    "node_id": "",
+                    "reason": "计划缺少覆盖状态节点",
+                    "repair_hint": "补充覆盖状态查询",
+                    "set": {},
+                }
+            ],
+        }
+
+        with self.assertRaises(QuerySpecError) as raised:
+            analyze_single_turn(
+                "这个桩号范围是否超出数据覆盖？",
+                "mysql",
+                PhysicalSchemaView(columns=frozenset()),
+                FieldReachSet(),
+                audit=True,
+            )
+
+        self.assertIn("规划审计", str(raised.exception))
+        self.assertNotIn("请补充具体时间范围", str(raised.exception))
 
     @patch("app.query.analysis.audit_query_plan")
     @patch("app.query.analysis.chat_json")

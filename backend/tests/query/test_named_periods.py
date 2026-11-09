@@ -64,6 +64,54 @@ class NamedPeriodTests(unittest.TestCase):
             "named_period",
             {item.rule_id for item in detect_evidence("10月1日到10月31日泛油分布")},
         )
+        self.assertIn(
+            "named_period",
+            {item.rule_id for item in detect_evidence("最近三个月的病害趋势")},
+        )
+
+    def test_recent_months_use_a_complete_rolling_day_window(self):
+        now = datetime(2026, 11, 9, 4, 18, 43)
+
+        self.assertEqual(
+            resolve_named_period("最近三个月", now),
+            (datetime(2026, 8, 9), datetime(2026, 11, 10)),
+        )
+
+    def test_rolling_window_replaces_duplicate_equivalent_time_filters(self):
+        duplicate = (
+            bound(
+                "collection_time",
+                "between",
+                ("2026-08-09 04:18:43", "2026-11-09 04:18:43"),
+            ),
+            bound(
+                "collection_time",
+                "between",
+                ("2026-08-09 04:18:43", "2026-11-09 04:18:43"),
+            ),
+        )
+        plan = QueryPlan(
+            question="长沙－芷江高速公路最近三个月的病害数量变化趋势",
+            nodes=(
+                PlanNode(
+                    id="q1",
+                    spec=spec("q1", duplicate),
+                ),
+            ),
+        )
+
+        normalized = normalize_named_period_window(
+            plan,
+            ["最近三个月"],
+            datetime(2026, 11, 9, 4, 18, 43),
+        )
+
+        filters = normalized.nodes[0].spec.filters
+        self.assertEqual(len(filters), 1)
+        self.assertEqual(
+            filters[0].storage_value,
+            ["2026-08-09 00:00:00", "2026-11-10 00:00:00"],
+        )
 
     def test_clipped_quarter_window_is_widened(self):
         plan = QueryPlan(
@@ -91,6 +139,31 @@ class NamedPeriodTests(unittest.TestCase):
         filters = normalized.nodes[0].spec.filters
         self.assertEqual(filters[1].storage_value, "2027-01-01 00:00:00")
         self.assertEqual(filters[1].resolver, "named_period")
+
+    def test_month_inside_current_year_is_not_widened_to_the_year_end(self):
+        plan = QueryPlan(
+            question="今年10月全路网的坑槽分布",
+            nodes=(
+                PlanNode(
+                    id="q1",
+                    spec=spec(
+                        "q1",
+                        (
+                            bound("collection_time", ">=", "2026-10-01 00:00:00"),
+                            bound("collection_time", "<", "2026-11-01 00:00:00"),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        normalized = normalize_named_period_window(
+            plan,
+            ["今年"],
+            datetime(2026, 11, 8, 10, 0, 0),
+        )
+
+        self.assertEqual(normalized, plan)
 
     def test_previous_quarter_node_is_not_widened(self):
         plan = QueryPlan(

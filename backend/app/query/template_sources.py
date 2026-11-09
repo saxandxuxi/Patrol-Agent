@@ -9,7 +9,7 @@ from ..services.logging_service import log_event
 from ..services.resource_loader import load_capability_file
 from .contracts import QuerySpec, ValueBinding
 from .fields import PhysicalSchemaView
-from .preset_bindings import filter_semantic_name
+from .preset_bindings import filter_semantic_name, is_derived_parameter
 from .templates import TemplateContract
 
 
@@ -55,14 +55,23 @@ def _contracts_from_declaration(
         subjects = ("disease",)
     metrics = _as_tuple(match.get("metrics"))
     dimensions = _as_tuple(match.get("group_by"))
-    filters = set(_as_tuple(match.get("slots")))
-    filters.update(str(item) for item in (raw.get("params") or []))
+    filters = {
+        item
+        for item in _as_tuple(match.get("slots"))
+        if not is_derived_parameter(item)
+    }
+    filters.update(
+        str(item)
+        for item in (raw.get("params") or [])
+        if not is_derived_parameter(str(item))
+    )
     required = _as_tuple(match.get("requires"))
     if not required and adapter_id == "preset":
         parameter_specs = preset_lib.load().get("params") or {}
         required = tuple(
             str(item)
             for item in (raw.get("params") or [])
+            if not is_derived_parameter(str(item))
             if not bool((parameter_specs.get(str(item)) or {}).get("allow_all"))
         )
     required_filters = tuple(
@@ -71,6 +80,7 @@ def _contracts_from_declaration(
                 filter_semantic_name(item)
                 for item in required
                 if str(item).strip()
+                and not is_derived_parameter(item)
             }
         )
     )

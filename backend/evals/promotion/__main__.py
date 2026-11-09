@@ -62,6 +62,7 @@ def _load_manifest(path: Path) -> ExamManifest:
             question=str(item.get("question") or ""),
             focus=str(item.get("focus") or ""),
             source=str(item.get("source") or "fresh"),
+            coverage_slot=str(item.get("coverage_slot") or ""),
         )
         for item in data.get("cases") or []
         if isinstance(item, dict)
@@ -78,7 +79,11 @@ def _load_manifest(path: Path) -> ExamManifest:
     )
 
 
-def _generate(output: Path, seed: int) -> int:
+def _generate(
+    output: Path,
+    seed: int,
+    focus_slots: tuple[str, ...] = (),
+) -> int:
     document = _document_text()
     old_cases = sample_old_cases(seed=seed, count=5)
     old_pool = load_old_cases()
@@ -96,6 +101,7 @@ def _generate(output: Path, seed: int) -> int:
         exclude_ids=excluded_ids,
         count=15,
         exclude_questions=excluded_questions,
+        focus_slots=focus_slots or None,
     )
     manifest = ExamManifest(
         exam_id=f"promotion-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
@@ -147,13 +153,19 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--report", type=Path)
     parser.add_argument("--seed", type=int, default=20261107)
+    parser.add_argument(
+        "--focus-slot",
+        action="append",
+        default=[],
+        help="专项考试职责槽；generate 时至少提供 15 个不同值",
+    )
     args = parser.parse_args()
     if args.command == "generate":
         output = args.output or (
             Path(__file__).with_name("runs")
             / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.yaml"
         )
-        return _generate(output, args.seed)
+        return _generate(output, args.seed, tuple(args.focus_slot))
     if not args.cases:
         parser.error("run requires --cases")
     report = args.report or args.cases.with_suffix(".report.json")

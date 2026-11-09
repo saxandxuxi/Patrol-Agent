@@ -378,3 +378,60 @@ class PostCalcFailureTests(unittest.TestCase):
             [row["占比"] for row in payload["rows"]],
             ["25.000000", "75.000000"],
         )
+
+    def test_calculation_share_is_not_rejected_by_analysis_only_assertion(self):
+        payload = execute_post_calc(
+            {
+                "question": "计算前三类分别占该月病害总数的百分比",
+                "view": "distribution",
+                "depends_on": ["q1", "q2"],
+                "metrics": ["count"],
+                "dimensions": ["problem_type_name"],
+                "required_assertions": ["analysis_only"],
+                "calculation": {
+                    "tool": "calculate_columns",
+                    "operation": "percentage_share",
+                    "operands": [
+                        {
+                            "name": "numerator",
+                            "source": {"node": "q1", "field": "count"},
+                        },
+                        {
+                            "name": "total",
+                            "source": {"node": "q2", "field": "count"},
+                        },
+                    ],
+                    "output": {
+                        "name": "percentage",
+                        "label": "占比",
+                        "unit": "%",
+                    },
+                    "precision": 2,
+                },
+            },
+            {
+                "q1": {
+                    "view": "top_groups",
+                    "field_labels": {
+                        "problem_type_name": "病害类型",
+                        "count": "数量",
+                    },
+                    "rows": [
+                        {"病害类型": "条状修补", "数量": "147"},
+                        {"病害类型": "横向裂缝", "数量": "22"},
+                        {"病害类型": "纵向裂缝", "数量": "13"},
+                    ],
+                },
+                "q2": {
+                    "view": "count",
+                    "field_labels": {"count": "病害数量"},
+                    "rows": [{"病害数量": "245"}],
+                },
+            },
+        )
+
+        self.assertTrue(payload["accepted"])
+        self.assertEqual(
+            [row["占比"] for row in payload["rows"]],
+            ["60.00", "8.98", "5.31"],
+        )

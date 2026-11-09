@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import re
 import time
+import unicodedata
 from typing import Any
 
 from .db import db_manager
 from ..config import settings
 from . import text_match
 from .logging_service import log_error
+from .resource_loader import load_capability_file
 
 
 class QueryPlanError(RuntimeError):
@@ -79,9 +81,15 @@ def _resolve_route(route_text: str) -> dict[str, Any]:
             ]
         if similar:
             raise QueryPlanError(
-                f"没有找到路线“{route_text}”。名字相近的路线有：{'、'.join(similar)}，请确认是哪一条。"
+                f"当前路线台账没有找到与“{route_text}”唯一匹配的路线。"
+                f"可能对应的路线有：{'、'.join(similar)}。"
+                "确认前无法可靠统计，请选择其中一条或补充路线编码。"
             )
-        raise QueryPlanError(f"没有找到路线“{route_text}”，请确认路线编码或名称。")
+        raise QueryPlanError(
+            f"当前路线台账没有收录“{route_text}”，"
+            "因此无法可靠统计该路线的数据。"
+            "请补充台账中已登记的完整路线名称或编码。"
+        )
 
     exact = [
         row
@@ -251,18 +259,72 @@ def _clean_route_name(text: str) -> str:
     return re.sub(r"[^0-9A-Za-z\u4e00-\u9fa5]", "", str(text or ""))
 
 
-# 口语里给路线加的类型后缀。台账短名大多不带后缀（"包头-茂名" ↔ "包头-茂名高速"）。
-_ROUTE_NAME_SUFFIXES = ("高速公路", "高速", "公路")
+def _route_name_rules() -> dict[str, tuple[str, ...]]:
+    aliases = load_capability_file("aliases.yaml", {}) or {}
+    raw = (
+        aliases.get("route_name_rules", {})
+        if isinstance(aliases, dict)
+        else {}
+    )
+    if not isinstance(raw, dict):
+        raw = {}
+    return {
+        key: tuple(
+            str(item)
+            for item in raw.get(key) or ()
+            if str(item).strip()
+        )
+        for key in (
+            "connectors",
+            "leading_words",
+            "suffixes",
+            "determiners",
+        )
+    }
 
 
 def _route_alias_key(text: str) -> str:
-    """路线别名归一：NFKC + 去标点 + 去类型后缀（"长沙－芷江高速公路" → "长沙芷江"）。"""
+    """路线别名归一：NFKC + 去标点 + 去类型后缀 + 去连接词（"长沙到芷江" → "长沙芷江"）。"""
 
     key = text_match.normalize(text)
-    for suffix in _ROUTE_NAME_SUFFIXES:
+    rules = _route_name_rules()
+    for word in sorted(rules["determiners"], key=len, reverse=True):
+        key = key.replace(word, "")
+    for suffix in sorted(rules["suffixes"], key=len, reverse=True):
         if len(key) > len(suffix) and key.endswith(suffix):
-            return key[: -len(suffix)]
+            key = key[: -len(suffix)]
+            break
+    for word in sorted(rules["connectors"], key=len, reverse=True):
+        key = key.replace(word, "")
+    for word in sorted(rules["leading_words"], key=len, reverse=True):
+        if key.startswith(word):
+            key = key[len(word) :]
     return key
+
+
+def _endpoint_abbreviations(name: str) -> set[str]:
+    """由起止地名生成通用简称，例如“平江－洞口高速公路”→“平洞”。"""
+
+    normalized = unicodedata.normalize("NFKC", name)
+    parts = [
+        re.sub(r"[^0-9A-Za-z\u4e00-\u9fa5]", "", item.strip())
+        for item in re.split(r"[-—~至到]+", normalized)
+        if item.strip()
+    ]
+    if len(parts) != 2:
+        return set()
+    suffixes = _route_name_rules()["suffixes"]
+    endpoints = []
+    for part in parts:
+        for suffix in sorted(suffixes, key=len, reverse=True):
+            if len(part) > len(suffix) and part.endswith(suffix):
+                part = part[: -len(suffix)]
+                break
+        part = re.sub(r"^(?:[GSXYZ]\d+)", "", part, flags=re.IGNORECASE)
+        if len(part) < 2 or not re.match(r"[\u4e00-\u9fa5]", part):
+            return set()
+        endpoints.append(part)
+    return {"".join(item[0] for item in endpoints)}
 
 
 def _alias_route_rows(route_text: str) -> list[dict[str, Any]]:
@@ -271,12 +333,35 @@ def _alias_route_rows(route_text: str) -> list[dict[str, Any]]:
     key = _route_alias_key(route_text)
     if len(key) < 2:
         return []
+    aliases = load_capability_file("aliases.yaml", {}) or {}
+    route_aliases = (
+        aliases.get("route_name", {})
+        if isinstance(aliases, dict)
+        else {}
+    )
+
+    def names(row: dict[str, Any]) -> list[str]:
+        values = [
+            str(row.get(field) or "")
+            for field in ("short_name", "full_name", "code")
+        ]
+        if isinstance(route_aliases, dict):
+            for official in ("short_name", "full_name", "code"):
+                configured = route_aliases.get(str(row.get(official) or ""))
+                if isinstance(configured, str):
+                    values.append(configured)
+                elif isinstance(configured, (list, tuple)):
+                    values.extend(str(item) for item in configured)
+        for official in ("short_name", "full_name"):
+            values.extend(_endpoint_abbreviations(str(row.get(official) or "")))
+        return values
+
     return [
         row
         for row in _route_rows()
         if any(
-            _route_alias_key(row.get(field)) == key
-            for field in ("short_name", "full_name")
+            _route_alias_key(name) == key
+            for name in names(row)
         )
     ][:20]
 
@@ -329,7 +414,12 @@ def _suspicious_piece(message: str, piece: str, row: dict[str, Any]) -> bool:
         token
         # 非贪婪：只取"最短的像路线名的前缀"。贪婪版会把"西乡段病害密度比其他路"整段吃进去，
         # 于是"西乡段"被当成"另一条路的名字"而否掉（实测这句直接报"没找到路线"）。
-        for token in re.findall(r"[\u4e00-\u9fa5]{2,20}?(?:段|线|路)", message)
+        # 高速/公路也算路线名后缀：用户说"广深高速"时，那是一个独立的路线名，
+        # 不能拿它的尾巴"深高速"去认"武汉－深圳（G0422武深高速）"。
+        for token in re.findall(
+            r"[\u4e00-\u9fa5]{2,20}?(?:高速|公路|段|线|路)",
+            message,
+        )
         # "西乡段哪个路格"这种：token 从路线名一直连到疑问词，不是"另一条路的名字"。
         if not any(word in token for word in _QUESTION_WORDS)
     ]
@@ -340,7 +430,18 @@ def _suspicious_piece(message: str, piece: str, row: dict[str, Any]) -> bool:
     for token in name_like:
         if piece not in token:
             continue
-        after = token[token.index(piece) + len(piece) :]
+        start = token.index(piece)
+        before = token[:start]
+        after = token[start + len(piece) :]
+        # 片段只是"另一个更像独立路线名的词"的后半截时同样可疑：
+        # "广深高速"里的"深高速"不是"武深高速"的证据。
+        head = re.sub(r"(高速|公路|段|线|路)$", "", before)
+        if head:
+            combined = _clean_route_name(head + piece)
+            if not any(
+                combined in name or name in combined for name in route_names
+            ):
+                return True
         # 后面跟的是"这两条路/那条路/附近"这类泛指时不算可疑，
         # 只有像"龙华段"这种具体地名才算（只多一个"段/线/路"字的是正常叫法）。
         if after and after[0] in "这那的两种三个几和与等近内上中哪":

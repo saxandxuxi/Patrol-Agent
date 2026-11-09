@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -11,7 +12,7 @@ from starlette.responses import StreamingResponse
 
 from ..services import nl2sql
 from ..services import chat_settings
-from ..services.agent import handle_message
+from ..services.agent import _compiler_process, handle_message
 from ..services.memory import clear_session
 from ..config import settings
 from ..store import (
@@ -26,6 +27,7 @@ from ..store import (
     get_result,
     list_conversations,
     list_history,
+    save_result,
 )
 
 
@@ -279,6 +281,31 @@ def query_review(payload: QueryReviewRequest) -> dict:
     from ..query.review_repair import repair_review_evidence
 
     repaired = repair_review_evidence(evidence)
+    sections = list(repaired.answer.sections)
+    result_id = str(uuid.uuid4())
+    review_gate = (
+        dict(repaired.answer.review_gate)
+        if repaired.answer.review_gate
+        else None
+    )
+    if review_gate is not None:
+        review_gate["result_id"] = result_id
+    saved_payload = {
+        "reply": repaired.answer.text,
+        "source": "single_turn_compiler",
+        "sections": sections,
+        "rows": [],
+        "columns": [],
+        "references": [],
+        "result_id": result_id,
+        "engine": "single_turn_compiler",
+        "process": _compiler_process(sections, evidence.original_question),
+        "question": evidence.original_question,
+        "used_question": evidence.original_question,
+        "reviewable": review_gate is not None,
+        "review_gate": review_gate,
+    }
+    save_result(result_id, saved_payload)
     return {
         "accepted": not bool(repaired.stopped_reason),
         "decision": "reject",
@@ -286,8 +313,12 @@ def query_review(payload: QueryReviewRequest) -> dict:
         "attempts": repaired.attempts,
         "stopped_reason": repaired.stopped_reason,
         "reply": repaired.answer.text,
-        "sections": list(repaired.answer.sections),
-        "review_gate": repaired.answer.review_gate,
+        "sections": sections,
+        "result_id": result_id,
+        "engine": saved_payload["engine"],
+        "process": saved_payload["process"],
+        "reviewable": saved_payload["reviewable"],
+        "review_gate": review_gate,
     }
 
 

@@ -4,9 +4,11 @@ from unittest.mock import patch
 from app.calculations.evidence import compact_table_evidence
 from app.calculations.post_calc import execute_post_calc
 from app.query.analysis import _canonical_dimensions, analyze_single_turn
-from app.query.contracts import QuerySpec
+from app.query.capability_registry import CapabilityRegistry
+from app.query.contracts import ExecutionObservation, QuerySpec
 from app.query.fields import FieldReachSet, PhysicalSchemaView
-from app.query.service import assemble_answer
+from app.query.scope_facts import PARTIAL
+from app.query.service import _answer_text, assemble_answer
 
 
 class AnswerExperienceTests(unittest.TestCase):
@@ -272,6 +274,400 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertIn("数量 10处", answer)
         self.assertIn("总面积 25.5㎡", answer)
 
+    def test_empty_detail_answer_says_no_matching_records(self):
+        from app.query.contracts import ExecutionObservation
+        from app.query.service import _answer_text
+
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="list",
+            metrics=(),
+            dimensions=("pile_number",),
+            filters=(),
+            output_projection=("pile_number",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT pile_number FROM ai_problem WHERE 1 = 0",
+            columns=("桩号",),
+            row_count=0,
+            preview_rows=(),
+            result_rows=(),
+            rows_fetched=0,
+        )
+
+        answer = _answer_text(spec, observation)
+
+        self.assertIn("没有匹配记录", answer)
+        self.assertNotIn("明细返回 0 条", answer)
+
+    def test_empty_detail_section_points_to_the_filters_not_the_workbench(self):
+        from app.query.service import _data_answer_text
+
+        answer = _data_answer_text(
+            {
+                "title": "包茂高速10月网状裂缝明细",
+                "type": "query_data",
+                "view": "list",
+                "status": "accepted",
+                "rows_fetched": 0,
+                "rows": [],
+                "preview_rows": [],
+                "spec": {
+                    "subject": "disease",
+                    "view": "list",
+                },
+            }
+        )
+
+        self.assertIn("没有匹配记录", answer)
+        self.assertNotIn("结果工作台", answer)
+
+    def test_route_length_uses_registered_kilometre_unit(self):
+        from app.query.contracts import ExecutionObservation
+        from app.query.service import _answer_text
+
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("route_length_km",),
+            dimensions=(),
+            filters=(),
+            output_projection=("route_length_km",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT 540.299",
+            columns=("路线长度",),
+            preview_rows=({"路线长度": "540.299"},),
+            result_rows=({"路线长度": "540.299"},),
+            rows_fetched=1,
+        )
+
+        answer = _answer_text(spec, observation)
+
+        self.assertIn("540.299公里", answer)
+        self.assertNotIn("540.299米", answer)
+
+    def test_explicit_pile_between_discloses_closed_boundaries(self):
+        from app.query.contracts import ExecutionObservation, ValueBinding
+        from app.query.service import _answer_text
+
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(
+                ValueBinding(
+                    field="pile_number",
+                    op="between",
+                    storage_value=(200000, 210000),
+                    display_value="K200,K210",
+                    source="user_explicit",
+                    resolver="pile_range",
+                    raw_text="K200到K210",
+                ),
+            ),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT COUNT(*)",
+            columns=("病害数量",),
+            preview_rows=({"病害数量": "125"},),
+            result_rows=({"病害数量": "125"},),
+            rows_fetched=1,
+        )
+
+        answer = _answer_text(spec, observation)
+
+        self.assertIn("K200", answer)
+        self.assertIn("K210", answer)
+        self.assertIn("包含", answer)
+        self.assertNotIn("。；", answer)
+
+    def test_group_digest_uses_spec_subject_when_section_lacks_top_level_subject(self):
+        from app.query.service import _data_answer_text
+
+        answer = _data_answer_text(
+            {
+                "type": "data",
+                "view": "top_groups",
+                "status": "accepted",
+                "rows_fetched": 1,
+                "rows": [{"病害类型": "条状修补", "数量": "11129"}],
+                "preview_rows": [{"病害类型": "条状修补", "数量": "11129"}],
+                "spec": {
+                    "subject": "disease",
+                    "view": "top_groups",
+                },
+            }
+        )
+
+        self.assertIn("数量 11129处", answer)
+        self.assertNotIn("11129条", answer)
+
+    def test_group_digest_uses_units_registered_for_serialized_spec(self):
+        from app.query.service import _data_answer_text
+
+        answer = _data_answer_text(
+            {
+                "type": "data",
+                "view": "top_groups",
+                "status": "accepted",
+                "rows_fetched": 1,
+                "rows": [
+                    {
+                        "路线名称": "平江－洞口高速公路",
+                        "数量": "9136",
+                        "路线长度": "319.694",
+                    }
+                ],
+                "preview_rows": [
+                    {
+                        "路线名称": "平江－洞口高速公路",
+                        "数量": "9136",
+                        "路线长度": "319.694",
+                    }
+                ],
+                "spec": {
+                    "kind": "mysql",
+                    "subject": "disease",
+                    "view": "top_groups",
+                    "metrics": ["count", "route_length_km"],
+                    "output_projection": [
+                        "route_name",
+                        "count",
+                        "route_length_km",
+                    ],
+                },
+            }
+        )
+
+        self.assertIn("319.694公里", answer)
+        self.assertNotIn("319.694米", answer)
+
+    def test_top_groups_small_result_lists_every_requested_group(self):
+        from app.query.service import _data_answer_text
+
+        rows = [
+            {"病害类型": "条状修补", "数量": "206", "平均面积": "0.379757"},
+            {"病害类型": "绿化缺失", "数量": "43", "平均面积": "55.843721"},
+            {"病害类型": "抛洒物", "数量": "43", "平均面积": "0.04"},
+            {"病害类型": "路肩垃圾", "数量": "17", "平均面积": "0.054118"},
+        ]
+        answer = _data_answer_text(
+            {
+                "type": "data",
+                "view": "top_groups",
+                "status": "accepted",
+                "rows_fetched": 4,
+                "rows": rows,
+                "preview_rows": rows,
+                "spec": {
+                    "subject": "disease",
+                    "view": "top_groups",
+                },
+            }
+        )
+
+        for row in rows:
+            self.assertIn(row["病害类型"], answer)
+
+    def test_top_groups_explains_when_fewer_groups_than_requested(self):
+        from app.query.service import _data_answer_text
+
+        answer = _data_answer_text(
+            {
+                "type": "data",
+                "view": "top_groups",
+                "status": "accepted",
+                "rows_fetched": 1,
+                "rows": [{"桩号分段": "K1+000~K2+000", "数量": "1"}],
+                "preview_rows": [{"桩号分段": "K1+000~K2+000", "数量": "1"}],
+                "spec": {
+                    "subject": "disease",
+                    "view": "top_groups",
+                    "limit": 5,
+                },
+            }
+        )
+
+        self.assertIn("仅命中 1 个分组", answer)
+        self.assertIn("少于请求的 Top 5", answer)
+
+    def test_top_groups_explains_explicit_requested_group_without_rows(self):
+        from app.query.service import _data_answer_text
+
+        answer = _data_answer_text(
+            {
+                "type": "data",
+                "view": "top_groups",
+                "status": "accepted",
+                "rows_fetched": 1,
+                "rows": [
+                    {
+                        "上下行方向": "下行",
+                        "病害类型": "条状修补",
+                        "数量": "1396",
+                    }
+                ],
+                "preview_rows": [
+                    {
+                        "上下行方向": "下行",
+                        "病害类型": "条状修补",
+                        "数量": "1396",
+                    }
+                ],
+                "missing_requested_groups": ["上下行方向 上行"],
+                "spec": {
+                    "subject": "disease",
+                    "view": "top_groups",
+                    "limit": 1,
+                },
+            }
+        )
+
+        self.assertIn("现有覆盖范围内没有匹配记录", answer)
+        self.assertIn("上下行方向 上行", answer)
+
+    def test_scalar_answer_does_not_unit_label_category_or_expose_null(self):
+        from app.query.contracts import ExecutionObservation
+        from app.query.service import _answer_text
+
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count", "total_area"),
+            dimensions=(),
+            filters=(),
+            output_projection=("problem_type_name", "count", "total_area"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT 1",
+            columns=("病害类型", "处数", "总面积"),
+            preview_rows=(
+                {"病害类型": "坑洞", "处数": "0", "总面积": "NULL"},
+            ),
+            result_rows=(
+                {"病害类型": "坑洞", "处数": "0", "总面积": "NULL"},
+            ),
+            rows_fetched=1,
+        )
+
+        answer = _answer_text(spec, observation)
+
+        self.assertIn("病害类型 坑洞", answer)
+        self.assertNotIn("坑洞处", answer)
+        self.assertIn("处数 0处", answer)
+        self.assertIn("总面积 无有效数值", answer)
+        self.assertNotIn("NULL", answer)
+
+    def test_group_digest_trims_decimal_noise_and_applies_metric_units(self):
+        answer = assemble_answer(
+            [
+                {
+                    "node_id": "q1",
+                    "title": "q1. 按路线统计",
+                    "type": "query_data",
+                    "view": "top_groups",
+                    "status": "accepted",
+                    "answer": "",
+                    "subject": "disease",
+                    "rows": [
+                        {
+                            "路线名称": "平江－洞口高速公路",
+                            "数量": "577",
+                            "总面积": "1085.6200000000",
+                        }
+                    ],
+                    "preview_rows": [
+                        {
+                            "路线名称": "平江－洞口高速公路",
+                            "数量": "577",
+                            "总面积": "1085.6200000000",
+                        }
+                    ],
+                    "rows_fetched": 1,
+                    "total_count": 1,
+                    "truncated": False,
+                }
+            ],
+            response_mode="data",
+        )
+
+        self.assertIn("数量 577处", answer.text)
+        self.assertIn("总面积 1085.62㎡", answer.text)
+        self.assertNotIn("1085.6200000000", answer.text)
+
+    def test_patrol_mileage_dynamic_column_keeps_km_unit(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="patrol",
+            view="distribution",
+            metrics=("patrol_mileage",),
+            dimensions=("equipment_id",),
+            filters=(),
+            output_projection=("equipment_id", "patrol_mileage"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="每台巡检设备累计巡检里程",
+        )
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT equipment_id, SUM(patrol_mileage) / 1000",
+            columns=("巡检设备", "巡检里程合计"),
+            preview_rows=(
+                {"巡检设备": "1420324267072", "巡检里程合计": "798.55"},
+            ),
+            result_rows=(
+                {"巡检设备": "1420324267072", "巡检里程合计": "798.55"},
+            ),
+            rows_fetched=1,
+        )
+
+        answer = _answer_text(
+            spec,
+            observation,
+            registry=CapabilityRegistry.load(),
+        )
+
+        self.assertIn("巡检里程合计 798.55公里", answer)
+
     @patch("app.query.analysis.chat_json")
     def test_analysis_intent_adds_terminal_analysis_node(self, chat_json):
         chat_json.return_value = {
@@ -444,6 +840,69 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertEqual(answer.sections[0]["node_id"], "q1")
         self.assertEqual(answer.sections[1]["node_id"], "q2_calc")
 
+    def test_analysis_answer_keeps_upstream_partial_coverage_evidence(self):
+        conclusion = "长沙－芷江高速公路的病害数量高于另外两条路线。"
+        coverage = (
+            "长沙－芷江高速公路现有病害记录的采集时间在 "
+            "2026-10-27 09:56 至 2026-11-04 10:37"
+        )
+        answer = assemble_answer(
+            [
+                {
+                    "node_id": "q1",
+                    "type": "query_data",
+                    "view": "distribution",
+                    "status": "accepted",
+                    "coverage_verdict": PARTIAL,
+                    "coverage_detail": coverage,
+                    "rows_fetched": 6,
+                },
+                {
+                    "node_id": "q2",
+                    "type": "post_calc",
+                    "status": "accepted",
+                    "answer": conclusion,
+                    "rows_fetched": 0,
+                },
+            ],
+            response_mode="analysis",
+        )
+
+        self.assertIn(conclusion, answer.text)
+        self.assertIn("2026-10-27", answer.text)
+        self.assertIn("覆盖边界", answer.text)
+
+    def test_partial_coverage_downgrades_conclusion_scope(self):
+        answer = assemble_answer(
+            [
+                {
+                    "node_id": "q1",
+                    "type": "query_data",
+                    "view": "top_groups",
+                    "status": "accepted",
+                    "coverage_verdict": PARTIAL,
+                    "coverage_detail": (
+                        "全库病害台账现有病害记录的采集时间在 "
+                        "2026-06-18 19:58 至 2026-11-04 16:20"
+                    ),
+                    "answer": (
+                        "全路网中检出病害数量最多的前5条路线是"
+                        "长沙－芷江高速公路、平江－洞口高速公路等"
+                    ),
+                }
+            ],
+            response_mode="data",
+        )
+
+        self.assertTrue(
+            answer.text.startswith(
+                "覆盖范围不完整：以下结果只代表实际有记录的部分；"
+                "未覆盖区间的数据可能改变总量、趋势或排名，"
+            )
+        )
+        self.assertIn("这里只能给出已覆盖部分的观察结果", answer.text)
+        self.assertIn("2026-11-04", answer.text)
+
     def test_large_table_is_compressed_to_metric_boundaries(self):
         rows = [
             {"路线名称": "A", "数量": 100, "面积": 80, "路线长度": 20},
@@ -458,6 +917,30 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertEqual(evidence["metrics"]["数量"]["min"]["group"], "C")
         self.assertEqual(evidence["metrics"]["面积"]["max"]["group"], "A")
         self.assertEqual(evidence["metrics"]["路线长度"]["min"]["group"], "B")
+
+    def test_compact_evidence_keeps_the_leader_within_each_outer_group(self):
+        rows = [
+            {"上下行方向": "上行", "病害类型": "条状修补", "数量": 14562},
+            {"上下行方向": "上行", "病害类型": "纵向裂缝", "数量": 1023},
+            {"上下行方向": "下行", "病害类型": "横向裂缝", "数量": 833},
+            {"上下行方向": "下行", "病害类型": "条状修补", "数量": 10708},
+        ]
+
+        evidence = compact_table_evidence(rows)
+        summary = evidence["group_summaries"][0]
+        down = next(
+            item
+            for item in summary["groups"]
+            if item["group"]["上下行方向"] == "下行"
+        )
+
+        self.assertEqual(summary["parent_columns"], ["上下行方向"])
+        self.assertEqual(summary["detail_columns"], ["病害类型"])
+        self.assertEqual(down["metrics"]["数量"]["max"]["value"], 10708.0)
+        self.assertEqual(
+            down["metrics"]["数量"]["max"]["row"],
+            {"病害类型": "条状修补"},
+        )
 
     @patch(
         "app.calculations.domain.analysis.chat",

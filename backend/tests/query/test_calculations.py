@@ -1,6 +1,8 @@
 import unittest
 from decimal import Decimal
+from unittest.mock import patch
 
+from app.calculations.domain.analysis import analyze_evidence
 from app.calculations.columns import calculate_columns
 from app.calculations.domain.trend import render_series_calculation
 from app.calculations.evidence import compact_table_evidence
@@ -11,6 +13,7 @@ from app.calculations.models import (
     CalculationRequest,
 )
 from app.calculations.numbers import as_decimal, numeric_value
+from app.calculations.post_calc import execute_post_calc
 from app.calculations.registry import CalculationRegistry
 from app.calculations.scalar import calculate_scalar
 from app.calculations.series import calculate_series
@@ -117,6 +120,56 @@ class ScalarCalculationTests(unittest.TestCase):
             registry.snapshot.calculators["calculate_scalar"].operations,
         )
 
+
+class AnalysisPresentationRepairTests(unittest.TestCase):
+    @patch("app.calculations.domain.analysis.chat")
+    def test_analysis_only_rewrites_ungrounded_numbers_once(self, chat):
+        chat.side_effect = [
+            (
+                "上海-昆明最高发段为 K1402+000~K1403+000（20处），"
+                "包头-茂名最高发段为 K2179+000~K2180+000（154处），"
+                "包头高出134处。"
+            ),
+            (
+                "两条路线最高发段位置不同：上海-昆明在 "
+                "K1402+000~K1403+000（20处），包头-茂名在 "
+                "K2179+000~K2180+000（154处）；包头最高段处数更高。"
+            ),
+        ]
+        dependencies = [
+            {
+                "question": "上海-昆明高速病害最多的3个公里段",
+                "rows": [
+                    {"桩号分段": "K1402+000~K1403+000", "数量": "20"},
+                    {"桩号分段": "K1411+000~K1412+000", "数量": "14"},
+                    {"桩号分段": "K1416+000~K1417+000", "数量": "10"},
+                ],
+            },
+            {
+                "question": "包头-茂名高速病害最多的3个公里段",
+                "rows": [
+                    {"桩号分段": "K2179+000~K2180+000", "数量": "154"},
+                    {"桩号分段": "K2180+000~K2181+000", "数量": "138"},
+                    {"桩号分段": "K2178+000~K2179+000", "数量": "116"},
+                ],
+            },
+        ]
+
+        result = analyze_evidence(
+            "对比两条路线高发段的位置差异",
+            dependencies,
+            requirements={
+                "required_assertions": [
+                    "analysis_only",
+                    "multi_metric_comparison",
+                ],
+            },
+        )
+
+        self.assertTrue(result["accepted"])
+        self.assertEqual(chat.call_count, 2)
+        self.assertIn("位置不同", result["reply"])
+
     def test_precision_zero_is_preserved(self):
         request = scalar_request("add", left=1, right=2)
         request = CalculationRequest(
@@ -159,6 +212,321 @@ class ScalarCalculationTests(unittest.TestCase):
         )
 
         self.assertEqual(value, Decimal("7"))
+
+    def test_scalar_source_row_index_reads_the_ordered_row(self):
+        task = {
+            "id": "gap",
+            "question": "第一条路线比第二条多多少处",
+            "depends_on": ["routes"],
+        }
+        request = CalculationRequest(
+            tool="calculate_scalar",
+            operation="subtract",
+            operands=(
+                CalculationOperand(
+                    name="left",
+                    source={
+                        "node": "routes",
+                        "field": "count",
+                        "row_index": 0,
+                    },
+                ),
+                CalculationOperand(
+                    name="right",
+                    source={
+                        "node": "routes",
+                        "field": "count",
+                        "row_index": 1,
+                    },
+                ),
+            ),
+            output=CalculationOutput(name="count_gap", label="数量差值"),
+            precision=0,
+        )
+
+        payload = execute_calculation(
+            task,
+            request,
+            {
+                "routes": {
+                    "field_labels": {
+                        "route_name": "路线名称",
+                        "count": "数量",
+                    },
+                    "rows": [
+                        {"路线名称": "路线A", "数量": "7"},
+                        {"路线名称": "路线B", "数量": "3"},
+                    ],
+                }
+            },
+        )
+
+        self.assertIn("数量差值 = 4", str(payload["reply"]))
+
+    def test_scalar_selected_row_caption_omits_other_metrics(self):
+        task = {
+            "id": "gap",
+            "question": "两条路线的病害总处数相差多少",
+            "depends_on": ["routes"],
+        }
+        request = CalculationRequest(
+            tool="calculate_scalar",
+            operation="subtract",
+            operands=(
+                CalculationOperand(
+                    name="left",
+                    source={
+                        "node": "routes",
+                        "field": "count",
+                        "row_index": 0,
+                    },
+                ),
+                CalculationOperand(
+                    name="right",
+                    source={
+                        "node": "routes",
+                        "field": "count",
+                        "row_index": 1,
+                    },
+                ),
+            ),
+            output=CalculationOutput(name="count_gap", label="病害总处数差值"),
+            precision=0,
+        )
+
+        payload = execute_calculation(
+            task,
+            request,
+            {
+                "routes": {
+                    "field_labels": {
+                        "route_name": "路线名称",
+                        "count": "数量",
+                        "total_area": "总面积",
+                    },
+                    "rows": [
+                        {
+                            "路线名称": "路线A",
+                            "数量": "7",
+                            "总面积": "70",
+                        },
+                        {
+                            "路线名称": "路线B",
+                            "数量": "3",
+                            "总面积": "30",
+                        },
+                    ],
+                },
+            },
+        )
+
+        reply = str(payload["reply"])
+        self.assertIn("路线A", reply)
+        self.assertIn("路线B", reply)
+        self.assertNotIn("70", reply)
+        self.assertNotIn("30", reply)
+
+    def test_scalar_source_row_index_out_of_range_is_structured_failure(self):
+        task = {
+            "id": "gap",
+            "question": "选择不存在的行",
+            "depends_on": ["routes"],
+        }
+        request = CalculationRequest(
+            tool="calculate_scalar",
+            operation="subtract",
+            operands=(
+                CalculationOperand(
+                    name="left",
+                    source={
+                        "node": "routes",
+                        "field": "count",
+                        "row_index": 0,
+                    },
+                ),
+                CalculationOperand(
+                    name="right",
+                    source={
+                        "node": "routes",
+                        "field": "count",
+                        "row_index": 5,
+                    },
+                ),
+            ),
+            output=CalculationOutput(name="count_gap", label="数量差值"),
+        )
+
+        payload = execute_calculation(
+            task,
+            request,
+            {
+                "routes": {
+                    "field_labels": {"count": "数量"},
+                    "rows": [{"数量": "7"}],
+                }
+            },
+        )
+
+        self.assertFalse(payload["accepted"])
+        self.assertEqual(
+            payload["failure"]["failure_code"],
+            "calculation_operand_missing",
+        )
+
+    def test_scalar_zero_denominator_failure_keeps_operand_meaning(self):
+        task = {
+            "id": "avg_per_task",
+            "question": "计算平均每次任务检出病害数",
+            "depends_on": ["tasks"],
+        }
+        request = CalculationRequest(
+            tool="calculate_scalar",
+            operation="divide",
+            operands=(
+                CalculationOperand(name="numerator", value=0),
+                CalculationOperand(
+                    name="denominator",
+                    source={"node": "tasks", "field": "count"},
+                ),
+            ),
+            output=CalculationOutput(
+                name="avg_per_task",
+                label="平均每次任务检出病害数",
+            ),
+        )
+
+        payload = execute_calculation(
+            task,
+            request,
+            {
+                "tasks": {
+                    "question": "统计任务数量",
+                    "field_labels": {"count": "数量"},
+                    "rows": [{"数量": "0"}],
+                }
+            },
+        )
+
+        self.assertFalse(payload["accepted"])
+        calculation = payload["failure"]["evidence"]["calculation"]
+        denominator = next(
+            item
+            for item in calculation["operands"]
+            if item["name"] == "denominator"
+        )
+        self.assertEqual(denominator["label"], "统计任务数量")
+        self.assertEqual(calculation["zero_operand"], "denominator")
+
+    def test_dataset_comparison_uses_declared_entity_dependencies(self):
+        task = {
+            "id": "compare",
+            "question": "比较最近两次巡检之间的新增病害",
+            "depends_on": [
+                "patrol_before",
+                "patrol_after",
+                "disease_before",
+                "disease_after",
+            ],
+            "comparison_depends_on": [
+                "disease_before",
+                "disease_after",
+            ],
+            "required_assertions": ["dataset_comparison"],
+        }
+        payload = execute_post_calc(
+            task,
+            {
+                "patrol_before": {
+                    "rows": [
+                        {
+                            "patrol_number": "P1",
+                            "create_time": "2026-10-27 09:00:00",
+                        }
+                    ],
+                },
+                "patrol_after": {
+                    "rows": [
+                        {
+                            "patrol_number": "P2",
+                            "create_time": "2026-10-31 09:00:00",
+                        }
+                    ],
+                },
+                "disease_before": {
+                    "rows": [
+                        {"problem_number": "D1"},
+                        {"problem_number": "D2"},
+                    ],
+                },
+                "disease_after": {
+                    "rows": [
+                        {"problem_number": "D2"},
+                        {"problem_number": "D3"},
+                    ],
+                },
+            },
+        )
+
+        self.assertTrue(payload["accepted"])
+        self.assertIn("problem_number", str(payload["reply"]))
+        self.assertNotIn("create_time", str(payload["reply"]))
+        self.assertEqual(
+            {row["problem_number"] for row in payload["rows"]},
+            {"D1", "D3"},
+        )
+
+    def test_datetime_interval_uses_registered_tool(self):
+        payload = execute_post_calc(
+            {
+                "id": "interval",
+                "question": "最近两次巡检相隔几天",
+                "depends_on": ["earlier_patrol", "later_patrol"],
+                "required_assertions": ["preserve_user_scope"],
+                "calculation": {
+                    "tool": "calculate_datetime_interval",
+                    "operation": "elapsed_days",
+                    "operands": [
+                        {
+                            "name": "earlier",
+                            "source": {
+                                "node": "earlier_patrol",
+                                "field": "create_time",
+                                "row_index": 0,
+                            },
+                        },
+                        {
+                            "name": "later",
+                            "source": {
+                                "node": "later_patrol",
+                                "field": "create_time",
+                                "row_index": 0,
+                            },
+                        },
+                    ],
+                    "output": {
+                        "name": "interval_days",
+                        "label": "巡检间隔",
+                        "unit": "天",
+                    },
+                    "precision": 0,
+                },
+            },
+            {
+                "earlier_patrol": {
+                    "rows": [
+                        {"create_time": "2026-10-27 09:36:19"},
+                    ],
+                },
+                "later_patrol": {
+                    "rows": [
+                        {"create_time": "2026-10-31 12:29:11"},
+                    ],
+                },
+            },
+        )
+
+        self.assertTrue(payload["accepted"])
+        self.assertIn("巡检间隔 = 4 天", str(payload["reply"]))
 
 
 class ColumnCalculationTests(unittest.TestCase):
@@ -264,6 +632,26 @@ class ColumnCalculationTests(unittest.TestCase):
             [Decimal("25.000000"), Decimal("75.000000")],
         )
 
+    def test_column_percentage_share_accepts_constant_without_column_role(self):
+        """总数来自独立聚合节点时，分母是常量，不应再要求同名逐行列。"""
+
+        result = calculate_columns(
+            "percentage_share",
+            [
+                {"route_name": "A", "count": 10},
+                {"route_name": "B", "count": 30},
+            ],
+            {"numerator": "count"},
+            "share",
+            constants={"total": Decimal("40")},
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(
+            [row["share"] for row in result.rows],
+            [Decimal("25.000000"), Decimal("75.000000")],
+        )
+
 
 class ScalarDifferenceRenderingTests(unittest.TestCase):
     """差值要给出“谁更多、多多少”，不能只甩一条可能为负的公式。"""
@@ -315,8 +703,11 @@ class ScalarDifferenceRenderingTests(unittest.TestCase):
 
         reply = str(payload["reply"])
         self.assertIn("数量差值 = 13145", reply)
-        self.assertIn("省道", reply)
-        self.assertIn("更多", reply)
+        self.assertIn("'省道'", reply)
+        self.assertIn(
+            "少 13145",
+            reply,
+        )
         self.assertNotIn("-13145", reply)
 
     def test_difference_without_labels_still_reports_positive_gap(self):
@@ -328,6 +719,52 @@ class ScalarDifferenceRenderingTests(unittest.TestCase):
         reply = str(payload["reply"])
         self.assertIn("相差 6", reply)
         self.assertNotIn("-6", reply)
+
+    def test_difference_states_direction_from_left_to_right(self):
+        payload = self._execute(
+            {
+                "question": "统计2026年10月病害数量",
+                "field_labels": {"count": "数量"},
+                "rows": [{"数量": "390"}],
+            },
+            {
+                "question": "统计2026年11月病害数量",
+                "field_labels": {"count": "数量"},
+                "rows": [{"数量": "0"}],
+            },
+        )
+
+        reply = str(payload["reply"])
+        self.assertIn("390", reply)
+        self.assertIn(
+            "统计2026年10月病害数量比统计2026年11月病害数量多 390",
+            reply,
+        )
+        self.assertNotIn("后者比前者", reply)
+        self.assertNotIn("-390", reply)
+
+    def test_difference_names_both_periods_without_ambiguous_pronouns(self):
+        payload = self._execute(
+            {
+                "question": "统计本周的病害数量",
+                "field_labels": {"count": "数量"},
+                "rows": [{"数量": "14105"}],
+            },
+            {
+                "question": "统计上周的病害数量",
+                "field_labels": {"count": "数量"},
+                "rows": [{"数量": "18677"}],
+            },
+        )
+
+        reply = str(payload["reply"])
+        self.assertIn("统计本周的病害数量", reply)
+        self.assertIn("统计上周的病害数量", reply)
+        self.assertIn(
+            "统计本周的病害数量比统计上周的病害数量少 4572",
+            reply,
+        )
+        self.assertNotIn("后者比前者", reply)
 
     def test_multiply_keeps_plain_formula(self):
         task = {

@@ -1,9 +1,11 @@
+import json
 import unittest
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 from evals.promotion.case_factory import (
+    _default_generator,
     generate_exam_cases,
     load_old_cases,
     sample_old_cases,
@@ -51,6 +53,197 @@ def manifest(fresh_ok=15, old_ok=5, fingerprint="code-1"):
 
 
 class PromotionEvalTests(unittest.TestCase):
+    @patch("evals.promotion.case_factory.chat_json")
+    def test_default_generator_receives_actual_capability_gaps(self, chat_json):
+        chat_json.return_value = {"cases": []}
+
+        _default_generator(
+            "业务文档",
+            set(),
+            15,
+            set(),
+        )
+
+        prompt = "\n".join(
+            str(item.get("content") or "")
+            for item in chat_json.call_args.args[0]
+        )
+        self.assertIn("management_zone", prompt)
+        self.assertIn("lane_level_distribution", prompt)
+        self.assertIn("history_damage_interval", prompt)
+        self.assertIn("最多 1 道", prompt)
+
+    @patch("evals.promotion.case_factory.chat_json")
+    def test_default_generator_receives_structured_retry_evidence(
+        self,
+        chat_json,
+    ):
+        chat_json.return_value = {"cases": []}
+
+        _default_generator(
+            "业务文档",
+            set(),
+            1,
+            set(),
+            batch_focus=("具体记录明细",),
+            retry_evidence={
+                "具体记录明细": [
+                    {
+                        "question": "已经出现过的明细题",
+                        "reason": "duplicate_question",
+                    }
+                ]
+            },
+        )
+
+        prompt = "\n".join(
+            str(item.get("content") or "")
+            for item in chat_json.call_args.args[0]
+        )
+        self.assertIn("已经出现过的明细题", prompt)
+        self.assertIn("duplicate_question", prompt)
+
+    @patch("evals.promotion.case_factory._default_generator")
+    def test_fresh_generation_assigns_distinct_focus_slots(self, generator):
+        focus_batches = []
+
+        def generate(
+            document,
+            exclude_ids,
+            count,
+            exclude_questions,
+            batch_focus=(),
+            retry_evidence=None,
+        ):
+            focus_batches.append(tuple(batch_focus))
+            return [
+                ExamCase(
+                    id=f"focus{len(focus_batches)}_{index:02d}",
+                    category=slot,
+                    question=f"focus{len(focus_batches)} 问题 {index}",
+                    focus=f"{slot}：检查是否答所问",
+                    source="fresh",
+                    coverage_slot=slot,
+                )
+                for index, slot in enumerate(batch_focus, start=1)
+            ]
+
+        generator.side_effect = generate
+
+        generated = generate_exam_cases("业务文档", set(), 15)
+
+        self.assertEqual(len(generated), 15)
+        flattened = [item for batch in focus_batches for item in batch]
+        self.assertEqual(len(flattened), 15)
+        self.assertEqual(len(set(flattened)), 15)
+
+    @patch("evals.promotion.case_factory._default_generator")
+    def test_fresh_generation_honors_business_unit_focus_slots(self, generator):
+        slot_names = tuple(f"位置专项槽 {index}" for index in range(1, 16))
+        focus_batches = []
+
+        def generate(
+            document,
+            exclude_ids,
+            count,
+            exclude_questions,
+            batch_focus=(),
+            retry_evidence=None,
+        ):
+            focus_batches.append(tuple(batch_focus))
+            return [
+                ExamCase(
+                    id=f"location_{len(focus_batches)}_{index:02d}",
+                    category="位置与分布",
+                    question=f"位置问题 {len(focus_batches)}-{index}",
+                    focus=f"{slot}：检查位置数据链路",
+                    source="fresh",
+                    coverage_slot=slot,
+                )
+                for index, slot in enumerate(batch_focus, start=1)
+            ]
+
+        generator.side_effect = generate
+
+        generated = generate_exam_cases(
+            "业务文档",
+            set(),
+            15,
+            focus_slots=slot_names,
+        )
+
+        self.assertEqual(len(generated), 15)
+        self.assertEqual(
+            tuple(item for batch in focus_batches for item in batch),
+            slot_names,
+        )
+
+    def test_fresh_generation_requires_enough_business_unit_focus_slots(self):
+        with self.assertRaisesRegex(ValueError, "focus_slots"):
+            generate_exam_cases(
+                "业务文档",
+                set(),
+                15,
+                focus_slots=("只有一个专项槽",),
+            )
+
+    @patch("evals.promotion.case_factory.chat_json")
+    def test_default_generation_rejects_case_with_wrong_coverage_slot(
+        self,
+        chat_json,
+    ):
+        calls = []
+
+        def generate(messages, **_kwargs):
+            calls.append(messages)
+            prompt = "\n".join(
+                str(item.get("content") or "") for item in messages
+            )
+            marker = "本次小批必须覆盖的结构化职责槽：\n"
+            batch_focus = json.loads(
+                prompt.split(marker, 1)[1].split("\n\n", 1)[0]
+            )
+            cases = [
+                {
+                    "id": f"slot_{len(calls)}_{index}",
+                    "category": slot,
+                    "question": f"第 {len(calls)} 批第 {index} 题：{slot}",
+                    "focus": f"{slot}：检查对应能力",
+                    "coverage_slot": slot,
+                }
+                for index, slot in enumerate(batch_focus, start=1)
+            ]
+            if len(calls) == 1:
+                cases[-1]["coverage_slot"] = batch_focus[0]
+                cases[-1]["question"] = "错误的覆盖槽题目"
+            return {"cases": cases}
+
+        chat_json.side_effect = generate
+
+        generated = generate_exam_cases("业务文档", set(), 15)
+
+        self.assertEqual(len(generated), 15)
+        self.assertNotIn(
+            "错误的覆盖槽题目",
+            {item.question for item in generated},
+        )
+        self.assertEqual(
+            {item.coverage_slot for item in generated},
+            {
+                item.coverage_slot
+                for item in generated
+                if item.coverage_slot
+            },
+        )
+        self.assertEqual(
+            len({item.coverage_slot for item in generated}),
+            15,
+        )
+        self.assertIn(
+            "当前数据能力不足",
+            {item.coverage_slot for item in generated},
+        )
+
     def test_promotes_at_exact_thresholds(self):
         item = manifest(fresh_ok=12, old_ok=4)
         results = run_exam(
@@ -169,8 +362,11 @@ class PromotionEvalTests(unittest.TestCase):
         self.assertNotEqual(second, third)
 
     def test_fresh_generation_excludes_seen_questions(self):
+        calls = []
+
         def generator(document, exclude_ids, count):
-            data = cases("fresh", count + 2, "generated")
+            calls.append(count)
+            data = cases("fresh", count + 2, f"generated{len(calls)}")
             return [item for item in data if item.id not in exclude_ids][:count]
 
         generated = generate_exam_cases(
@@ -185,10 +381,13 @@ class PromotionEvalTests(unittest.TestCase):
         self.assertNotIn("generated_02", {item.id for item in generated})
 
     def test_fresh_generation_excludes_duplicate_question_text(self):
+        calls = []
+
         def generator(document, exclude_ids, count):
-            data = cases("fresh", count + 2, "generated")
+            calls.append(count)
+            data = cases("fresh", count + 2, f"generated{len(calls)}")
             data[1] = ExamCase(
-                id="renamed_duplicate",
+                id=f"renamed_duplicate_{len(calls)}",
                 category=data[1].category,
                 question=data[0].question,
                 focus=data[1].focus,
@@ -217,7 +416,7 @@ class PromotionEvalTests(unittest.TestCase):
             calls.append(set(exclude_ids))
             if len(calls) == 1:
                 return cases("fresh", 2, "retry1")
-            return cases("fresh", count, "retry2")
+            return cases("fresh", count, f"retry{len(calls)}")
 
         generated = generate_exam_cases(
             "业务文档",
@@ -226,8 +425,81 @@ class PromotionEvalTests(unittest.TestCase):
             generator=generator,
         )
 
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 4)
         self.assertEqual(len(generated), 15)
+
+    def test_fresh_generation_limits_the_final_batch_to_the_remaining_count(self):
+        calls = []
+
+        def generator(document, exclude_ids, count):
+            calls.append(count)
+            amount = 2 if len(calls) == 1 else min(count, 5)
+            return cases("fresh", amount, f"batch{len(calls)}")
+
+        generated = generate_exam_cases(
+            "业务文档",
+            set(),
+            15,
+            generator=generator,
+        )
+
+        self.assertEqual(calls, [5, 5, 5, 3])
+        self.assertEqual(len(generated), 15)
+
+    def test_fresh_generation_uses_small_reliable_batches(self):
+        calls = []
+
+        def generator(document, exclude_ids, count):
+            calls.append(count)
+            amount = min(count, 5)
+            return cases("fresh", amount, f"batch{len(calls)}")
+
+        generated = generate_exam_cases(
+            "业务文档",
+            set(),
+            15,
+            generator=generator,
+        )
+
+        self.assertEqual(calls, [5, 5, 5])
+        self.assertEqual(len(generated), 15)
+
+    @patch("evals.promotion.case_factory._default_generator")
+    def test_generation_failure_names_the_missing_coverage_slot(
+        self,
+        generator,
+    ):
+        attempts = 0
+
+        def generate(
+            document,
+            exclude_ids,
+            count,
+            exclude_questions,
+            batch_focus=(),
+            retry_evidence=None,
+        ):
+            nonlocal attempts
+            attempts += 1
+            return [
+                ExamCase(
+                    id=f"partial_{attempts}_{index}",
+                    category=slot,
+                    question=f"partial {attempts} 问题 {index}",
+                    source="fresh",
+                    coverage_slot=slot,
+                )
+                for index, slot in enumerate(
+                    item
+                    for item in batch_focus
+                    if item != "具体记录明细"
+                )
+            ]
+
+        generator.side_effect = generate
+
+        with self.assertRaisesRegex(ValueError, "具体记录明细"):
+            generate_exam_cases("业务文档", set(), 15)
 
     def test_product_runner_auto_confirms_recommended_capability(self):
         case = ExamCase(

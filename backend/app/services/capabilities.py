@@ -1689,6 +1689,20 @@ def _stash_payload(payload: dict[str, Any]) -> str:
     return token
 
 
+def has_pending(token: str) -> bool:
+    """Return whether a confirmation token belongs to this capability store."""
+
+    key = str(token or "")
+    item = _STASH.get(key)
+    if not item:
+        return False
+    ts, _payload = item
+    if time.time() - ts > _TOKEN_TTL_SECONDS:
+        _STASH.pop(key, None)
+        return False
+    return True
+
+
 def take(token: str) -> dict[str, Any] | None:
     item = _STASH.pop(str(token or ""), None)
     if not item:

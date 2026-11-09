@@ -1,6 +1,7 @@
 calculators:
   calculate_scalar:
     input_shapes: [scalar_list]
+    source_selectors: [row_index]
     operations:
       [add, subtract, multiply, divide, ratio, percentage_share, percentage_change]
     precision: 6
@@ -14,5 +15,10 @@ calculators:
   calculate_series:
     input_shapes: [series]
     operations: [subtract, percentage_change]
+    precision: 6
+    zero_denominator: error
+  calculate_datetime_interval:
+    input_shapes: [temporal_scalar_list]
+    operations: [elapsed_days]
     precision: 6
     zero_denominator: error

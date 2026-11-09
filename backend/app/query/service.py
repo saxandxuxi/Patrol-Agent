@@ -7,7 +7,6 @@ from typing import Any
 
 from ..services import (
     field_grounding,
-    nl2sql,
     preset_lib,
     schema_catalog,
     sql_engine,
@@ -16,7 +15,6 @@ from ..services import (
 )
 from ..services.llm import LLMError
 from ..services.logging_service import console_json
-from ..services.resource_loader import load_capability_file
 from ..services.route_resolver import QueryPlanError
 from .analysis import analyze_single_turn
 from .capability_registry import CapabilityRegistry, resolve_subject
@@ -38,12 +36,50 @@ from .contracts import (
     immutable_scope_hash,
     scope_hash,
 )
+from .empty_results import (
+    aggregate_result_is_empty as _aggregate_is_empty,
+    is_outside_scope_empty_answerable,
+    outside_scope_empty_answer,
+    zero_count_observation,
+)
 from .executor import execute_compiled
 from .fields import FieldReachHit, FieldReachSet, PhysicalSchemaView
+from .patrol_batches import (
+    PatrolBatchResolutionError,
+    describe_batch_lookup_evidence,
+    resolve_entity_comparison_batches,
+    validate_explicit_patrol_batches,
+)
+from .patrol_windows import complete_recent_window_groups
 from .preset_bindings import apply_overrides, values_from_spec
+from .presentation.rows import (
+    empty_metric_note as _empty_metric_note,
+    format_display_value as _format_display_value,
+    format_row_text as _format_row_text,
+    missing_value_labels as _missing_value_labels,
+)
+from .presentation.boundaries import (
+    explicit_range_note,
+    partial_coverage_scope_notice,
+)
+from .presentation.enumerations import (
+    complete_explicit_enum_groups,
+    missing_explicit_top_group_labels,
+)
+from .presentation.units import (
+    metric_unit as _metric_unit,
+    registered_units as _resolve_registered_units,
+)
 from .review import ReviewSuspicion, issue_review_gate, serialize_query_spec
 from .result_projection import result_field_map
-from .scope_facts import INSIDE, OUTSIDE, ScopeFacts, empty_scope_facts
+from .scope_facts import (
+    INSIDE,
+    OUTSIDE,
+    PARTIAL,
+    ScopeFacts,
+    empty_scope_facts,
+    coverage_facts,
+)
 from .template_sources import (
     AutoTemplateProvider,
     BuiltinTemplateProvider,
@@ -74,6 +110,22 @@ class _PendingTurn:
     candidates: CandidateSet
     schema: PhysicalSchemaView
     registry: CapabilityRegistry | None = None
+    # 确认后仍要能跑"计算节点失败 → 重排一次"的修复，所以确认卡上必须
+    # 带着原始问题、库类型、字段触达和模板来源。以前这几个字段没存，
+    # 用户点确认卡走的路径完全没有修复机会（计划只在执行期暴雷）。
+    question: str = ""
+    kind: str = "mysql"
+    reach: FieldReachSet | None = None
+    providers: tuple[Any, ...] = ()
+
+
+class _EmptyDependencyInput(UnsupportedQuerySpec):
+    def __init__(self, node_id: str, field: str):
+        self.node_id = str(node_id)
+        self.field = str(field)
+        super().__init__(
+            f"输入依赖 {self.node_id}.{self.field} 没有可传递的值"
+        )
 
 
 _PENDING: dict[str, _PendingTurn] = {}
@@ -135,24 +187,7 @@ def _default_template_executor(
             )
         return sql
     if candidate.contract.adapter_id == "builtin":
-        registry = load_capability_file("templates.yaml", {}) or {}
-        declaration = next(
-            (
-                item
-                for item in registry.get("templates") or []
-                if isinstance(item, dict)
-                and str(item.get("id") or "") == candidate.contract.native_id
-            ),
-            None,
-        )
-        if not declaration:
-            return ""
-        builder = str(declaration.get("builder") or "")
-        if not builder:
-            return ""
-        plan = nl2sql.build_query_plan(spec.question, spec.kind)
-        _apply_spec_to_plan(plan, spec)
-        return nl2sql.build_template_sql_for(plan, builder) or ""
+        return _compile_queryspec_to_physical(spec)
     if candidate.contract.adapter_id == "auto":
         template = next(
             (
@@ -185,68 +220,25 @@ def _default_template_executor(
 
 
 def _default_wren_executor(spec: Any) -> str:
-    question = str(getattr(spec, "question", "") or "").strip()
-    if not question:
-        raise RuntimeError("QuerySpec is missing its frozen sub-question")
+    return _compile_queryspec_to_physical(spec)
+
+
+def _compile_queryspec_to_physical(spec: Any) -> str:
     kind = str(getattr(spec, "kind", "mysql") or "mysql")
     mdl_sql = compile_spec_mdl(spec)
-    if mdl_sql:
-        physical, error = wren_engine.compile_mdl_sql_verbose(kind, mdl_sql)
-        if physical:
-            return physical
-        raise UnsupportedQuerySpec(
-            f"QuerySpec 受控编译失败：{error or 'empty physical SQL'}"
-        )
-    plan = nl2sql.build_query_plan(question, kind)
-    mdl_sql = (
-        nl2sql.simple_route_group_mdl(plan)
-        or nl2sql.simple_patrol_route_list_mdl(plan)
-        or ""
-    )
-    selected_models = nl2sql.select_tables(
-        question,
-        kind,
-        subject=str(plan.get("subject") or ""),
-        route_via_patrol=bool(plan.get("route_scope_from_patrol")),
-    )
-    if selected_models:
-        nl2sql.prune_conditions_for_selection(plan, selected_models)
-    _apply_spec_to_plan(plan, spec)
-    mdl_ctx = wren_engine.mdl_context(kind, focus=selected_models)
     if not mdl_sql:
-        context = nl2sql.retrieve_query_context(question, kind, plan)
-        wren_slots = dict(plan.get("slots") or {})
-        route_match = wren_slots.get("route_match") or {}
-        if route_match.get("short_name"):
-            wren_slots["route"] = str(route_match["short_name"])
-    else:
-        context = {}
-        wren_slots = dict(plan.get("slots") or {})
-    feedback = ""
-    last_error = ""
-    required_lines = [
-        *nl2sql.mdl_condition_lines(plan),
-        *_spec_compiler_lines(spec),
-    ]
-    for _attempt in range(2):
-        if not mdl_sql or last_error:
-            mdl_sql = sql_engine.generate_mdl_sql(
-                question,
-                mdl_ctx,
-                required_lines,
-                wren_slots,
-                feedback=feedback,
-                examples=str(context.get("examples") or ""),
-                errors=nl2sql.error_memory_hint(question),
-                samples=nl2sql.value_samples(kind),
-            )
-        physical, error = wren_engine.compile_mdl_sql_verbose(kind, mdl_sql)
-        if physical:
-            return physical
-        last_error = error or "empty physical SQL"
-        feedback = f"上一版 MDL-SQL 编译失败：{last_error}"
-        mdl_sql = ""
-    raise RuntimeError(f"Wren compile failed: {last_error}")
+        raise UnsupportedQuerySpec(
+            "QuerySpec 受控编译器不支持当前表、字段或查询视图"
+        )
+    physical, error = wren_engine.compile_mdl_sql_verbose(
+        kind,
+        mdl_sql,
+    )
+    if physical:
+        return physical
+    raise UnsupportedQuerySpec(
+        f"QuerySpec 受控编译失败：{error or 'empty physical SQL'}"
+    )
 
 
 def _default_execute_sql(
@@ -255,85 +247,6 @@ def _default_execute_sql(
     question: str = "",
 ) -> dict[str, Any]:
     return sql_engine.execute_sql(kind, sql, question=question)
-
-
-def _apply_spec_to_plan(plan: dict[str, Any], spec: Any) -> None:
-    plan["subject"] = spec.subject
-    plan["shape"] = spec.view
-    slots = plan.setdefault("slots", {})
-    required = set(plan.get("required_conditions") or ())
-    semantic_conditions: list[dict[str, Any]] = []
-    for binding in spec.filters:
-        field = str(binding.field)
-        if field == "problem_type_name":
-            values = (
-                binding.storage_value
-                if isinstance(binding.storage_value, (list, tuple))
-                else [binding.storage_value]
-            )
-            slots["damage_matches"] = [
-                {"problem_type": str(value)}
-                for value in values
-            ]
-            required.add("damage_type")
-            continue
-        if field == "route_name":
-            slots["route_match"] = {
-                "id": str(binding.storage_value),
-                "short_name": binding.display_value,
-            }
-            required.add("route")
-            continue
-        if field in {"collection_time", "create_time"}:
-            required.add("time_range")
-            if binding.op == "between" and isinstance(binding.storage_value, (list, tuple)):
-                slots["time_start"] = str(binding.storage_value[0])
-                slots["time_end"] = str(binding.storage_value[1])
-            elif binding.op in {">=", ">", "="}:
-                slots["time_start"] = str(binding.storage_value)
-            elif binding.op in {"<", "<="}:
-                slots["time_end"] = str(binding.storage_value)
-            continue
-        if field in {"device_code", "equipment_id"}:
-            required.add("device_code")
-            slots["device_id"] = str(binding.storage_value)
-            continue
-        condition_field = (
-            "effective_disease_length"
-            if field == "disease_length"
-            else field
-        )
-        semantic_conditions.append(
-            {
-                "field": condition_field,
-                "op": binding.op,
-                "value": binding.storage_value,
-            }
-        )
-    slots["semantic_conditions"] = semantic_conditions
-    plan["required_conditions"] = sorted(required)
-    semantic = plan.setdefault("semantic", {})
-    semantic["shape"] = spec.view
-    if spec.metrics:
-        semantic["metrics"] = list(spec.metrics)
-    if len(spec.dimensions) == 1:
-        semantic["group_by"] = spec.dimensions[0]
-    if spec.output_projection:
-        semantic["output_fields"] = list(spec.output_projection)
-
-
-def _spec_compiler_lines(spec: Any) -> list[str]:
-    lines: list[str] = []
-    if spec.dimensions:
-        lines.append(
-            "必须输出并按以下维度分组（GROUP BY），每个组合各占一行："
-            + "、".join(spec.dimensions)
-        )
-    if spec.metrics:
-        lines.append("必须输出以下指标：" + "、".join(spec.metrics))
-    if spec.output_projection:
-        lines.append("必须输出以下字段：" + "、".join(spec.output_projection))
-    return lines
 
 
 def _default_post_calc_executor(
@@ -350,6 +263,13 @@ def _data_answer_text(section: dict[str, Any]) -> str:
     section_type = str(section.get("type") or "")
     title = str(section.get("title") or "").strip()
     prefix = f"“{title}”" if title else "本次查询"
+    section_subject = _section_subject(section)
+    display_units = section.get("display_units")
+    if not isinstance(display_units, dict):
+        display_units = _resolve_registered_units(section.get("spec"))
+    missing_labels = section.get("missing_value_labels")
+    if not isinstance(missing_labels, dict):
+        missing_labels = {}
     if str(section.get("status") or "accepted") != "accepted":
         return str(section.get("answer") or "").strip()
     rows_fetched = int(
@@ -367,10 +287,17 @@ def _data_answer_text(section: dict[str, Any]) -> str:
         ]
         inherited = _inherited_note(section)
         suffix = f"；{inherited}" if inherited else ""
+        if rows_fetched == 0:
+            return f"{prefix}没有匹配记录（0 条）{suffix}"
         # 只有一两条记录时，用户要的是答案本身，不是“请去工作台看”。
         if 0 < len(preview) <= 3:
             detail = "；".join(
-                "，".join(f"{key} {value}" for key, value in row.items())
+                _format_row_text(
+                    row,
+                    subject=section_subject,
+                    units=display_units,
+                    missing_labels=missing_labels,
+                )
                 for row in preview
             )
             if total_count is not None and int(total_count) > len(preview):
@@ -400,7 +327,18 @@ def _data_answer_text(section: dict[str, Any]) -> str:
             if isinstance(row, dict)
         ]
         shown = len(result_rows) or rows_fetched
-        digest = _grouped_digest(result_rows)
+        digest_limit = (
+            len(result_rows)
+            if view == "top_groups" and len(result_rows) <= 10
+            else 3
+        )
+        digest = _grouped_digest(
+            result_rows,
+            limit=digest_limit,
+            subject=section_subject,
+            units=display_units,
+            missing_labels=missing_labels,
+        )
         text = f"{prefix}查询完成，共 {shown} 行"
         if digest:
             # 结果很少时要说明“这就是全部”，否则用户分不清是完整清单
@@ -409,15 +347,45 @@ def _data_answer_text(section: dict[str, Any]) -> str:
                 text = f"{text}（已全部列出）：{digest}"
             else:
                 text = f"{text}；按排序前列：{digest}"
+        spec = section.get("spec")
+        requested_top = (
+            spec.get("limit")
+            if isinstance(spec, dict)
+            else getattr(spec, "limit", None)
+        )
+        insufficient_top_note = (
+            f"仅命中 {shown} 个分组，少于请求的 Top {requested_top}"
+            if (
+                view == "top_groups"
+                and isinstance(requested_top, int)
+                and 0 < shown < requested_top
+            )
+            else ""
+        )
         notes = [
             _inherited_note(section),
             str(section.get("coverage_note") or ""),
+            (
+                "以下请求分组在现有覆盖范围内没有匹配记录："
+                + "、".join(
+                    str(item)
+                    for item in (
+                        section.get("missing_requested_groups") or ()
+                    )
+                )
+                if section.get("missing_requested_groups")
+                else ""
+            ),
             (
                 "范围内没有" + "、".join(filled) + "的记录，已按 0 计入"
                 if filled
                 else ""
             ),
-            _empty_metric_note(result_rows),
+            _empty_metric_note(
+                result_rows,
+                missing_labels=missing_labels,
+            ),
+            insufficient_top_note,
             "完整表格请在结果工作台查看",
         ]
         suffix = "；".join(item for item in notes if item)
@@ -425,9 +393,25 @@ def _data_answer_text(section: dict[str, Any]) -> str:
     return str(section.get("answer") or "").strip()
 
 
+def _section_subject(section: dict[str, Any]) -> str:
+    subject = str(section.get("subject") or "").strip()
+    if subject:
+        return subject
+    spec = section.get("spec")
+    return (
+        str(spec.get("subject") or "").strip()
+        if isinstance(spec, dict)
+        else ""
+    )
+
+
 def _grouped_digest(
     rows: list[dict[str, Any]],
     limit: int = 3,
+    *,
+    subject: str = "",
+    units: dict[str, str] | None = None,
+    missing_labels: dict[str, str] | None = None,
 ) -> str:
     """分组结果先给一行确定性的摘要，别只留一句“请去工作台看”。
 
@@ -435,7 +419,12 @@ def _grouped_digest(
     这里只做展示，不重新计算，也不改变任何数值。
     """
     lines = [
-        "，".join(f"{key} {value}" for key, value in row.items())
+        _format_row_text(
+            row,
+            subject=subject,
+            units=units,
+            missing_labels=missing_labels,
+        )
         for row in rows[:limit]
     ]
     return "；".join(item for item in lines if item)
@@ -451,45 +440,6 @@ def _inherited_note(section: dict[str, Any]) -> str:
     if not inherited:
         return ""
     return f"本次结果沿用了上一节点筛选出的条件：{inherited}"
-
-
-def _aggregate_is_empty(spec: Any, observation: ExecutionObservation) -> bool:
-    """聚合视图把"没有记录"算成了 0/NULL，也要走空范围判定。
-
-    `COUNT(*)` 在没有匹配行时返回 1 行 0，`SUM` 返回 1 行 NULL；如果不认这种
-    "空聚合"，超范围查询就会被当成"共 0处"轻描淡写地放过。
-    """
-
-    view = str(spec.view)
-    if view not in {"count", "sum", "avg"}:
-        return False
-    rows = observation.result_rows or observation.preview_rows
-    if len(rows) != 1:
-        return False
-    values = list(rows[0].values())
-    if not values:
-        return False
-    # COUNT 的空结果是 0；SUM/AVG 的空结果是 NULL（0 可能是真实数据，不能当空）。
-    zero_is_empty = view == "count"
-    for value in values:
-        if value is None or value == "":
-            continue
-        if not zero_is_empty:
-            return False
-        try:
-            if float(value) != 0.0:
-                return False
-        except (TypeError, ValueError):
-            return False
-    return True
-
-
-def _empty_metric_note(rows: list[dict[str, Any]]) -> str:
-    """分组里出现空值要如实说明，不能含混成 0。"""
-    for row in rows:
-        if any(value in (None, "") for value in row.values()):
-            return "有个别分组没有有效数值（不是 0），结果里保留为空"
-    return ""
 
 
 def _inherited_filter_columns(
@@ -522,7 +472,11 @@ def assemble_answer(
     response_mode: str = "data",
 ) -> AnswerPackage:
     text_sections = sections
-    if response_mode == "analysis":
+    has_failed_sections = any(
+        str(section.get("status") or "accepted") != "accepted"
+        for section in sections
+    )
+    if response_mode == "analysis" and not has_failed_sections:
         conclusions = [
             section
             for section in sections
@@ -545,6 +499,26 @@ def assemble_answer(
     if not texts:
         return AnswerPackage("查询完成，但没有可展示的数据。")
     text = "；".join(texts)
+    coverage_warning = partial_coverage_scope_notice(
+        section.get("coverage_verdict")
+        for section in sections
+    )
+    if coverage_warning:
+        text = f"{coverage_warning}；{text}"
+    coverage_details = list(
+        dict.fromkeys(
+            str(section.get("coverage_detail") or "").strip()
+            for section in sections
+            if str(section.get("coverage_verdict") or "")
+            in {PARTIAL, OUTSIDE}
+            and str(section.get("coverage_detail") or "").strip()
+        )
+    )
+    uncovered_details = [
+        detail for detail in coverage_details if detail not in text
+    ]
+    if uncovered_details:
+        text = f"{text}；覆盖边界：{'；'.join(uncovered_details)}"
     if text[-1:] not in "。！？.!?；;":
         text += "。"
     return AnswerPackage(text, tuple(sections))
@@ -649,10 +623,20 @@ def _materialize_inputs(
             )
         source_spec = accepted_specs.get(binding.from_node)
         from_field = str(binding.from_field).rsplit(".", 1)[-1]
+        source_rows = [
+            row
+            for row in (observation.result_rows or observation.preview_rows)
+            if isinstance(row, dict)
+        ]
+        if binding.row_index is not None:
+            if binding.row_index < 0 or binding.row_index >= len(source_rows):
+                raise UnsupportedQuerySpec(
+                    f"输入依赖 {binding.from_node} 只有 {len(source_rows)} 行，"
+                    f"无法选择第 {binding.row_index + 1} 行"
+                )
+            source_rows = [source_rows[binding.row_index]]
         values: list[Any] = []
-        for row in observation.result_rows or observation.preview_rows:
-            if not isinstance(row, dict):
-                continue
+        for row in source_rows:
             value = row.get(from_field)
             if value is None:
                 value = next(
@@ -681,8 +665,15 @@ def _materialize_inputs(
                 continue
             values.append(value)
         if not values:
+            raise _EmptyDependencyInput(
+                binding.from_node,
+                binding.from_field,
+            )
+        if len(values) > 1 and binding.op not in {"in", "between"}:
             raise UnsupportedQuerySpec(
-                f"输入依赖 {binding.from_node}.{binding.from_field} 没有可传递的值"
+                f"输入依赖 {binding.from_node}.{binding.from_field} "
+                f"返回了 {len(values)} 个值，但目标条件是单值 {binding.op}；"
+                "请声明 row_index 选择确定的一行，或把 op 改成 in/between。"
             )
         filters = [
             item
@@ -721,98 +712,41 @@ def _materialize_inputs(
     return replace(spec, filters=tuple(filters), input_bindings=())
 
 
-def _numeric_value(observation: Any) -> int | None:
+_RECORD_COUNT_METRICS = frozenset(
+    {"count", "count_task", "task_count", "record_count"}
+)
+
+
+def _record_count_value(spec: Any, observation: Any) -> int | None:
+    count_metrics = [
+        str(metric)
+        for metric in spec.metrics
+        if str(metric).rsplit(".", 1)[-1] in _RECORD_COUNT_METRICS
+    ]
+    if len(count_metrics) != 1:
+        return None
+    count_field = count_metrics[0]
+    count_column = result_field_map(
+        spec,
+        observation.columns,
+    ).get(count_field)
     rows = observation.result_rows or observation.preview_rows
     for row in rows:
         if not isinstance(row, dict):
             continue
-        for value in row.values():
+        values = (
+            (row.get(count_column),)
+            if count_column
+            else row.values()
+            if len(spec.metrics) == 1
+            else ()
+        )
+        for value in values:
             try:
                 return int(float(value))
             except (TypeError, ValueError):
                 continue
     return None
-
-
-# 这些枚举取值的意思是“没区分/全部”，不是真实的一类，补 0 行只会添噪音。
-_UNSPECIFIED_ENUM_LABELS = frozenset(
-    {"全部", "全部/未区分", "全部/未知", "未区分", "未知", "未填写", "未识别"}
-)
-
-
-def _completed_enum_rows(
-    spec: Any,
-    observation: Any,
-    registry: CapabilityRegistry | None,
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """按枚举维度分组、且只统计数量时，把枚举里没出现的取值补成 0 行。
-
-    结果行回答“这次命中了哪些取值”，枚举回答“这个字段有哪些合法取值”，
-    两者是不同的视图。用户问“上行、下行各多少处”时，缺的一侧必须是
-    显式的 0，而不是让人自己去推断是不是漏查了。只补数量，不补平均值。
-    """
-    rows = list(observation.result_rows or observation.preview_rows)
-    metrics = tuple(str(item).lower() for item in spec.metrics)
-    if (
-        registry is None
-        or not rows
-        or not isinstance(rows[0], dict)
-        or spec.view not in {"distribution", "top_groups"}
-        or len(spec.dimensions) != 1
-        or not metrics
-        # 只有可加指标缺值才等于 0；平均值、最大最小值、占比缺值不是 0。
-        or any(
-            not (item == "count" or item.startswith(("total_", "sum_")))
-            for item in metrics
-        )
-    ):
-        return rows, []
-    dimension_id = str(spec.dimensions[0]).rsplit(".", 1)[-1]
-    field = registry.snapshot.fields.get(spec.subject, {}).get(dimension_id)
-    if field is None or not field.physical_table or not field.physical_column:
-        return rows, []
-    enum = registry.snapshot.enums.get(
-        (field.physical_table, field.physical_column)
-    )
-    if enum is None:
-        return rows, []
-    column = result_field_map(spec, tuple(rows[0])).get(dimension_id)
-    if not column:
-        return rows, []
-    wanted: list[str] | None = None
-    for item in spec.filters:
-        if str(item.field).rsplit(".", 1)[-1] != dimension_id:
-            continue
-        value = item.storage_value
-        wanted = [
-            str(entry)
-            for entry in (
-                value if isinstance(value, (list, tuple)) else [value]
-            )
-        ]
-    present = {str(row.get(column) or "").strip() for row in rows}
-    filled: list[str] = []
-    for value in enum.values.values():
-        label = str(value.display or value.label or "").strip()
-        if wanted is not None and not (
-            {value.code, value.label, value.display} & set(wanted)
-        ):
-            continue
-        if (
-            not label
-            or label in present
-            or label in _UNSPECIFIED_ENUM_LABELS
-            or str(value.label or "").strip() in _UNSPECIFIED_ENUM_LABELS
-        ):
-            continue
-        filled.append(label)
-        rows.append(
-            {
-                **{key: 0 for key in rows[0]},
-                column: label,
-            }
-        )
-    return rows, filled
 
 
 def _observation_payload(
@@ -931,6 +865,7 @@ def _section_identity(node: Any) -> dict[str, Any]:
     title = f"{node.id}. {question[:48]}" if question else node.id
     return {
         "node_id": node.id,
+        "subject": node.spec.subject,
         "title": title,
         "question": question,
         "tool": node.node_type,
@@ -979,6 +914,31 @@ def _execute_plan(
     candidate_set: CandidateSet | None = None,
     registry: CapabilityRegistry | None = None,
 ) -> AnswerPackage:
+    blocked_nodes: dict[str, str] = {}
+    blocked_node_statuses: dict[str, str] = {}
+    blocked_evidence: dict[str, dict[str, Any]] = {}
+    blocked_status = "ambiguous"
+    try:
+        plan = validate_explicit_patrol_batches(plan)
+        plan = resolve_entity_comparison_batches(plan)
+    except PatrolBatchResolutionError as exc:
+        if exc.plan is None:
+            reason = str(exc).strip() or "查询日期无法落实到真实巡检批次"
+            return AnswerPackage(
+                reason,
+                (
+                    {
+                        "status": exc.status,
+                        "failure_code": exc.failure_code,
+                        "answer": reason,
+                    },
+                ),
+            )
+        plan = exc.plan
+        blocked_nodes = dict(exc.blocked_nodes)
+        blocked_node_statuses = dict(exc.blocked_node_statuses)
+        blocked_evidence = dict(exc.blocked_evidence)
+        blocked_status = exc.status
     candidate_by_node: dict[str, TemplateCandidate] = {}
     for candidate in (candidate_set.candidates if candidate_set else ()):
         if decision.choices.get(candidate.node_id) == candidate.candidate_id:
@@ -991,6 +951,31 @@ def _execute_plan(
     empty_scope_nodes: set[str] = set()
     count_by_scope: dict[tuple[Any, ...], int] = {}
     for node in plan.nodes:
+        if node.id in blocked_nodes:
+            reason = blocked_nodes[node.id]
+            evidence = blocked_evidence.get(node.id, {})
+            evidence_note = describe_batch_lookup_evidence(evidence)
+            answer = (
+                f"{reason} {evidence_note}".strip()
+                if evidence_note
+                else reason
+            )
+            unavailable_dependencies[node.id] = answer
+            answers_by_id[node.id] = answer
+            sections.append(
+                {
+                    **_section_identity(node),
+                    "answer": answer,
+                    "status": blocked_node_statuses.get(
+                        node.id,
+                        blocked_status,
+                    ),
+                    "failure_code": PatrolBatchResolutionError.failure_code,
+                    "failure_stage": "resolution",
+                    "evidence": evidence,
+                }
+            )
+            continue
         missing_dependencies = [
             dependency
             for dependency in node.depends_on
@@ -1001,6 +986,42 @@ def _execute_plan(
                 dependency in unavailable_dependencies
                 for dependency in missing_dependencies
             ):
+                details = "；".join(
+                    str(answers_by_id[dependency]).strip()
+                    for dependency in missing_dependencies
+                    if str(answers_by_id.get(dependency) or "").strip()
+                )
+                reason = "依赖的前置结果不完整，已停止执行这一步。"
+                if details:
+                    reason = f"{reason}原因：{details}"
+                unavailable_dependencies[node.id] = reason
+                answers_by_id[node.id] = reason
+                blocked_answer = (
+                    "依赖的前置结果未通过，已停止执行这一步；"
+                    "详细原因见对应上游步骤。"
+                )
+                upstream_batch_evidence = {
+                    dependency: blocked_evidence[dependency]
+                    for dependency in missing_dependencies
+                    if dependency in blocked_evidence
+                }
+                sections.append(
+                    {
+                        **_section_identity(node),
+                        "answer": blocked_answer,
+                        "status": "blocked",
+                        "failure_code": "dependency_failed",
+                        "failure_stage": "dependency",
+                        "evidence": {
+                            "dependency_ids": list(missing_dependencies),
+                            "upstream_batch_resolution": upstream_batch_evidence,
+                        }
+                        if upstream_batch_evidence
+                        else {
+                            "dependency_ids": list(missing_dependencies),
+                        },
+                    }
+                )
                 continue
             reason = (
                 f"依赖步骤 {', '.join(missing_dependencies)} 未通过，"
@@ -1013,12 +1034,44 @@ def _execute_plan(
             )
             if details:
                 reason = f"{reason}原因：{details}"
+            answers_by_id[node.id] = reason
+            sections.append(
+                {
+                    **_section_identity(node),
+                    "answer": (
+                        "依赖的前置结果未通过，已停止执行这一步；"
+                        "详细原因见对应上游步骤。"
+                    ),
+                    "status": "blocked",
+                    "failure_code": "dependency_failed",
+                    "evidence": {
+                        "dependency_ids": list(missing_dependencies),
+                    },
+                }
+            )
+            continue
+        empty_dependencies = [
+            dependency
+            for dependency in node.depends_on
+            if dependency in empty_scope_nodes
+        ]
+        if node.node_type == "post_calc" and empty_dependencies:
+            reason = (
+                "前置查询在现有覆盖范围内没有匹配记录，未覆盖部分又无法判断；"
+                "缺少可计算的真实值，已停止这一步后置计算。"
+            )
+            answers_by_id[node.id] = reason
+            unavailable_dependencies[node.id] = reason
             sections.append(
                 {
                     **_section_identity(node),
                     "answer": reason,
-                    "status": "blocked",
-                    "failure_code": "dependency_failed",
+                    "status": "unsupported",
+                    "failure_code": "dependency_empty_scope",
+                    "failure_stage": "dependency",
+                    "evidence": {
+                        "dependency_ids": empty_dependencies,
+                    },
                 }
             )
             continue
@@ -1043,6 +1096,53 @@ def _execute_plan(
                     accepted_observations,
                     accepted_specs,
                 )
+            except _EmptyDependencyInput as exc:
+                observation = ExecutionObservation(
+                    node_id=node.id,
+                    ok=True,
+                    engine="dependency_short_circuit",
+                    sql="",
+                )
+                if node.spec.view == "count":
+                    observation = zero_count_observation(
+                        node.spec,
+                        observation,
+                        registry,
+                    )
+                    answer = (
+                        f"上游步骤 {exc.node_id} 在指定范围内返回 0 条；"
+                        f"本步骤继承该空集合，计数为 0。"
+                    )
+                else:
+                    answer = (
+                        f"上游步骤 {exc.node_id} 在指定范围内返回 0 条；"
+                        "本步骤没有可继续处理的记录。"
+                    )
+                accepted_observations[node.id] = observation
+                accepted_specs[node.id] = node.spec
+                answers_by_id[node.id] = answer
+                empty_scope_nodes.add(node.id)
+                if node.spec.view == "count":
+                    count_by_scope[_scope_key(node.spec)] = 0
+                sections.append(
+                    {
+                        **_section_identity(node),
+                        "answer": answer,
+                        "status": "accepted",
+                        "engine": observation.engine,
+                        "shape": node.spec.view,
+                        "columns": list(observation.columns),
+                        "preview_rows": list(observation.preview_rows),
+                        "rows": list(
+                            observation.result_rows
+                            or observation.preview_rows
+                        ),
+                        "rows_fetched": observation.rows_fetched,
+                        "total_count": observation.total_count,
+                        "truncated": observation.truncated,
+                    }
+                )
+                continue
             except UnsupportedQuerySpec as exc:
                 sections.append(
                     {
@@ -1086,6 +1186,9 @@ def _execute_plan(
                     "metrics": list(node.spec.metrics),
                     "dimensions": list(node.spec.dimensions),
                     "required_assertions": list(node.spec.required_assertions),
+                    "comparison_depends_on": list(
+                        node.spec.comparison_depends_on
+                    ),
                     "calculation": (
                         node.spec.calculation.to_dict()
                         if node.spec.calculation is not None
@@ -1096,10 +1199,17 @@ def _execute_plan(
             )
             if not payload.get("accepted", False):
                 failure = payload.get("failure") or {}
-                reason = str(
-                    payload.get("reply")
-                    or failure.get("reason")
-                    or "后置计算没有返回可用结果"
+                from ..calculations.domain.rendering import (
+                    render_calculation_failure,
+                )
+
+                reason = (
+                    render_calculation_failure(failure)
+                    or str(
+                        payload.get("reply")
+                        or failure.get("reason")
+                        or "后置计算没有返回可用结果"
+                    )
                 )
                 failure_code = str(
                     failure.get("failure_code") or "post_calc_empty"
@@ -1224,44 +1334,6 @@ def _execute_plan(
             effective_spec,
             list(observation.result_rows or observation.preview_rows),
         )
-        incomplete_trend = (
-            effective_spec.view == "trend" and bool(coverage_note)
-        )
-        if incomplete_trend:
-            answer = (
-                _answer_text(
-                    effective_spec,
-                    observation,
-                    coverage_note="",
-                )
-                + "；"
-                + (
-                    coverage_note
-                    or "时间序列不完整，无法可靠判断完整时间窗口的趋势。"
-                )
-            )
-            unavailable_dependencies[node.id] = answer
-            sections.append(
-                {
-                    **_section_identity(node),
-                    "answer": answer,
-                    "status": "unsupported",
-                    "failure_code": "incomplete_time_coverage",
-                    "sql": compiled.sql,
-                    "engine": compiled.engine,
-                    "shape": effective_spec.view,
-                    "columns": list(observation.columns),
-                    "preview_rows": list(observation.preview_rows),
-                    "rows": list(
-                        observation.result_rows or observation.preview_rows
-                    ),
-                    "rows_fetched": observation.rows_fetched,
-                    "total_count": observation.total_count,
-                    "truncated": observation.truncated,
-                    "coverage_note": coverage_note,
-                }
-            )
-            continue
         if (
             effective_spec.view in {"detail", "list"}
             and observation.total_count is None
@@ -1286,9 +1358,20 @@ def _execute_plan(
         scope_facts = (
             empty_scope_facts(effective_spec)
             if scoped_empty
-            else ScopeFacts()
+            else coverage_facts(effective_spec)
         )
-        if scoped_empty and scope_facts.verdict == OUTSIDE:
+        outside_scope_empty = (
+            scoped_empty
+            and is_outside_scope_empty_answerable(
+                effective_spec,
+                scope_facts,
+            )
+        )
+        if (
+            scoped_empty
+            and scope_facts.verdict == OUTSIDE
+            and not outside_scope_empty
+        ):
             answer = (
                 "该查询范围内没有匹配记录，并且它超出这份台账的真实数据覆盖："
                 f"{scope_facts.detail}。因此这一问无法给出数值。"
@@ -1309,22 +1392,111 @@ def _execute_plan(
                     "rows": [],
                     "rows_fetched": 0,
                     "coverage_detail": scope_facts.detail,
+                    "coverage_verdict": OUTSIDE,
                 }
             )
             continue
-        scoped_empty = scoped_empty and scope_facts.verdict == INSIDE
+        if scoped_empty and scope_facts.verdict == PARTIAL:
+            answer = (
+                f"该查询区间只有部分位于台账覆盖内：{scope_facts.detail}。"
+                "在现有记录覆盖到的重叠部分未观察到匹配记录；"
+                "未覆盖部分无法判断，因此这不是整个查询区间的完整零结果。"
+            )
+            accepted_observations[node.id] = observation
+            accepted_specs[node.id] = effective_spec
+            answers_by_id[node.id] = answer
+            empty_scope_nodes.add(node.id)
+            sections.append(
+                {
+                    **_section_identity(node),
+                    "answer": answer,
+                    "status": "accepted",
+                    "sql": compiled.sql,
+                    "engine": compiled.engine,
+                    "shape": effective_spec.view,
+                    "columns": list(observation.columns),
+                    "preview_rows": [],
+                    "rows": [],
+                    "rows_fetched": 0,
+                    "total_count": observation.total_count,
+                    "truncated": observation.truncated,
+                    "coverage_detail": scope_facts.detail,
+                    "coverage_verdict": PARTIAL,
+                    "empty_scope": True,
+                }
+            )
+            continue
+        inside_scope_empty = (
+            scoped_empty and scope_facts.verdict == INSIDE
+        )
         report = verify_result(
             effective_spec,
             compiled,
             observation,
-            scope_has_records=scoped_empty,
+            scope_has_records=inside_scope_empty or outside_scope_empty,
         )
-        display_rows, enum_filled = _completed_enum_rows(
+        display_rows, enum_filled = complete_explicit_enum_groups(
             effective_spec,
             observation,
             registry,
+            scope_has_records=inside_scope_empty,
         )
-        _trace_node_result(node, compiled, observation, report)
+        display_rows_completed = bool(enum_filled)
+        recent_binding = next(
+            (
+                item
+                for item in node.spec.input_bindings
+                if str(item.to_field).rsplit(".", 1)[-1]
+                == "patrol_number"
+            ),
+            None,
+        )
+        if (
+            recent_binding is not None
+            and "complete_recent_window"
+            in effective_spec.required_assertions
+            and recent_binding.from_node in accepted_observations
+        ):
+            display_rows, recent_filled = complete_recent_window_groups(
+                effective_spec,
+                replace(
+                    observation,
+                    columns=(
+                        tuple(display_rows[0])
+                        if display_rows
+                        else observation.columns
+                    ),
+                    row_count=len(display_rows),
+                    preview_rows=tuple(display_rows[:10]),
+                    result_rows=tuple(display_rows),
+                    rows_fetched=len(display_rows),
+                ),
+                accepted_specs[recent_binding.from_node],
+                accepted_observations[recent_binding.from_node],
+            )
+            enum_filled = [*enum_filled, *recent_filled]
+            display_rows_completed = True
+        materialized_observation = observation
+        if report.status == "accepted" and display_rows_completed:
+            materialized_columns = (
+                tuple(display_rows[0])
+                if display_rows
+                else tuple(observation.columns)
+            )
+            materialized_observation = replace(
+                observation,
+                columns=materialized_columns,
+                row_count=len(display_rows),
+                preview_rows=tuple(display_rows[:10]),
+                result_rows=tuple(display_rows),
+                rows_fetched=len(display_rows),
+            )
+        _trace_node_result(
+            node,
+            compiled,
+            materialized_observation,
+            report,
+        )
         if report.status != "accepted":
             failure_code = (
                 report.issues[0].code
@@ -1359,32 +1531,75 @@ def _execute_plan(
                 }
             )
             continue
-        if scoped_empty:
-            answer = (
-                "该查询范围内没有匹配记录（0 条）；"
-                "已核对该范围在库里有数据，属于“范围内确实没有记录”，"
-                "不是数据缺失。"
+        if outside_scope_empty and not enum_filled:
+            if effective_spec.view == "count":
+                materialized_observation = zero_count_observation(
+                    effective_spec,
+                    materialized_observation,
+                    registry,
+                )
+            answer = outside_scope_empty_answer(
+                effective_spec.view,
+                _answer_text(
+                    effective_spec,
+                    materialized_observation,
+                    coverage_note="",
+                    registry=registry,
+                ),
+                scope_facts,
             )
+            empty_scope_nodes.add(node.id)
+        elif inside_scope_empty and not enum_filled:
+            if effective_spec.view == "count" and observation.rows_fetched == 0:
+                materialized_observation = zero_count_observation(
+                    effective_spec,
+                    materialized_observation,
+                    registry,
+                )
+                answer = (
+                    _answer_text(
+                        effective_spec,
+                        materialized_observation,
+                        coverage_note="",
+                        registry=registry,
+                    )
+                    + "；已核对该范围在库里有数据，"
+                    "属于“范围内确实没有记录”，不是数据缺失。"
+                )
+            elif observation.rows_fetched == 0:
+                answer = (
+                    "该查询范围内没有匹配记录（0 条）；"
+                    "已核对该范围在库里有数据，属于“范围内确实没有记录”，"
+                    "不是数据缺失。"
+                )
+            else:
+                # 聚合视图的空：COUNT 返回 0，或 SUM/AVG 无有效数值。
+                # 不能写成“0 条明细”，也不能当成指标损坏拦下整条链路。
+                answer = (
+                    "该筛选范围内没有可统计的记录"
+                    "（聚合结果为 0 或空，匹配记录为空或指标值全部为空）；"
+                    "已核对范围覆盖，不是查询执行失败。"
+                )
             empty_scope_nodes.add(node.id)
         else:
             answer = _answer_text(
                 effective_spec,
-                (
-                    replace(
-                        observation,
-                        preview_rows=tuple(display_rows),
-                        result_rows=tuple(display_rows),
-                    )
-                    if enum_filled
-                    else observation
-                ),
+                materialized_observation,
                 coverage_note=coverage_note,
+                registry=registry,
             )
-        accepted_observations[node.id] = observation
+            if scope_facts.verdict == PARTIAL and scope_facts.detail:
+                answer = f"{answer}；覆盖边界：{scope_facts.detail}"
+            elif scope_facts.verdict == INSIDE and scope_facts.detail:
+                answer = f"{answer}；覆盖核对：{scope_facts.detail}"
+        accepted_observations[node.id] = materialized_observation
         accepted_specs[node.id] = effective_spec
         answers_by_id[node.id] = answer
         if effective_spec.view == "count":
-            count = _numeric_value(observation)
+            count = _record_count_value(
+                effective_spec,
+                materialized_observation,
+            )
             if count is not None:
                 count_by_scope[_scope_key(effective_spec)] = count
         sections.append(
@@ -1395,29 +1610,51 @@ def _execute_plan(
                 "sql": compiled.sql,
                 "engine": compiled.engine,
                 "shape": effective_spec.view,
-                "columns": list(observation.columns),
+                    "columns": list(materialized_observation.columns),
                 "preview_rows": (
                     display_rows
-                    if enum_filled
-                    else list(observation.preview_rows)
+                        if display_rows_completed
+                        else list(materialized_observation.preview_rows)
                 ),
                 "rows": (
                     display_rows
-                    if enum_filled
+                        if display_rows_completed
                     else list(
-                        observation.result_rows or observation.preview_rows
+                            materialized_observation.result_rows
+                            or materialized_observation.preview_rows
                     )
                 ),
-                "rows_fetched": observation.rows_fetched,
-                "total_count": observation.total_count,
-                "truncated": observation.truncated,
+                    "rows_fetched": materialized_observation.rows_fetched,
+                    "total_count": materialized_observation.total_count,
+                    "truncated": materialized_observation.truncated,
                 "coverage_note": coverage_note,
+                "coverage_detail": (
+                    scope_facts.detail
+                ),
+                "coverage_verdict": scope_facts.verdict,
+                "missing_value_labels": _missing_value_labels(
+                    effective_spec,
+                    materialized_observation.columns,
+                    registry,
+                ),
                 "enum_filled_groups": enum_filled,
+                "missing_requested_groups": missing_explicit_top_group_labels(
+                    effective_spec,
+                    materialized_observation,
+                    registry,
+                ),
                 "inherited_filters": _inherited_filter_columns(
                     effective_spec,
                     registry,
                 ),
             }
+        )
+    for section in sections:
+        if not isinstance(section, dict) or section.get("display_units"):
+            continue
+        section["display_units"] = _resolve_registered_units(
+            section.get("spec"),
+            registry,
         )
     answer = assemble_answer(sections, response_mode=plan.response_mode)
     gate = issue_review_gate(answer, _review_suspicions(plan, sections))
@@ -1429,11 +1666,32 @@ def _answer_text(
     observation: Any,
     *,
     coverage_note: str | None = None,
+    registry: CapabilityRegistry | None = None,
 ) -> str:
+    def with_boundary(text: str) -> str:
+        note = explicit_range_note(spec)
+        if not note or note in text:
+            return text
+        clean = text.rstrip().removesuffix("。")
+        return f"{clean}；{note}"
+
+    registered_units = _resolve_registered_units(spec, registry)
+    missing_labels = _missing_value_labels(
+        spec,
+        observation.columns,
+        registry,
+    )
     if spec.view in {"detail", "list", "top_records"}:
+        if observation.rows_fetched == 0:
+            return with_boundary("没有匹配记录（0 条）")
         preview = list(observation.preview_rows)
         text = "；".join(
-            "，".join(f"{key} {value}" for key, value in row.items())
+            _format_row_text(
+                row,
+                subject=spec.subject,
+                units=registered_units,
+                missing_labels=missing_labels,
+            )
             for row in preview
             if isinstance(row, dict)
         )
@@ -1448,7 +1706,7 @@ def _answer_text(
                 f"明细返回 {observation.rows_fetched} 条"
                 + (f"；{text}" if text else "")
             )
-        return text
+        return with_boundary(text)
     result_rows = list(observation.result_rows or observation.preview_rows)
     hidden_rows = len(result_rows) > 50
     preview = result_rows[:10] if hidden_rows else result_rows
@@ -1456,24 +1714,17 @@ def _answer_text(
         if spec.view in {"count", "sum", "avg"}:
             first = preview[0]
             if len(first) > 1:
-                values = {
-                    "disease": "处",
-                    "patrol": "次",
-                    "route": "条",
-                    "section": "段",
-                    "work_order": "条",
-                }
-                parts = []
-                for key, value in first.items():
-                    key_text = str(key)
-                    if "面积" in key_text or "area" in key_text.lower():
-                        unit = "㎡"
-                    elif "长度" in key_text or "length" in key_text.lower():
-                        unit = "米"
-                    else:
-                        unit = values.get(spec.subject, "条")
-                    parts.append(f"{key_text} {value}{unit}")
-                return "；".join(parts)
+                text = _format_row_text(
+                    first,
+                    subject=spec.subject,
+                    units=registered_units,
+                    missing_labels=missing_labels,
+                ).replace("，", "；")
+                note = _empty_metric_note(
+                    [first],
+                    missing_labels=missing_labels,
+                )
+                return with_boundary(f"{text}；{note}" if note else text)
             numeric_key = next(
                 (
                     key
@@ -1483,38 +1734,40 @@ def _answer_text(
                 next(iter(first), ""),
             )
             number = first.get(numeric_key, "")
-            units = {
-                "disease": "处",
-                "patrol": "次",
-                "route": "条",
-                "section": "段",
-                "work_order": "条",
-                "bridge": "座",
-                "tunnel": "座",
-                "slope": "处",
-            }
-            metric_text = " ".join(
-                [
-                    *[str(item) for item in spec.metrics],
-                    *[str(item) for item in spec.output_projection],
-                    *[str(item) for item in observation.columns],
-                ]
-            ).lower()
-            if "length" in metric_text or "长度" in metric_text:
-                unit = "米"
-            elif "area" in metric_text or "面积" in metric_text:
-                unit = "㎡"
-            else:
-                unit = units.get(spec.subject, "条")
+            registered_unit = (
+                registered_units.get(str(numeric_key))
+                or next(
+                    (
+                        registered_units.get(str(metric_id))
+                        for metric_id in spec.metrics
+                        if registered_units.get(str(metric_id))
+                    ),
+                    "",
+                )
+            )
+            unit = registered_unit or _metric_unit(
+                str(numeric_key),
+                spec.subject,
+            )
+            display = _format_display_value(number)
+            if display == "无有效数值":
+                return with_boundary(f"{numeric_key} 无有效数值")
             if spec.view == "count":
-                return f"共 {number}{unit}"
-            return f"{numeric_key} {number} {unit}"
+                return with_boundary(f"共 {display}{unit}")
+            return with_boundary(f"{numeric_key} {display} {unit}")
         lines = []
         for row in preview:
-            lines.append("，".join(f"{key} {value}" for key, value in row.items()))
+            lines.append(
+                _format_row_text(
+                    row,
+                    subject=spec.subject,
+                    units=registered_units,
+                    missing_labels=missing_labels,
+                )
+            )
         text = "；".join(lines)
         if hidden_rows:
-            return (
+            return with_boundary(
                 f"共 {observation.rows_fetched} 行，当前展示前 10 行；{text}"
             )
         coverage = (
@@ -1524,14 +1777,14 @@ def _answer_text(
         )
         if coverage:
             text = f"{text}；{coverage}"
-        return text
+        return with_boundary(text)
     coverage = (
         time_window_coverage(spec, result_rows)
         if coverage_note is None
         else coverage_note
     )
     text = f"查询返回 {observation.rows_fetched} 行"
-    return f"{text}；{coverage}" if coverage else text
+    return with_boundary(f"{text}；{coverage}" if coverage else text)
 
 
 def start_single_turn(
@@ -1552,6 +1805,7 @@ def start_single_turn(
         reach,
         registry,
         grounded=grounded,
+        kind=kind,
     )
     try:
         plan = analyze_single_turn(
@@ -1563,7 +1817,7 @@ def start_single_turn(
             registry=registry,
             subject=subject_resolution.subject,
         )
-    except nl2sql.QueryPlanError as exc:
+    except QueryPlanError as exc:
         return TurnStart(
             plan=QueryPlan(question=question, nodes=()),
             answer=AnswerPackage(
@@ -1625,12 +1879,24 @@ def start_single_turn(
         )
     except QuerySpecError as exc:
         detail = str(exc)
-        hint = (
-            "这是查询计划内部的视图名不合法，不代表数据里查不到；"
-            "请换一种说法再问，或切换模型重试。"
-            if "不支持的查询视图" in detail
-            else "请换一种说法再问，或切换模型重试。"
-        )
+        if detail.startswith("calculation_"):
+            # 计算节点生不出来是**系统侧**的计划问题（重排 3 次都没给出
+            # 合法的 calculation），不能把 calculation_required 这种内部代码
+            # 甩给用户，也不该说成"数据里查不到"。
+            detail = (
+                "这一步需要做计算，但系统没能给出可执行的计算方案"
+                "（缺少计算工具或操作数）；本次查询没有执行，"
+                "可以重试一次或把要计算的指标和口径说得更具体"
+            )
+            hint = ""
+        elif "未知能力缺口" in detail:
+            detail = (
+                "系统识别到当前数据能力不足，但没有可靠对应到已登记的"
+                "能力缺口；本次查询没有执行"
+            )
+            hint = ""
+        else:
+            hint = ""
         return TurnStart(
             plan=QueryPlan(question=question, nodes=()),
             answer=AnswerPackage(
@@ -1658,7 +1924,16 @@ def start_single_turn(
         combined = combined.merge(resolve_templates(node.spec, schema, providers))
     if combined.candidates:
         ticket = issue_confirmation(plan, combined, schema.snapshot)
-        _PENDING[ticket.token] = _PendingTurn(plan, combined, schema, registry)
+        _PENDING[ticket.token] = _PendingTurn(
+            plan,
+            combined,
+            schema,
+            registry,
+            question=question,
+            kind=kind,
+            reach=reach,
+            providers=tuple(providers),
+        )
         return TurnStart(
             plan=plan,
             candidate_set=combined,
@@ -1687,6 +1962,13 @@ def _post_calc_failure_feedback(answer: Any) -> str:
         if str(section.get("type") or "") != "post_calc":
             continue
         if str(section.get("status") or "accepted") == "accepted":
+            continue
+        if (
+            str(section.get("failure_code") or "")
+            in {"dependency_failed", PatrolBatchResolutionError.failure_code}
+            or str(section.get("failure_stage") or "")
+            in {"dependency", "resolution"}
+        ):
             continue
         failures.append(
             {
@@ -1730,11 +2012,16 @@ def _repair_failed_post_calc(
     reach: Any,
     registry: CapabilityRegistry | None,
     providers: Any,
+    decision: Any = None,
+    candidate_set: CandidateSet | None = None,
 ) -> Any:
     """计算节点失败时，把失败证据反馈给规划器重排一次。
 
     只修计算步骤，数据步骤必须完全不漂移；重排后仍有失败就保留原始回答，
     不会用“改到 100%”掩盖问题，也不会无限重试。
+
+    带 `decision` 进来表示用户已经点过确认卡：重排后的数据节点直接沿用
+    已确认的口径（不再弹一次卡），只允许计算节点变化。
     """
     feedback = _post_calc_failure_feedback(answer)
     if not feedback:
@@ -1760,15 +2047,16 @@ def _repair_failed_post_calc(
         return answer
     if _data_scope_signature(repaired) != _data_scope_signature(plan):
         return answer
-    for node in repaired.nodes:
-        if node.node_type != "query_data":
-            continue
-        if resolve_templates(node.spec, schema, providers).candidates:
-            return answer
+    if decision is None:
+        for node in repaired.nodes:
+            if node.node_type != "query_data":
+                continue
+            if resolve_templates(node.spec, schema, providers).candidates:
+                return answer
     repaired_answer = _execute_plan(
         repaired,
-        UserDecision(token=""),
-        None,
+        decision if decision is not None else UserDecision(token=""),
+        candidate_set if decision is not None else None,
         registry,
     )
     if any(
@@ -1790,11 +2078,25 @@ def confirm_single_turn(
         raise ValueError("confirmation ticket is missing or expired")
     decision = consume_confirmation(ticket_token, choices, overrides)
     _PENDING.pop(ticket_token, None)
-    return _execute_plan(
+    answer = _execute_plan(
         pending.plan,
         decision,
         pending.candidates,
         pending.registry,
+    )
+    if pending.reach is None:
+        return answer
+    return _repair_failed_post_calc(
+        pending.plan,
+        answer,
+        pending.question,
+        pending.kind,
+        pending.schema,
+        pending.reach,
+        pending.registry,
+        pending.providers,
+        decision=decision,
+        candidate_set=pending.candidates,
     )
 
 

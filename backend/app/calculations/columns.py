@@ -56,7 +56,12 @@ def calculate_columns(
             "calculation_operation_unknown",
             f"未实现操作符：{operation}",
         )
-    missing_roles = [role for role in roles if not operands.get(role)]
+    constant_values = dict(constants or {})
+    missing_roles = [
+        role
+        for role in roles
+        if not operands.get(role) and role not in constant_values
+    ]
     if missing_roles:
         return base.failure(
             "calculation_operand_missing",
@@ -71,7 +76,6 @@ def calculate_columns(
             "列计算没有输入行",
         )
     available = set(source_rows[0])
-    constant_values = dict(constants or {})
     missing_columns = [
         operands[role]
         for role in roles

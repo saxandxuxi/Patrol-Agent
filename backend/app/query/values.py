@@ -21,8 +21,42 @@ _TIME_FIELDS = {
 
 
 def _source(raw_value: Any, question: str) -> str:
-    text = str(raw_value or "").strip()
-    return "user_explicit" if text and text in question else "model_inference"
+    values = (
+        list(raw_value)
+        if isinstance(raw_value, (list, tuple, set))
+        else [raw_value]
+    )
+    texts = [
+        str(value).strip()
+        for value in values
+        if str(value if value is not None else "").strip()
+    ]
+    return (
+        "user_explicit"
+        if texts and all(text in question for text in texts)
+        else "model_inference"
+    )
+
+
+def _strip_like_pattern(raw_value: Any) -> Any:
+    """把模型写的包含式模式（`%裂缝%`）还原成待解析的字典值（`裂缝`）。
+
+    编译层没有 LIKE 语义：模型写 like 时，去掉首尾通配符后仍要经过字典/实体族
+    解析（裂缝 → 横向裂缝、纵向裂缝、网状裂缝），解析不出来就按"不在字典中"
+    明确失败，绝不把通配符模式直接编进 SQL。模式中间还夹着通配符（`条%补`）
+    时原样保留，让字典解析给出清晰的拒绝原因。
+    """
+
+    if isinstance(raw_value, (list, tuple)):
+        return [_strip_like_pattern(item) for item in raw_value]
+    if not isinstance(raw_value, str):
+        return raw_value
+    text = raw_value.strip()
+    while text[:1] in {"%", "_"}:
+        text = text[1:]
+    while text[-1:] in {"%", "_"}:
+        text = text[:-1]
+    return text.strip()
 
 
 def _shift_months(moment: datetime, months: int) -> datetime:
@@ -107,7 +141,7 @@ def _resolve_damage_type(
         op="=",
         storage_value=storage_value,
         display_value=display_text,
-        source=_source(display_text, question),
+        source=_source(texts, question),
         resolver=(
             "damage_type_dictionary"
             if exact
@@ -203,6 +237,28 @@ def resolve_value(
     subject: str = "",
     registry: Any = None,
 ) -> ValueBinding:
+    # 过滤字段都是封闭字段（字典 / 枚举 / 编号 / 时间 / 数值），没有子串语义。
+    # 模型可能把 `%路线名%` 这类 LIKE 模式错误地配成 `=`；只按运算符清洗会
+    # 让通配符作为字面值进入字典解析，最终误报“路线不存在”。凡是首尾带通配符
+    # 的字符串值都先还原；中间仍夹着通配符时保留，让字典解析给出明确拒绝。
+    if isinstance(raw_value, str) and raw_value.strip()[:1] in {"%", "_"} or (
+        isinstance(raw_value, str)
+        and raw_value.strip()[-1:] in {"%", "_"}
+    ):
+        raw_value = _strip_like_pattern(raw_value)
+    elif isinstance(raw_value, (list, tuple)) and any(
+        isinstance(item, str)
+        and item.strip()
+        and (
+            item.strip()[:1] in {"%", "_"}
+            or item.strip()[-1:] in {"%", "_"}
+        )
+        for item in raw_value
+    ):
+        raw_value = _strip_like_pattern(raw_value)
+    if op == "like":
+        # LIKE 没有编译语义；清洗后归一到等值/集合匹配。
+        op = "="
     if field == "problem_type_name":
         if registry is None:
             from .capability_registry import CapabilityRegistry
@@ -261,7 +317,7 @@ def resolve_value(
                 op="in",
                 storage_value=list(dict.fromkeys(displays)),
                 display_value=joined,
-                source=_source(joined, question),
+                source=_source(route_values, question),
                 resolver="route_dictionary",
                 raw_text="、".join(route_values),
             )
@@ -336,7 +392,18 @@ def resolve_value(
                 op="between" if relative else op,
                 storage_value=storage_value,
                 display_value=display_value,
-                source=_source(text, question),
+                source=(
+                    "user_explicit"
+                    if relative
+                    or (
+                        question_parsed is not None
+                        and raw_parsed is not None
+                        and question_parsed[0]
+                        <= raw_parsed[0]
+                        <= question_parsed[1]
+                    )
+                    else _source(text, question)
+                ),
                 resolver="time_range",
                 raw_text=text,
             )

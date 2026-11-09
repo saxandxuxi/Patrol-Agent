@@ -12,5 +12,7 @@ def compile_registered_metric(
 ) -> str:
     alias_map: defaultdict[str, str] = defaultdict(str)
     alias_map.update(aliases or {})
+    alias_map.setdefault("disease", "disease")
+    alias_map.setdefault("patrol", "patrol")
     alias_map["alias"] = alias_map.get(subject) or subject
     return str(metric.expression or "").format_map(alias_map)
