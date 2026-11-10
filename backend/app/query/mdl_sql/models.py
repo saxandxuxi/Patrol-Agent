@@ -160,6 +160,72 @@ class MdlQueryContract:
 
 
 @dataclass(frozen=True)
+class CapabilityContext:
+    subject: str
+    fields: Mapping[str, Mapping[str, Any]]
+    metrics: Mapping[str, Mapping[str, Any]]
+    derived_metrics: Mapping[str, Mapping[str, Any]]
+    enum_values: Mapping[str, Mapping[str, Mapping[str, Any]]]
+    entity_families: Mapping[str, Mapping[str, Any]]
+    assertions: Mapping[str, Mapping[str, Any]]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "subject": self.subject,
+            "fields": _plain(self.fields),
+            "metrics": _plain(self.metrics),
+            "derived_metrics": _plain(self.derived_metrics),
+            "enum_values": _plain(self.enum_values),
+            "entity_families": _plain(self.entity_families),
+            "assertions": _plain(self.assertions),
+        }
+
+
+@dataclass(frozen=True)
+class MdlContext:
+    root_model: str
+    models: Mapping[str, Mapping[str, Any]]
+    relationships: tuple[Mapping[str, Any], ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "root_model": self.root_model,
+            "models": _plain(self.models),
+            "relationships": _plain(self.relationships),
+        }
+
+
+@dataclass(frozen=True)
+class PromptContextBundle:
+    schema_version: int
+    contract: MdlQueryContract
+    business_capability: CapabilityContext
+    mdl_subset: MdlContext
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "contract": self.contract,
+            "business_capability": self.business_capability.to_dict(),
+            "mdl_subset": self.mdl_subset.to_dict(),
+            "relationship_subgraph": list(
+                self.mdl_subset.relationships
+            ),
+        }
+
+
+def _plain(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _plain(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    return value
+
+
+@dataclass(frozen=True)
 class CompilerFailure:
     code: str
     stage: str

@@ -2,9 +2,35 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from collections.abc import Iterable
+from types import MappingProxyType
 
 from ..errors import MdlSqlRelationshipError
 from ..models import MdlRelationship, MdlSnapshot, RelationshipSubgraph
+
+
+def relationship_context(
+    snapshot: MdlSnapshot,
+    relationship_ids: tuple[str, ...],
+) -> tuple[MappingProxyType, ...]:
+    facts: list[MappingProxyType] = []
+    for relationship_id in relationship_ids:
+        relationship = snapshot.relationships[relationship_id]
+        facts.append(
+            MappingProxyType(
+                {
+                    "relationship_id": relationship.relationship_id,
+                    "models": list(relationship.models),
+                    "join_type": relationship.join_type,
+                    "cardinality": relationship.cardinality,
+                    "condition": relationship.condition,
+                    "field_pairs": [
+                        list(pair) for pair in relationship.field_pairs
+                    ],
+                    "source": relationship.source,
+                }
+            )
+        )
+    return tuple(facts)
 
 
 def build_relationship_subgraph(
