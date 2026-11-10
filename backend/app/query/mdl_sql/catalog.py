@@ -45,11 +45,30 @@ def load_mdl_snapshot(
         raw.get("relationships") or (),
         models,
     )
+    physical_table_to_model: dict[str, str] = {}
+    for model in models.values():
+        if not model.physical_table:
+            continue
+        existing = physical_table_to_model.get(model.physical_table)
+        if existing and existing != model.name:
+            raise MdlSqlConfigurationError(
+                "invalid_mdl_catalog",
+                {
+                    "reason": "duplicate_physical_table",
+                    "table": model.physical_table,
+                    "models": [existing, model.name],
+                },
+                message="同一物理表不能映射到多个 MDL 模型",
+            )
+        physical_table_to_model[model.physical_table] = model.name
     return MdlSnapshot(
         fingerprint=_mdl_fingerprint(base),
         models=MappingProxyType(models),
         cubes=MappingProxyType(cubes),
         relationships=MappingProxyType(relationships),
+        physical_table_to_model=MappingProxyType(
+            physical_table_to_model
+        ),
         source_dir=str(base),
     )
 
@@ -74,9 +93,9 @@ def _build_models(
                 {"reason": "duplicate_or_missing_model_name", "model": name},
                 message="MDL 模型名称缺失或重复",
             )
-        table_reference = raw.get("table_reference") or {}
+        table_reference = raw.get("table_reference")
         physical_table = str(
-            table_reference.get("table")
+            (table_reference.get("table") or "")
             if isinstance(table_reference, Mapping)
             else ""
         )

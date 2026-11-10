@@ -127,3 +127,11 @@ fields:
       physical_table: ai_problem
       physical_column: pile_distance
       requires_join: [disease]
+  section:
+    route_name:
+      expression: route.short_name
+      label: 路线名称
+      roles: [dimension, output]
+      physical_table: basic_facilities_routes
+      physical_column: short_name
+      requires_join: [section_route]

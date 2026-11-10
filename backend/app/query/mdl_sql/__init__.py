@@ -1,4 +1,5 @@
 from .catalog import load_mdl_snapshot
+from .contract_builder import build_mdl_query_contract
 from .context import build_relationship_subgraph
 from .errors import (
     FAILURE_CODES,
@@ -17,7 +18,13 @@ from .models import (
     MdlColumn,
     MdlCube,
     MdlCubeField,
+    MdlFieldBinding,
+    MdlFilterBinding,
     MdlModel,
+    MdlMetricBinding,
+    MdlOrderBinding,
+    MdlOutputBinding,
+    MdlQueryContract,
     MdlRelationship,
     MdlSnapshot,
     MdlSqlCandidate,
@@ -32,7 +39,13 @@ __all__ = [
     "MdlColumn",
     "MdlCube",
     "MdlCubeField",
+    "MdlFieldBinding",
+    "MdlFilterBinding",
     "MdlModel",
+    "MdlMetricBinding",
+    "MdlOrderBinding",
+    "MdlOutputBinding",
+    "MdlQueryContract",
     "MdlRelationship",
     "MdlSnapshot",
     "MdlSqlCandidate",
@@ -46,6 +59,7 @@ __all__ = [
     "RelationshipPath",
     "RelationshipSubgraph",
     "build_relationship_subgraph",
+    "build_mdl_query_contract",
     "failure_message",
     "load_mdl_snapshot",
 ]

@@ -90,6 +90,60 @@ metrics:
       label: 巡检里程
       unit: km
       allowed_views: [count, distribution, top_groups, trend]
+  route:
+    count:
+      expression: COUNT(*)
+      label: 数量
+      unit: 条
+      allowed_views: [count, distribution, top_groups]
+  section:
+    count:
+      expression: COUNT(*)
+      label: 数量
+      unit: 条
+      allowed_views: [count, distribution, top_groups]
+  pile_point:
+    count:
+      expression: COUNT(*)
+      label: 数量
+      unit: 个
+      allowed_views: [count, distribution, top_groups]
+  asset:
+    count:
+      expression: COUNT(*)
+      label: 数量
+      unit: 条
+      allowed_views: [count, distribution, top_groups]
+  work_order:
+    count:
+      expression: COUNT(*)
+      label: 数量
+      unit: 个
+      allowed_views: [count, distribution, top_groups, trend]
+  bridge:
+    count:
+      expression: COUNT(*)
+      label: 数量
+      unit: 座
+      allowed_views: [count, distribution, top_groups]
+  tunnel:
+    count:
+      expression: COUNT(*)
+      label: 数量
+      unit: 座
+      allowed_views: [count, distribution, top_groups]
+  slope:
+    count:
+      expression: COUNT(*)
+      label: 数量
+      unit: 处
+      allowed_views: [count, distribution, top_groups]
+  project:
+    count:
+      expression: COUNT(*)
+      label: 数量
+      unit: 个
+      allowed_views: [count, distribution, top_groups]
   _field_metric_generation:
     # 自动生成的 SUM/AVG/MIN/MAX 必须沿用字段的物理单位换算，不能因为换了一个
     # 指标 ID 就绕过显式指标的单位口径。
