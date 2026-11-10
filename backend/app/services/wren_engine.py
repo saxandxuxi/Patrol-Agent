@@ -617,6 +617,21 @@ def compile_error_hint(kind: str, mdl_sql: str, error: str) -> str:
     return ""
 
 
+def dry_plan_mdl_sql(
+    kind: str,
+    mdl_sql: str,
+) -> tuple[str | None, str]:
+    """Call Wren once and return only physical SQL plus any raw error text."""
+    try:
+        physical = _engine(kind).dry_plan(mdl_sql)
+    except Exception as exc:
+        return None, str(exc)
+    if isinstance(physical, dict):
+        physical = physical.get("sql") or physical.get("dialect_sql") or ""
+    physical = str(physical or "").strip()
+    return (physical or None), ""
+
+
 def compile_mdl_sql_verbose(kind: str, mdl_sql: str) -> tuple[str | None, str]:
     """同 compile_mdl_sql，但把失败原因一起返回（给重写用）。"""
     if not settings.wren_enabled or not mdl_sql:
@@ -660,16 +675,10 @@ def compile_mdl_sql_verbose(kind: str, mdl_sql: str) -> tuple[str | None, str]:
     if join_issue:
         log_event("wren", "WARNING", "join_contract_rejected", kind=kind, reason=join_issue[:200])
         return None, join_issue
-    try:
-        engine = _engine(kind)
-        physical = engine.dry_plan(mdl_sql)
-    except Exception as exc:
-        error = str(exc)
+    physical, error = dry_plan_mdl_sql(kind, mdl_sql)
+    if error:
         log_event("wren", "INFO", "compile_failed", kind=kind, reason=error[:200])
         return None, compile_error_hint(kind, mdl_sql, error) or error[:200]
-    if isinstance(physical, dict):
-        physical = physical.get("sql") or physical.get("dialect_sql") or ""
-    physical = str(physical or "").strip()
     if not physical:
         return None, ""
     log_event("wren", "INFO", "compile_success", kind=kind, mdl_sql=mdl_sql[:120])
