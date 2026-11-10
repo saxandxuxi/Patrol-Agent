@@ -3,7 +3,7 @@
 `prompts/` 目录里的 Markdown 是运行时提示词的唯一来源。代码通过
 `backend/app/services/prompts.py` 读取文件，修改后不需要改 service 里的字符串。
 
-当前共有 26 个提示词文件，另有本 README。文件头必须声明用途、调用点、模型和全部
+当前共有 27 个提示词文件，另有本 README。文件头必须声明用途、调用点、模型和全部
 `<<占位符>>`；`backend/tests/query/test_prompt_contracts.py` 会校验声明与正文一致，
 并要求本文件列出每一个提示词文件。
 
@@ -48,6 +48,7 @@ cd backend
 | `intent.md` | 意图分类 | `intent.classify_intent()` | semantic | `message`, `rule_hint`, `candidates` |
 | `knowledge.md` | 仅依据 RAGFlow 片段回答知识题 | `agent._answer_knowledge()` | knowledge | `context`, `message` |
 | `metadata.md` | 解析数据库元数据问题 | `metadata_service.parse_metadata_request()` | semantic | `databases`, `tables`, `message` |
+| `mdl_sql_generator.md` | 按冻结合同生成一次受控 MDL-SQL | `mdl_sql.compiler.llm_fallback.generate_mdl_sql_once()` | sql | `context_json`, `failure_json` |
 | `planning.md` | 规划完整回答所需的执行步骤 | `orchestrator._llm_tasks()` | planner | `question`, `known_damage_types` |
 | `promotion_exam_generate.md` | 生成晋级考试题 | `evals.promotion.case_factory` | planner | `business_document`, `exclude_ids`, `exclude_questions`, `case_count`, `capability_gaps`, `unavailable_fields`, `batch_focus`, `retry_evidence` |
 | `query_holdout_judge.md` | held-out 语义验收裁判 | `evals.run_holdout_eval` | verify | `business_document`, `case_json`, `execution_json` |

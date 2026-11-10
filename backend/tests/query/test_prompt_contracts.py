@@ -140,6 +140,20 @@ class PromptContractTests(unittest.TestCase):
         missing = sorted(name for name in prompt_names if name not in readme)
         self.assertEqual(missing, [], f"README 缺少提示词：{missing}")
 
+    def test_mdl_sql_generator_prompt_is_contract_bounded(self):
+        _, body = body_and_header("mdl_sql_generator.md")
+
+        self.assertIn("QuerySpec 和合同是只读权威", body)
+        self.assertIn(
+            "只能使用给定的 MDL 模型、字段、指标、枚举和关系 ID",
+            body,
+        )
+        self.assertIn("只允许一条只读 SELECT 或 WITH ... SELECT", body)
+        self.assertIn("不输出 Markdown、思考过程或解释", body)
+        self.assertIn('"mdl_sql"', body)
+        self.assertIn('"used_models"', body)
+        self.assertIn('"used_relationship_ids"', body)
+
     def test_planning_prompt_avoids_copyable_specific_week_example(self):
         _, body = body_and_header("planning.md")
         self.assertNotIn("2026年第31周", body)
