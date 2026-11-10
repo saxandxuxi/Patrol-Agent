@@ -10,9 +10,22 @@ from typing import Any
 class SubjectCapability:
     subject_id: str
     base_table: str
+    mdl_model: str
     joins: dict[str, dict[str, str]] = field(default_factory=dict)
     allowed_views: tuple[str, ...] = ()
     entities: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class MdlCompilationPolicy:
+    schema_version: int
+    max_context_bytes: int
+    max_models_per_contract: int
+    max_relationship_hops: int
+    llm_fallback_attempts: int
+    forbidden_sql_types: tuple[str, ...]
+    forbidden_functions: tuple[str, ...]
+    require_soft_delete: bool
 
 
 @dataclass(frozen=True)
@@ -92,6 +105,7 @@ class EntityFamilyCapability:
 class CapabilitySnapshot:
     version: str
     config_hash: str
+    mdl_compilation: MdlCompilationPolicy
     subjects: dict[str, SubjectCapability]
     fields: dict[str, dict[str, FieldCapability]]
     metrics: dict[str, dict[str, MetricCapability]]

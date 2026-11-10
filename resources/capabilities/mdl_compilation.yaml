@@ -1,0 +1,26 @@
+mdl_compilation:
+  schema_version: 1
+  max_context_bytes: 131072
+  max_models_per_contract: 8
+  max_relationship_hops: 4
+  llm_fallback_attempts: 1
+  forbidden_sql_types:
+    - INSERT
+    - UPDATE
+    - DELETE
+    - MERGE
+    - CREATE
+    - ALTER
+    - DROP
+    - TRUNCATE
+    - GRANT
+    - REVOKE
+    - CALL
+    - EXEC
+  forbidden_functions:
+    - sleep
+    - benchmark
+    - load_file
+    - get_lock
+    - release_lock
+  require_soft_delete: true

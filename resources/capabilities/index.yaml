@@ -1,6 +1,7 @@
 version: "1"
 files:
   - subjects.yaml
+  - mdl_compilation.yaml
   - fields.yaml
   - field_overrides.yaml
   - metrics.yaml

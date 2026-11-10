@@ -14,6 +14,7 @@ class CapabilityConfigError(ValueError):
 
 _FILE_ROOT_KEYS = {
     "subjects.yaml": "subjects",
+    "mdl_compilation.yaml": "mdl_compilation",
     "fields.yaml": "fields",
     "field_overrides.yaml": "field_overrides",
     "metrics.yaml": "metrics",

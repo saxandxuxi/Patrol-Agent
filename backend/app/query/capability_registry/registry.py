@@ -15,6 +15,7 @@ from .models import (
     EnumCapability,
     EnumValueCapability,
     FieldCapability,
+    MdlCompilationPolicy,
     MetricCapability,
     PlannerCapabilityView,
     PlannerFieldView,
@@ -41,10 +42,14 @@ class CapabilityRegistry:
     ) -> "CapabilityRegistry":
         loaded = load_capability_config(config_dir)
         docs = loaded.documents
+        mdl_compilation = _parse_mdl_compilation_policy(
+            docs["mdl_compilation"],
+        )
         subjects = {
             str(subject_id): SubjectCapability(
                 subject_id=str(subject_id),
                 base_table=str(raw.get("base_table") or ""),
+                mdl_model=str(raw.get("mdl_model") or ""),
                 joins=dict(raw.get("joins") or {}),
                 allowed_views=tuple(str(item) for item in raw.get("allowed_views") or ()),
                 entities=tuple(str(item) for item in raw.get("entities") or ()),
@@ -52,6 +57,11 @@ class CapabilityRegistry:
             for subject_id, raw in docs["subjects"].items()
             if isinstance(raw, dict)
         }
+        for subject_id, subject in subjects.items():
+            if not subject.mdl_model:
+                raise CapabilityConfigError(
+                    f"missing_mdl_model: {subject_id}",
+                )
         fields = {
             str(subject): {
                 str(field_id): FieldCapability(
@@ -165,6 +175,7 @@ class CapabilityRegistry:
         snapshot = CapabilitySnapshot(
             version=loaded.version,
             config_hash=loaded.config_hash,
+            mdl_compilation=mdl_compilation,
             subjects=subjects,
             fields=fields,
             metrics=metrics,
@@ -505,3 +516,114 @@ class CapabilityRegistry:
                     raise CapabilityConfigError(
                         f"unknown_physical_field: {field.physical_table}.{field.physical_column}"
                     )
+
+
+_MDL_COMPILATION_KEYS = frozenset(
+    {
+        "schema_version",
+        "max_context_bytes",
+        "max_models_per_contract",
+        "max_relationship_hops",
+        "llm_fallback_attempts",
+        "forbidden_sql_types",
+        "forbidden_functions",
+        "require_soft_delete",
+    }
+)
+_FORBIDDEN_SQL_TYPES = frozenset(
+    {
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "MERGE",
+        "CREATE",
+        "ALTER",
+        "DROP",
+        "TRUNCATE",
+        "GRANT",
+        "REVOKE",
+        "CALL",
+        "EXEC",
+    }
+)
+
+
+def _parse_mdl_compilation_policy(raw: Any) -> MdlCompilationPolicy:
+    unknown = set(raw) - _MDL_COMPILATION_KEYS
+    if unknown:
+        raise CapabilityConfigError(
+            "unknown_mdl_compilation_key: "
+            + ", ".join(sorted(str(item) for item in unknown))
+        )
+
+    schema_version = _positive_policy_int(raw, "schema_version")
+    if schema_version != 1:
+        raise CapabilityConfigError(
+            f"unsupported_mdl_compilation_schema: {schema_version}"
+        )
+    llm_fallback_attempts = _positive_policy_int(
+        raw,
+        "llm_fallback_attempts",
+    )
+    if llm_fallback_attempts != 1:
+        raise CapabilityConfigError(
+            "invalid_mdl_compilation: llm_fallback_attempts must be 1"
+        )
+
+    forbidden_sql_types = raw.get("forbidden_sql_types")
+    if (
+        not isinstance(forbidden_sql_types, (list, tuple))
+        or not forbidden_sql_types
+        or any(
+            not isinstance(item, str)
+            or item not in _FORBIDDEN_SQL_TYPES
+            for item in forbidden_sql_types
+        )
+    ):
+        raise CapabilityConfigError(
+            "invalid_mdl_compilation: forbidden_sql_types"
+        )
+
+    forbidden_functions = raw.get("forbidden_functions")
+    if (
+        not isinstance(forbidden_functions, (list, tuple))
+        or any(
+            not isinstance(item, str) or not item.strip()
+            for item in forbidden_functions
+        )
+    ):
+        raise CapabilityConfigError(
+            "invalid_mdl_compilation: forbidden_functions"
+        )
+
+    require_soft_delete = raw.get("require_soft_delete")
+    if not isinstance(require_soft_delete, bool) or not require_soft_delete:
+        raise CapabilityConfigError(
+            "invalid_mdl_compilation: require_soft_delete must be true"
+        )
+
+    return MdlCompilationPolicy(
+        schema_version=schema_version,
+        max_context_bytes=_positive_policy_int(raw, "max_context_bytes"),
+        max_models_per_contract=_positive_policy_int(
+            raw,
+            "max_models_per_contract",
+        ),
+        max_relationship_hops=_positive_policy_int(
+            raw,
+            "max_relationship_hops",
+        ),
+        llm_fallback_attempts=llm_fallback_attempts,
+        forbidden_sql_types=tuple(forbidden_sql_types),
+        forbidden_functions=tuple(forbidden_functions),
+        require_soft_delete=require_soft_delete,
+    )
+
+
+def _positive_policy_int(raw: Mapping[str, Any], key: str) -> int:
+    value = raw.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise CapabilityConfigError(
+            f"invalid_mdl_compilation: {key} must be a positive integer"
+        )
+    return value

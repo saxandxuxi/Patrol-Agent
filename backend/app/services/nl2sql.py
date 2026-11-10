@@ -6509,18 +6509,6 @@ def _local_example_text(
 
 _TABLE_SELECT_CACHE: dict[str, list[str]] = {}
 
-# 旧语义层判定的"主体"→ MDL 模型名；该入口已停用，仅为历史模板分析保留映射。
-_SUBJECT_MODELS: dict[str, str] = {
-    "disease": "disease",
-    "route": "route",
-    "section": "section",
-    "patrol": "patrol",
-    "pile_point": "pile_point",
-    "asset": "ai_asset_main",
-    "work_order": "ai_work_order",
-}
-
-
 def select_tables(
     question: str,
     kind: str = "mysql",
@@ -6548,7 +6536,15 @@ def select_tables(
     listing = wren_engine.table_list(kind)
     if not listing:
         return set()
-    subject_model = _SUBJECT_MODELS.get(subject, "") if kind == "mysql" else ""
+    subject_model = ""
+    if kind == "mysql" and subject:
+        from app.query.capability_registry import CapabilityRegistry
+
+        subject_capability = CapabilityRegistry.load(kind).snapshot.subjects.get(
+            subject,
+        )
+        if subject_capability is not None:
+            subject_model = subject_capability.mdl_model
     hint_text = (
         f"本轮语义层判定的主体是「{subject}」（对应模型 {subject_model}）："
         "只选回答该主体必需的辅助表，不要把无关的大表（尤其病害主表 disease）拉进来。"
