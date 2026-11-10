@@ -17,6 +17,8 @@ def row_with_group_labels(
 
 def compact_table_evidence(
     rows: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+    *,
+    context_columns: tuple[str, ...] | list[str] = (),
 ) -> dict[str, Any]:
     valid_rows = [
         dict(row) for row in rows if isinstance(row, dict) and row
@@ -90,6 +92,18 @@ def compact_table_evidence(
     if len(group_columns) > 1 and numeric_columns:
         parent_columns = group_columns[:1]
         detail_columns = group_columns[1:]
+        context = {
+            str(column)
+            for column in context_columns
+            if str(column).strip()
+        }
+        selection_columns = [
+            column for column in detail_columns if column not in context
+        ]
+        if not selection_columns:
+            selection_columns = [
+                column for column in group_columns if column not in context
+            ]
         groups_by_parent: dict[
             tuple[str, ...],
             list[dict[str, Any]],
@@ -136,6 +150,8 @@ def compact_table_evidence(
             {
                 "parent_columns": parent_columns,
                 "detail_columns": detail_columns,
+                "selection_columns": selection_columns,
+                "context_columns": sorted(context),
                 "groups": groups,
             }
         )

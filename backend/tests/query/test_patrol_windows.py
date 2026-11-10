@@ -1,6 +1,9 @@
 import unittest
 from dataclasses import replace
+from unittest.mock import patch
 
+from app.query.analysis import analyze_single_turn
+from app.query.capability_registry import CapabilityRegistry
 from app.query.contracts import (
     ExecutionObservation,
     InputBinding,
@@ -9,6 +12,7 @@ from app.query.contracts import (
     QuerySpec,
     ValueBinding,
 )
+from app.query.fields import FieldReachSet, PhysicalSchemaView
 from app.query.patrol_windows import (
     complete_recent_window_groups,
     complete_recent_window_plan,
@@ -53,7 +57,40 @@ def _recent_plan() -> QueryPlan:
     )
 
 
+def _missing_recent_window_draft() -> dict:
+    return {
+        "final_goal": "最近三次巡查里出现次数最多的五种病害类型",
+        "intent_family": "analysis",
+        "answer_operation": "single_result",
+        "unknown_terms": [],
+        "views": [
+            {
+                "id": "q1",
+                "action": "query_data",
+                "question": "最近三次巡查里出现次数最多的五种病害类型",
+                "subject": "disease",
+                "view": "top_groups",
+                "metrics": ["count"],
+                "dimensions": ["problem_type_name"],
+                "filters": [],
+                "output_projection": ["problem_type_name", "count"],
+                "order_by": [
+                    {"field": "create_time", "direction": "desc"}
+                ],
+                "limit": 5,
+                "required_assertions": ["preserve_user_scope"],
+                "depends_on": [],
+                "inputs": [],
+            }
+        ],
+    }
+
+
 class RecentPatrolWindowPlanTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.registry = CapabilityRegistry.load()
+
     def test_disease_collection_time_is_not_used_as_the_patrol_batch_axis(self):
         original = _recent_plan()
         target = original.nodes[0]
@@ -267,6 +304,112 @@ class RecentPatrolWindowPlanTests(unittest.TestCase):
             ],
         )
         self.assertEqual(filled, ["P5", "P4"])
+
+    @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
+    @patch("app.query.planning_repair.controller.chat_json")
+    @patch("app.query.analysis.chat_json")
+    def test_missing_recent_window_dependency_is_repaired_before_execution(
+        self,
+        chat_json,
+        repair_chat_json,
+        _audit,
+    ):
+        chat_json.return_value = _missing_recent_window_draft()
+        repair_chat_json.return_value = {
+            "patches": [
+                {
+                    "op": "add",
+                    "path": "/views/0",
+                    "value": {
+                        "id": "batches",
+                        "action": "query_data",
+                        "question": "取最近三次真实巡检批次",
+                        "subject": "patrol",
+                        "view": "list",
+                        "metrics": [],
+                        "dimensions": ["patrol_number", "create_time"],
+                        "filters": [],
+                        "output_projection": [
+                            "patrol_number",
+                            "create_time",
+                        ],
+                        "order_by": [
+                            {
+                                "field": "create_time",
+                                "direction": "desc",
+                            }
+                        ],
+                        "limit": 3,
+                        "required_assertions": [
+                            "preserve_user_scope",
+                            "recent_window",
+                        ],
+                        "depends_on": [],
+                        "inputs": [],
+                    },
+                },
+                {
+                    "op": "set",
+                    "path": "/views/1/order_by",
+                    "value": [
+                        {"field": "count", "direction": "desc"}
+                    ],
+                },
+                {
+                    "op": "set",
+                    "path": "/views/1/required_assertions",
+                    "value": [
+                        "preserve_user_scope",
+                        "recent_window",
+                    ],
+                },
+                {
+                    "op": "set",
+                    "path": "/views/1/depends_on",
+                    "value": ["batches"],
+                },
+                {
+                    "op": "set",
+                    "path": "/views/1/inputs",
+                    "value": [
+                        {
+                            "from_node": "batches",
+                            "from_field": "patrol_number",
+                            "to_field": "patrol_number",
+                            "op": "in",
+                        }
+                    ],
+                },
+            ],
+            "reason": "从真实巡检批次驱动病害分组，并按数量排序",
+        }
+
+        plan = analyze_single_turn(
+            "最近三次巡查里，出现次数最多的五种病害类型",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+            registry=self.registry,
+            subject="disease",
+        )
+
+        self.assertEqual([node.id for node in plan.nodes], ["batches", "q1"])
+        batches, counts = plan.nodes
+        self.assertEqual(batches.spec.limit, 3)
+        self.assertEqual(batches.spec.subject, "patrol")
+        self.assertEqual(counts.depends_on, ("batches",))
+        self.assertEqual(
+            counts.spec.input_bindings[0].from_node,
+            "batches",
+        )
+        self.assertEqual(
+            counts.spec.order_by,
+            ({"field": "count", "direction": "desc"},),
+        )
+        repair_prompt = str(repair_chat_json.call_args.args[0])
+        self.assertIn("missing_recent_window_dependency", repair_prompt)
+        self.assertIn("最近 3 次", repair_prompt)
 
 
 if __name__ == "__main__":

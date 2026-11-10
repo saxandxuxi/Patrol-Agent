@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from .capability_registry import CapabilityIssue, CapabilityRegistry
@@ -43,6 +44,39 @@ def _source_may_return_multiple_rows(spec: QuerySpec) -> bool:
     if spec.view in {"count", "sum", "avg"} and not spec.dimensions:
         return False
     return spec.limit is None or int(spec.limit) > 1
+
+
+def normalize_multi_row_input_bindings(plan: QueryPlan) -> QueryPlan:
+    """Treat equality to one output field as membership, not one arbitrary value."""
+
+    nodes_by_id = {node.id: node for node in plan.nodes}
+    nodes = []
+    changed = False
+    for node in plan.nodes:
+        if node.node_type != "query_data" or not node.spec.input_bindings:
+            nodes.append(node)
+            continue
+        bindings = []
+        node_changed = False
+        for binding in node.spec.input_bindings:
+            source = nodes_by_id.get(binding.from_node)
+            if (
+                source is not None
+                and binding.op == "="
+                and binding.row_index is None
+                and _source_may_return_multiple_rows(source.spec)
+            ):
+                binding = replace(binding, op="in")
+                node_changed = True
+            bindings.append(binding)
+        if node_changed:
+            node = replace(
+                node,
+                spec=replace(node.spec, input_bindings=tuple(bindings)),
+            )
+            changed = True
+        nodes.append(node)
+    return replace(plan, nodes=tuple(nodes)) if changed else plan
 
 
 def _data_type_family(data_type: str) -> str:
@@ -116,6 +150,8 @@ def _binding_issue(
     source: QuerySpec,
     target: QuerySpec,
     registry: CapabilityRegistry,
+    *,
+    consumes_series: bool = False,
 ) -> CapabilityIssue | None:
     source_field = _field_id(binding.from_field)
     target_field = _field_id(binding.to_field)
@@ -146,6 +182,11 @@ def _binding_issue(
                 "from_field": source_field,
             },
         )
+    if consumes_series:
+        # post_calc operands are columns/rules, not SQL filter predicates.
+        # Grouped values are valid inputs for calculate_columns and are
+        # validated against the calculation tool contract separately.
+        return None
     if binding.row_index is not None:
         if binding.row_index < 0:
             return CapabilityIssue(
@@ -335,6 +376,7 @@ def query_plan_input_binding_issue(
                 source.spec,
                 node.spec,
                 registry,
+                consumes_series=node.node_type == "post_calc",
             )
             if issue is not None:
                 return issue

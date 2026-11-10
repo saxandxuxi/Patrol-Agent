@@ -16,6 +16,8 @@ from app.query.service import TurnStart, confirm_single_turn, start_single_turn
 from app.services import chat_settings, prompts
 from app.services.llm import chat_json, role_model
 
+from .capability_evidence import judge_capability_evidence
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CASES = Path(__file__).with_name("single_turn") / "holdout_20.yaml"
@@ -192,6 +194,11 @@ def _default_judge(
                     "sections": payload.get("sections") or [],
                     "verification": payload.get("verification") or {},
                 },
+                ensure_ascii=False,
+                default=str,
+            ),
+            capability_evidence=json.dumps(
+                judge_capability_evidence(payload),
                 ensure_ascii=False,
                 default=str,
             ),

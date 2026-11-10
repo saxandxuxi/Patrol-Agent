@@ -426,8 +426,10 @@ def _pile_verdict(
     label: str,
     coverage_scope: str,
 ) -> ScopeFacts:
+    if count is None:
+        return ScopeFacts()
     try:
-        total = int(count or 0)
+        total = int(count)
         low = int(min_pile)
         high = int(max_pile)
     except (TypeError, ValueError):
@@ -471,8 +473,10 @@ def _verdict(
     label: str,
     noun: str = "病害记录",
 ) -> ScopeFacts:
+    if count is None:
+        return ScopeFacts()
     try:
-        total = int(count or 0)
+        total = int(count)
     except (TypeError, ValueError):
         return ScopeFacts()
     earliest = _parse(min_time)

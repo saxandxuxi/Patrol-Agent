@@ -73,6 +73,29 @@ class QueryAuditTests(unittest.TestCase):
         self.assertEqual(analyze_once.call_count, 2)
         self.assertIn("合法 JSON", analyze_once.call_args_list[1].args[-1])
 
+    @patch("app.query.analysis._analyze_once")
+    def test_model_quota_failure_does_not_retry_as_invalid_json(
+        self,
+        analyze_once,
+    ):
+        analyze_once.side_effect = LLMError(
+            "HTTP 429: insufficient balance",
+            category="quota_exhausted",
+            status_code=429,
+            retryable=False,
+        )
+
+        with self.assertRaises(LLMError) as raised:
+            analyze_single_turn(
+                "统计病害数量",
+                "mysql",
+                PhysicalSchemaView(columns=frozenset()),
+                FieldReachSet(),
+            )
+
+        self.assertEqual(raised.exception.category, "quota_exhausted")
+        self.assertEqual(analyze_once.call_count, 1)
+
     @patch("app.query.analysis.audit_query_plan")
     @patch("app.query.analysis.chat_json")
     def test_audit_patch_that_breaks_compiler_is_rejected(

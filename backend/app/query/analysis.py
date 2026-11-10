@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import replace
@@ -36,12 +38,20 @@ from .contracts import (
     post_calc_has_executable_body,
 )
 from .fields import FieldReachSet, OutputProjection, PhysicalSchemaView
-from .input_bindings import query_plan_input_binding_issue
+from .input_bindings import (
+    normalize_multi_row_input_bindings,
+    query_plan_input_binding_issue,
+)
 from .periods import dedupe_equivalent_filters, normalize_named_period_window
-from .patrol_windows import complete_recent_window_plan
+from .patrol_windows import (
+    complete_recent_window_plan,
+    missing_recent_window_dependency,
+)
 from .planner import build_query_plan
+from .planning_repair import RepairIssue, RepairTicket, request_repair
 from .scalar_sources import complete_scalar_source_selections
 from .semantic_operations import (
+    GROUP_SHARE,
     answer_operation_catalog,
     semantic_operation_audit_issue,
     semantic_operation_contract_issue,
@@ -57,6 +67,25 @@ from .validator import validate_query_spec
 from .values import resolve_value
 
 
+class QuerySubjectConflict(QuerySpecError):
+    def __init__(
+        self,
+        *,
+        initial_subject: str,
+        planner_subject: str,
+        reason: str = "",
+    ) -> None:
+        self.initial_subject = str(initial_subject or "").strip()
+        self.planner_subject = str(planner_subject or "").strip()
+        super().__init__(
+            reason
+            or (
+                f"最终回答主体 {self.planner_subject} "
+                f"与已确定主体 {self.initial_subject} 不一致"
+            )
+        )
+
+
 def _text_context(value: Any, limit: int = 8000) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)[:limit]
 
@@ -64,7 +93,31 @@ def _text_context(value: Any, limit: int = 8000) -> str:
 def _string_tuple(value: Any) -> tuple[str, ...]:
     if not isinstance(value, list):
         return ()
-    return tuple(str(item).strip() for item in value if str(item).strip())
+    texts: list[str] = []
+    for item in value:
+        if isinstance(item, Mapping):
+            term = str(item.get("term") or "").strip()
+            if term.startswith("capability_gap:"):
+                text = term
+            else:
+                text = str(
+                    item.get("reason")
+                    or item.get("message")
+                    or term
+                    or item.get("capability_gap")
+                    or ""
+                ).strip()
+                if (
+                    text
+                    and not text.startswith("capability_gap:")
+                    and item.get("capability_gap")
+                ):
+                    text = f"capability_gap:{item['capability_gap']}"
+        else:
+            text = str(item).strip()
+        if text:
+            texts.append(text)
+    return tuple(texts)
 
 
 def _metric_tuple(value: Any) -> tuple[str, ...]:
@@ -125,7 +178,14 @@ _METRIC_ALIASES = {
     "sum_length": "sum_disease_length",
     "total_length": "sum_disease_length",
     "avg_length": "average_length",
+    "average_length": "avg_disease_length",
+    "avg_effective_length": "avg_disease_length",
+    "avg_effective_disease_length": "avg_disease_length",
+    "average_effective_disease_length": "avg_disease_length",
     "sum_effective_length": "sum_effective_disease_length",
+    "total_effective_disease_length": "sum_effective_disease_length",
+    "max_effective_disease_length": "max_disease_length",
+    "min_effective_disease_length": "min_disease_length",
 }
 
 
@@ -302,9 +362,29 @@ def _normalize_terminal_answer_subject(
 
 
 def _plan_subject_issue(plan: QueryPlan, subject: str) -> str:
+    return _plan_subject_conflict(plan, subject)[0]
+
+
+def _plan_subject_conflict(
+    plan: QueryPlan,
+    subject: str,
+) -> tuple[str, str]:
     if not subject:
-        return ""
+        return "", ""
     nodes_by_id = {node.id: node for node in plan.nodes}
+
+    def dependency_ids(node: PlanNode) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                (
+                    *node.depends_on,
+                    *(
+                        binding.from_node
+                        for binding in node.spec.input_bindings
+                    ),
+                )
+            )
+        )
 
     def depends_on_subject(node_id: str, seen: set[str] | None = None) -> bool:
         visited = seen or set()
@@ -320,24 +400,19 @@ def _plan_subject_issue(plan: QueryPlan, subject: str) -> str:
                 nodes_by_id[dependency].spec.subject == subject
                 or depends_on_subject(dependency, visited)
             )
-            for dependency in node.depends_on
+            for dependency in dependency_ids(node)
         )
 
     consumed = {
         dependency
         for node in plan.nodes
-        for dependency in node.depends_on
+        for dependency in dependency_ids(node)
     }
-    consumed.update(
-        binding.from_node
-        for node in plan.nodes
-        for binding in node.spec.input_bindings
-    )
     for node in plan.nodes:
         if node.id in consumed:
             continue
         effective_subject = node.spec.subject
-        if node.node_type == "post_calc":
+        if node.node_type == "post_calc" and node.spec.subject != subject:
             dependency_subjects = {
                 nodes_by_id[dependency].spec.subject
                 for dependency in node.depends_on
@@ -351,9 +426,13 @@ def _plan_subject_issue(plan: QueryPlan, subject: str) -> str:
             if depends_on_subject(node.id):
                 continue
             return (
-                f"最终回答主体 {effective_subject} 与已确定主体 {subject} 不一致"
+                (
+                    f"最终回答主体 {effective_subject} "
+                    f"与已确定主体 {subject} 不一致"
+                ),
+                effective_subject,
             )
-    return ""
+    return "", ""
 
 
 def _plan_intent_issue(plan: QueryPlan, intent_family: str) -> str:
@@ -1150,7 +1229,12 @@ def _complete_scalar_metric_comparisons(
     )
 
 
-def _normalize_group_share_calculation(plan: QueryPlan) -> QueryPlan:
+def _normalize_group_share_calculation(
+    plan: QueryPlan,
+    *,
+    answer_operation: str = "",
+) -> QueryPlan:
+    nodes_by_id = {node.id: node for node in plan.nodes}
     nodes = []
     for node in plan.nodes:
         calculation = node.spec.calculation
@@ -1161,6 +1245,57 @@ def _normalize_group_share_calculation(plan: QueryPlan) -> QueryPlan:
             or calculation.operation != "percentage_share"
         ):
             nodes.append(node)
+            continue
+        operands = {item.name: item for item in calculation.operands}
+        numerator = operands.get("numerator")
+        total = operands.get("total")
+        numerator_node_id = (
+            str(numerator.source.get("node") or "")
+            if numerator is not None and numerator.source
+            else ""
+        )
+        total_node_id = (
+            str(total.source.get("node") or "")
+            if total is not None and total.source
+            else ""
+        )
+        numerator_source = nodes_by_id.get(numerator_node_id)
+        total_source = nodes_by_id.get(total_node_id)
+        if (
+            answer_operation == GROUP_SHARE
+            and numerator_source is not None
+            and numerator_source.spec.dimensions
+            and (
+                total_node_id == numerator_node_id
+                or (
+                    total_source is not None
+                    and not total_source.spec.dimensions
+                )
+            )
+        ):
+            nodes.append(
+                replace(
+                    node,
+                    spec=replace(
+                        node.spec,
+                        calculation=replace(
+                            calculation,
+                            tool="calculate_columns",
+                            operands=tuple(
+                                replace(
+                                    operand,
+                                    source={
+                                        key: value
+                                        for key, value in operand.source.items()
+                                        if key != "row_index"
+                                    },
+                                )
+                                for operand in calculation.operands
+                            ),
+                        ),
+                    ),
+                )
+            )
             continue
         source_nodes = {
             str(operand.source.get("node") or "")
@@ -1209,6 +1344,8 @@ def _analyze_once(
     *,
     registry: CapabilityRegistry | None = None,
     subject: str = "",
+    raw_draft: dict[str, Any] | None = None,
+    draft_capture: dict[str, Any] | None = None,
 ) -> QueryPlan:
     original = str(question or "").strip()
     if not original:
@@ -1222,42 +1359,53 @@ def _analyze_once(
         item.to_dict()
         for item in detect_evidence(original, kind)
     ]
-    data = chat_json(
-        prompts.messages(
-            "query_spec",
-            question=original,
-            kind=kind,
-            current_date=datetime.now().strftime("%Y-%m-%d"),
-            capabilities=_text_context(planner_view, limit=32000),
-            schema=_text_context(
-                sorted(
-                    (table, column)
-                    for table, column in schema.columns
-                    if planner_view
-                    and table == planner_view.get("base_table")
+    if raw_draft is None:
+        data = chat_json(
+            prompts.messages(
+                "query_spec",
+                question=original,
+                kind=kind,
+                current_date=datetime.now().strftime("%Y-%m-%d"),
+                capabilities=_text_context(planner_view, limit=32000),
+                schema=_text_context(
+                    sorted(
+                        (table, column)
+                        for table, column in schema.columns
+                        if planner_view
+                        and table == planner_view.get("base_table")
+                    ),
+                    limit=5000,
+                )
+                if planner_view
+                else _text_context(sorted(schema.columns)),
+                planning_feedback=planning_feedback or "无",
+                assist_evidence=_text_context(assist_evidence, limit=6000),
+                reach=_text_context(
+                    [
+                        {
+                            "table": item.table,
+                            "column": item.column,
+                            "matched_text": item.matched_text,
+                            "source": item.source,
+                            "score": item.score,
+                        }
+                        for item in reach.hits
+                    ]
                 ),
-                limit=5000,
-            )
-            if planner_view
-            else _text_context(sorted(schema.columns)),
-            planning_feedback=planning_feedback or "无",
-            assist_evidence=_text_context(assist_evidence, limit=6000),
-            reach=_text_context(
-                [
-                    {
-                        "table": item.table,
-                        "column": item.column,
-                        "matched_text": item.matched_text,
-                        "source": item.source,
-                        "score": item.score,
-                    }
-                    for item in reach.hits
-                ]
             ),
-        ),
-        model=role_model("semantic"),
-        max_tokens=4096,
-    )
+            model=role_model("semantic"),
+            max_tokens=4096,
+        )
+    else:
+        data = copy.deepcopy(raw_draft)
+    if draft_capture is not None and isinstance(data, dict):
+        draft_capture.update(
+            {
+                "draft": copy.deepcopy(data),
+                "planner_context": planner_view,
+                "assist_evidence": assist_evidence,
+            }
+        )
     if not isinstance(data, dict):
         raise QuerySpecError("模型没有返回 QuerySpec JSON")
     contract = IntentContract(
@@ -1491,6 +1639,13 @@ def _analyze_once(
         ),
     )
     plan = complete_scalar_source_selections(plan)
+    plan = complete_recent_window_plan(plan, registry)
+    recent_window_issue = missing_recent_window_dependency(
+        plan,
+        assist_evidence,
+    )
+    if recent_window_issue:
+        raise QuerySpecError(recent_window_issue)
     requires_order = any(
         str(item.get("candidate_type") or "") == "order_hint"
         for item in assist_evidence
@@ -1503,7 +1658,6 @@ def _analyze_once(
             extreme_issue = _spec_extreme_order_issue(spec, node_types)
             if extreme_issue:
                 raise QuerySpecError(extreme_issue)
-    plan = complete_recent_window_plan(plan, registry)
     plan = _complete_trend_analysis(
         plan,
         contract.intent_family,
@@ -1513,7 +1667,10 @@ def _analyze_once(
     plan = _complete_trend_dependencies(plan)
     plan = _complete_trend_calculation(plan)
     plan = _complete_scalar_metric_comparisons(plan, registry)
-    plan = _normalize_group_share_calculation(plan)
+    plan = _normalize_group_share_calculation(
+        plan,
+        answer_operation=contract.answer_operation,
+    )
     plan = normalize_named_period_window(
         plan,
         [
@@ -1524,13 +1681,18 @@ def _analyze_once(
         datetime.now(),
     )
     plan = dedupe_equivalent_filters(plan)
+    plan = normalize_multi_row_input_bindings(plan)
     if registry is not None:
         plan = complete_dataset_comparison_dependencies(plan, registry)
         plan = normalize_dataset_comparison_order(plan)
     plan = _normalize_terminal_answer_subject(plan, subject)
-    subject_issue = _plan_subject_issue(plan, subject)
+    subject_issue, planner_subject = _plan_subject_conflict(plan, subject)
     if subject_issue:
-        raise QuerySpecError(subject_issue)
+        raise QuerySubjectConflict(
+            initial_subject=subject,
+            planner_subject=planner_subject,
+            reason=subject_issue,
+        )
     intent_issue = _plan_intent_issue(plan, contract.intent_family)
     if intent_issue:
         raise QuerySpecError(intent_issue)
@@ -1651,6 +1813,152 @@ def _apply_audit_patches(plan: QueryPlan, verdict: dict[str, Any]) -> QueryPlan:
         nodes=tuple(nodes),
         response_mode=plan.response_mode,
     )
+
+
+def _repair_issue_from_error(
+    error: QuerySpecError,
+    draft: dict[str, Any],
+    registry: CapabilityRegistry | None = None,
+) -> RepairIssue:
+    reason = str(error or "").strip()
+    time_filter_fields = _time_filter_fields(draft, registry)
+    if "missing_recent_window_dependency" in reason:
+        return RepairIssue(
+            code="missing_recent_window_dependency",
+            path="/views",
+            reason=reason,
+            allowed_paths=(
+                "/views",
+                "/views/*",
+                "/views/*/action",
+                "/views/*/subject",
+                "/views/*/view",
+                "/views/*/metrics",
+                "/views/*/dimensions",
+                "/views/*/filters",
+                "/views/*/output_projection",
+                "/views/*/order_by",
+                "/views/*/limit",
+                "/views/*/required_assertions",
+                "/views/*/depends_on",
+                "/views/*/inputs",
+            ),
+        )
+    if "两个明确日期" in reason or "比较或变化" in reason:
+        return RepairIssue(
+            code="missing_date_comparison_nodes",
+            path="/views",
+            reason=reason,
+            allowed_paths=(
+                "/views",
+                "/views/*",
+                "/views/*/filters",
+            ),
+            mutable_filter_fields=time_filter_fields,
+        )
+    if "用户明确要求涉及字段" in reason:
+        return RepairIssue(
+            code="missing_required_field",
+            path="/views",
+            reason=reason,
+            allowed_paths=(
+                "/views",
+                "/views/*",
+                "/views/*/dimensions",
+                "/views/*/output_projection",
+                "/views/*/filters",
+            ),
+            mutable_filter_fields=time_filter_fields,
+        )
+    if "排序字段" in reason or "order_by" in reason:
+        return RepairIssue(
+            code="invalid_order_field",
+            path="/views/0/order_by",
+            reason=reason,
+            allowed_paths=("/views/*/order_by",),
+        )
+    if "主体" in reason:
+        return RepairIssue(
+            code="subject_conflict",
+            path="/views/0/subject",
+            reason=reason,
+            allowed_paths=("/views/*/subject",),
+        )
+    if "依赖" in reason or "inputs" in reason or "输入绑定" in reason:
+        return RepairIssue(
+            code="missing_dependency",
+            path="/views",
+            reason=reason,
+            allowed_paths=(
+                "/views",
+                "/views/*/inputs",
+                "/views/*/depends_on",
+                "/views/*/required_assertions",
+            ),
+        )
+    if "limit" in reason:
+        return RepairIssue(
+            code="invalid_limit",
+            path="/views/0/limit",
+            reason=reason,
+            allowed_paths=("/views/*/limit",),
+        )
+    structural_paths = (
+        "/views",
+        "/views/*",
+        "/views/*/action",
+        "/views/*/subject",
+        "/views/*/view",
+        "/views/*/metrics",
+        "/views/*/dimensions",
+        "/views/*/output_projection",
+        "/views/*/order_by",
+        "/views/*/limit",
+        "/views/*/required_assertions",
+        "/views/*/depends_on",
+        "/views/*/inputs",
+        "/views/*/calculation",
+        "/views/*/comparison_depends_on",
+    )
+    return RepairIssue(
+        code="query_spec_contract_violation",
+        path="/views",
+        reason=reason,
+        allowed_paths=structural_paths,
+    )
+
+
+def _time_filter_fields(
+    draft: dict[str, Any],
+    registry: CapabilityRegistry | None,
+) -> tuple[str, ...]:
+    if registry is None:
+        return ()
+    fields: set[str] = set()
+    for view in draft.get("views") or []:
+        if not isinstance(view, dict):
+            continue
+        subject = str(view.get("subject") or "").strip()
+        subject_fields = registry.snapshot.fields.get(subject, {})
+        for item in view.get("filters") or []:
+            if not isinstance(item, dict):
+                continue
+            field = str(item.get("field") or "").strip()
+            capability = subject_fields.get(field)
+            if capability is not None and "time" in capability.roles:
+                fields.add(field)
+    return tuple(sorted(fields))
+
+
+def _draft_signature(draft: dict[str, Any]) -> str:
+    payload = json.dumps(
+        draft,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _plan_contract_issues(
@@ -2363,6 +2671,21 @@ def _audit_failure_message(issues: list[Any]) -> str:
     return "独立规划审计未通过，但没有说明具体缺口；本次查询没有执行。"
 
 
+def _normalize_plan_shapes(plan: QueryPlan) -> QueryPlan:
+    nodes = []
+    for node in plan.nodes:
+        spec = normalize_segment_projection(node.spec)
+        spec = (
+            normalize_top_view(spec)
+            if node.node_type == "query_data"
+            else normalize_post_calc_shape(spec)
+        )
+        nodes.append(
+            node if spec == node.spec else replace(node, spec=spec)
+        )
+    return replace(plan, nodes=tuple(nodes))
+
+
 def analyze_single_turn(
     question: str,
     kind: str,
@@ -2376,7 +2699,13 @@ def analyze_single_turn(
 ) -> QueryPlan:
     feedback = str(planning_feedback or "")
     audit_evidence = detect_evidence(str(question or "").strip(), kind)
+    issues: list[dict[str, Any]] = []
+    raw_draft: dict[str, Any] | None = None
+    repaired_signatures: set[str] = set()
     for attempt in range(3):
+        draft_capture: dict[str, Any] = {}
+        next_draft = raw_draft
+        raw_draft = None
         try:
             plan = _analyze_once(
                 question,
@@ -2386,9 +2715,16 @@ def analyze_single_turn(
                 feedback,
                 registry=registry,
                 subject=subject,
+                raw_draft=next_draft,
+                draft_capture=draft_capture,
             )
+            plan = _normalize_plan_shapes(plan)
         except LLMError as exc:
-            if attempt == 0:
+            if (
+                attempt == 0
+                and exc.status_code is None
+                and exc.category in {"provider_error", "invalid_output"}
+            ):
                 feedback = (
                     "上一轮模型没有返回合法 JSON。"
                     "请只输出符合 query_spec 格式的 JSON，不要附加解释。"
@@ -2403,7 +2739,54 @@ def analyze_single_turn(
             raise
         except QuerySpecUnsupported:
             raise
+        except QuerySubjectConflict:
+            raise
         except QuerySpecError as exc:
+            draft = draft_capture.get("draft")
+            if isinstance(draft, dict) and attempt < 2:
+                issue = _repair_issue_from_error(
+                    exc,
+                    draft,
+                    registry,
+                )
+                ticket = RepairTicket(
+                    question=str(question or "").strip(),
+                    draft=draft,
+                    issue=issue,
+                    attempt=attempt + 1,
+                )
+                try:
+                    repaired = request_repair(
+                        ticket,
+                        capabilities=draft_capture.get("planner_context") or {},
+                        assist_evidence=draft_capture.get("assist_evidence") or (),
+                    )
+                except LLMError:
+                    raise
+                except Exception as repair_exc:  # noqa: BLE001
+                    raise QuerySpecError(
+                        "上一轮 QuerySpec 不符合契约，自动修复失败："
+                        f"{exc}；修复阶段：{repair_exc}"
+                    ) from repair_exc
+                signature = _draft_signature(repaired)
+                if (
+                    signature == _draft_signature(draft)
+                    or signature in repaired_signatures
+                ):
+                    raise QuerySpecError(
+                        "上一轮 QuerySpec 自动修复没有产生新计划，已停止重复执行"
+                    )
+                repaired_signatures.add(signature)
+                raw_draft = repaired
+                feedback = json.dumps(
+                    {
+                        "failure_code": issue.code,
+                        "reason": issue.reason,
+                        "allowed_paths": list(issue.allowed_paths),
+                    },
+                    ensure_ascii=False,
+                )
+                continue
             feedback = f"上一轮 QuerySpec 解析失败：{exc}"
             if attempt < 2:
                 continue

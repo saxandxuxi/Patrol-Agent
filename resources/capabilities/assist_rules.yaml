@@ -45,6 +45,13 @@ field_aliases:
   create_time_month: month
 
 regex_rules:
+  - id: recent_window
+    pattern: "(?:最近|近|过去)\\s*([0-9一二两三四五六七八九十]+)\\s*(?:次|回|轮)\\s*(?:巡查|巡检|检查)"
+    group: 1
+    candidate_type: recent_window
+    candidate_field: patrol_number
+    value_transform: chinese_integer
+    reason: "用户原话给出了最近 N 次巡查或巡检的窗口；具体批次必须由巡检节点按真实时间确定，不能从病害记录自身猜批次。"
   - id: named_period
     pattern: "(?:本|这|当)(?:个)?(?:年度|年|季度|季|月)|(?:上|下)(?:个)?(?:年度|年|季度|季|月)|第[一二三四1-4]季度|今年|去年|(?:最近|近|过去)[0-9一二两三四五六七八九十]+个?月"
     candidate_type: time_period

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
@@ -47,21 +48,42 @@ def analyze_evidence(
                     dependency.get("row_count")
                     or len(dependency.get("rows") or [])
                 ),
-                "compact": (
-                    dependency.get("compact")
-                    or compact_table_evidence(
-                        list(dependency.get("rows") or [])
-                    )
-                ),
+                        "group_labels": json_value(
+                            dependency.get("group_labels") or {}
+                        ),
+                        "compact": (
+                            compact_table_evidence(
+                                list(dependency.get("rows") or []),
+                                context_columns=tuple(
+                                    str(column)
+                                    for column in (
+                                        dependency.get("group_labels") or {}
+                                    )
+                                ),
+                            )
+                            if dependency.get("rows")
+                            else (
+                                dependency.get("compact")
+                                or compact_table_evidence([])
+                            )
+                        ),
             }
             for dependency in dependencies
         ]
     }
-    reply = _request_analysis(question, evidence, requirements)
     assertions = {
         str(item)
         for item in requirements.get("required_assertions") or ()
     } if requirements else set()
+    trend_comparison = _trend_series_conclusion(
+        dependencies,
+        assertions,
+    )
+    reply = (
+        trend_comparison
+        if trend_comparison
+        else _request_analysis(question, evidence, requirements)
+    )
     grouped_comparison = _group_comparison_conclusion(
         evidence,
         assertions,
@@ -227,6 +249,9 @@ def _group_comparison_conclusion(
         compact = dependency.get("compact") or {}
         for summary in compact.get("group_summaries") or []:
             detail_columns = list(summary.get("detail_columns") or ())
+            selection_columns = list(
+                summary.get("selection_columns") or detail_columns
+            )
             for group in summary.get("groups") or []:
                 row_count = int(group.get("row_count") or 0)
                 if row_count != 1:
@@ -265,7 +290,7 @@ def _group_comparison_conclusion(
                         single_item_signatures.append(
                             tuple(
                                 f"{column}={_normalized_value(selected_row.get(column))}"
-                                for column in detail_columns
+                                for column in selection_columns
                             )
                         )
                         parts.append(
@@ -295,6 +320,135 @@ def _group_comparison_conclusion(
     if not parts:
         return ""
     return "按结构化结果比较：" + "；".join(parts[:10]) + "。"
+
+
+def _trend_series_conclusion(
+    dependencies: list[dict[str, Any]],
+    assertions: set[str],
+) -> str:
+    """Render trend facts from ordered rows without asking a model to narrate.
+
+    Trend direction is a structured fact. Letting a model restate it can produce
+    a contradictory opening sentence or leak an internal self-correction even
+    when every number is grounded.
+    """
+    if "analysis_only" not in assertions:
+        return ""
+    row_dependencies = [
+        dependency
+        for dependency in dependencies
+        if isinstance(dependency, dict)
+        and any(isinstance(row, dict) for row in dependency.get("rows") or ())
+    ]
+    if not row_dependencies or any(
+        str(dependency.get("view") or "") != "trend"
+        for dependency in row_dependencies
+    ):
+        return ""
+
+    summaries: list[str] = []
+    last_values: dict[str, list[tuple[str, Decimal]]] = {}
+    for dependency in row_dependencies:
+        rows = [
+            row
+            for row in dependency.get("rows") or ()
+            if isinstance(row, dict)
+        ]
+        if len(rows) < 2:
+            continue
+        numeric_columns = [
+            column
+            for column in rows[0]
+            if sum(_decimal_value(row.get(column)) is not None for row in rows)
+            >= len(rows)
+        ]
+        label_columns = [
+            column
+            for column in rows[0]
+            if column not in numeric_columns
+            and all(str(row.get(column) or "").strip() for row in rows)
+        ]
+        caption = _dependency_caption(dependency)
+        for column in numeric_columns:
+            points = [
+                (
+                    " / ".join(
+                        str(row.get(label) or "").strip()
+                        for label in label_columns
+                        if str(row.get(label) or "").strip()
+                    ),
+                    _decimal_value(row.get(column)),
+                )
+                for row in rows
+            ]
+            points = [
+                (label, value)
+                for label, value in points
+                if value is not None
+            ]
+            if len(points) < 2:
+                continue
+            changes = [
+                current - previous
+                for (_, previous), (_, current) in zip(points, points[1:])
+            ]
+            if all(change == 0 for change in changes):
+                direction = "持平"
+            elif all(change >= 0 for change in changes):
+                direction = "上升"
+            elif all(change <= 0 for change in changes):
+                direction = "下降"
+            else:
+                direction = "有升有降"
+            sequence = "、".join(
+                f"{label} {_format_number(value)}" if label
+                else _format_number(value)
+                for label, value in points
+            )
+            first_label, first_value = points[0]
+            last_label, last_value = points[-1]
+            summaries.append(
+                f"{caption}：{column}从{first_label}的"
+                f"{_format_number(first_value)}到{last_label}的"
+                f"{_format_number(last_value)}，整体{direction}；"
+                f"序列为 {sequence}"
+            )
+            last_values.setdefault(column, []).append(
+                (caption, last_value)
+            )
+    if not summaries:
+        return ""
+    comparisons = []
+    for column, values in last_values.items():
+        if len(values) < 2:
+            continue
+        caption, maximum = max(values, key=lambda item: item[1])
+        comparisons.append(
+            f"最后一个已返回时间桶中，{caption}的{column}最高"
+            f"（{_format_number(maximum)}）"
+        )
+    suffix = f"；{'；'.join(comparisons)}" if comparisons else ""
+    return "按结构化时间序列：" + "；".join(summaries[:12]) + suffix + "。"
+
+
+def _dependency_caption(dependency: dict[str, Any]) -> str:
+    labels = dependency.get("group_labels")
+    if isinstance(labels, Mapping):
+        values = [
+            str(value).strip()
+            for value in labels.values()
+            if str(value).strip()
+        ]
+        if values:
+            return "、".join(dict.fromkeys(values))
+    return str(dependency.get("question") or "时间序列").strip()
+
+
+def _decimal_value(value: Any) -> Decimal | None:
+    try:
+        return Decimal(str(value).replace(",", ""))
+    except (ArithmeticError, TypeError, ValueError):
+        return None
 
 
 def _normalized_value(value: Any) -> str:

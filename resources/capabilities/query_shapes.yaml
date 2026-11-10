@@ -4,7 +4,21 @@ query_shapes:
       single_result:
         meaning: 一个查询视图即可回答问题。
       scalar_comparison:
-        meaning: 比较两个或多个已有数值的大小、差值或比例。
+        meaning: 只比较两个或多个已有数值的大小或谁多谁少，不产生新的算术数字。
+      scalar_difference:
+        meaning: 除比较大小外，还必须给出两个数值之间的差值等新算术结果。
+        required_tool: calculate_scalar
+        required_operation: subtract
+      group_share:
+        meaning: 对多个分组逐行计算各自占同一总量的比例、百分比或成数。
+        required_tool: calculate_columns
+        required_operation:
+        - ratio
+        - percentage_share
+        required_dependency_views:
+        - distribution
+        - top_groups
+        - trend
       entity_set_comparison:
         meaning: 比较两个真实批次之间新增或消失的病害、巡检等实体记录。
         required_assertion: dataset_comparison
@@ -56,6 +70,13 @@ query_shapes:
       batch_dimension: patrol_number
       batch_assertion: recent_window
       final_answer_note: 必须写明“这是按病害记录定位的巡检批次”，不能把结果说成完整巡检覆盖。
+    task_disease_evidence:
+      meaning: 用户要找出满足病害属性条件的巡检任务时，病害属性用于筛选和计数，任务只是这些病害记录所属的批次身份；必须先由病害记录关联巡检任务，再按任务编号分组。
+      allowed_subject: disease
+      required_identity_join: disease.patrol_id -> disease_patrol.id
+      batch_dimensions: [task_number]
+      alternate_batch_dimensions: [patrol_number]
+      final_answer_note: 结果只代表实际检出了匹配病害的任务，不得直接过滤巡检任务表上的病害字段，也不得声称这些任务完整覆盖了相关路段。
     unanchored_pile_segment:
       meaning: 用户只说“K50路段”而未给起止边界时，按 K50+000 至 K51+000 的 1 公里路段理解；用户给出明确起止边界时始终以用户边界为准。
       default_span_m: 1000
@@ -177,12 +198,10 @@ query_shapes:
     - avg_area
     - max_area
     - min_area
-    - avg_length
+    - avg_disease_length
     - sum_effective_disease_length
-    - total_effective_disease_length
-    - avg_effective_disease_length
-    - max_effective_disease_length
-    - min_effective_disease_length
+    - max_disease_length
+    - min_disease_length
     - converted_area
     - confidence
     - ratio

@@ -43,6 +43,50 @@ def dependency(rows):
 
 class AnalysisOnlyNumberGroundingTests(unittest.TestCase):
     @patch("app.calculations.domain.analysis.chat")
+    def test_trend_analysis_uses_structured_series_instead_of_model_narrative(
+        self,
+        chat,
+    ):
+        chat.return_value = (
+            "两条路线均呈下降趋势。注：此处需修正，"
+            "怀化实际上升，应重新判断。"
+        )
+
+        result = analyze_evidence(
+            "比较两条路线6月至11月的月度变化趋势",
+            [
+                {
+                    "question": "统计怀化绕城高速逐月病害数量",
+                    "view": "trend",
+                    "rows": [
+                        {"月份": "2026-10", "数量": "245"},
+                        {"月份": "2026-11", "数量": "669"},
+                    ],
+                    "columns": ["月份", "数量"],
+                    "row_count": 2,
+                },
+                {
+                    "question": "统计长沙－芷江高速逐月病害数量",
+                    "view": "trend",
+                    "rows": [
+                        {"月份": "2026-10", "数量": "11886"},
+                        {"月份": "2026-11", "数量": "1883"},
+                    ],
+                    "columns": ["月份", "数量"],
+                    "row_count": 2,
+                },
+            ],
+            requirements={"required_assertions": ["analysis_only"]},
+        )
+
+        self.assertTrue(result["accepted"], result)
+        chat.assert_not_called()
+        self.assertIn("上升", result["reply"])
+        self.assertIn("下降", result["reply"])
+        self.assertNotIn("均呈下降", result["reply"])
+        self.assertNotIn("此处需修正", result["reply"])
+
+    @patch("app.calculations.domain.analysis.chat")
     def test_analysis_only_cannot_invent_a_difference_number(self, chat):
         chat.return_value = "上行 99 处，下行 44 处，因此上行比下行多 55 处。"
 

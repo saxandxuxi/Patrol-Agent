@@ -1,8 +1,9 @@
 <!--
 用途：意图分类（knowledge / data / analysis / image / composite / metadata）
 调用：intent.classify_intent() → chat_json()
-模型：默认模型
-占位符：<<message>> 用户问题
+模型：role_model("semantic")
+占位符：<<message>> 用户问题 | <<rule_hint>> 规则候选提示 | <<candidates>> 候选数据域 |
+        <<capability_evidence>> 统一能力注册表命中事实
 说明：规则能判定的句子会提前 return（省一次 10~40 秒的 LLM 往返），走到这里的都是边界情况，
       所以示例要覆盖边界：无意义输入、图片+数据、知识里带数据词。
       reason 字段保留（便于排查），代码只看 intent。
@@ -80,9 +81,15 @@
 按**表结构语义**检索，这句话最像在问这几张表（命中证据见括号；只是证据，不是结论）：
 <<candidates>>
 
+统一能力注册表对这句话命中的字段事实如下（只是事实，不是意图结论）：
+<<capability_evidence>>
+
 如果这句话确实是在要表里的数据（哪怕用户用的是很随意的叫法："拍的那些片子""标了多少个点"），
 就判 data/analysis；只有要的是规范、标准、工艺、处置办法时才判 knowledge。
 候选里出现的是台账/字典表、而用户要的是表里某一列的**取值**（含图片、样图、URL 这类列）→ data；
 但如果是"把图片/照片/样图调出来、取出来、给我看看"（要图本体）→ image。
+如果用户在问某个已登记字段能否用于筛选、分组、计算或分析，即使该字段状态是
+`unavailable` / `lookup_required`，这也是在询问**数据库能力和数据可行性**，应判
+data 或 analysis；不能因为字段当前为空、数据不足就改判成 knowledge。
 
 <<message>>

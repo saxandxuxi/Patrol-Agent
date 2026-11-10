@@ -44,6 +44,13 @@ fields:
       physical_table: ai_problem
       physical_column: damage_type
       enum_key: ai_problem.damage_type
+    task_number:
+      expression: patrol.task_number
+      label: 任务编号
+      roles: [code, dimension, output]
+      physical_table: ai_maintain_patrol
+      physical_column: task_number
+      requires_join: [disease_patrol]
     route_length_km:
       expression: route.route_length_km
       label: 路线长度

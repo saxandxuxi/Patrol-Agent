@@ -65,6 +65,41 @@ def _generation_unavailable_fields() -> dict[str, dict[str, str]]:
     }
 
 
+def _generation_field_facts() -> dict[str, dict[str, object]]:
+    registry = CapabilityRegistry.load("mysql")
+    raw_concepts = registry.snapshot.aliases.get("field_concepts") or {}
+    concepts: dict[str, dict[str, object]] = {}
+    for concept_id, raw in raw_concepts.items():
+        if not isinstance(raw, Mapping):
+            continue
+        facts = []
+        for reference in raw.get("fields") or ():
+            subject, _, field_id = str(reference).partition(".")
+            field = registry.snapshot.fields.get(subject, {}).get(field_id)
+            if field is None:
+                continue
+            enum = registry.snapshot.enums.get(
+                (field.physical_table, field.physical_column)
+            )
+            facts.append(
+                {
+                    "field": f"{subject}.{field_id}",
+                    "label": field.label,
+                    "status": field.status,
+                    "reason": field.unavailable_reason,
+                    "values": [
+                        item.label for item in enum.values.values()
+                    ] if enum is not None else [],
+                }
+            )
+        if facts:
+            concepts[str(concept_id)] = {
+                "label": str(raw.get("label") or concept_id),
+                "fields": facts,
+            }
+    return concepts
+
+
 def _default_generator(
     document: str,
     exclude_ids: set[str],
@@ -94,6 +129,11 @@ def _default_generator(
                 ensure_ascii=False,
                 sort_keys=True,
             ),
+            field_facts=json.dumps(
+                _generation_field_facts(),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
             batch_focus=json.dumps(focus, ensure_ascii=False),
             retry_evidence=json.dumps(
                 retry_evidence or {},
@@ -103,6 +143,7 @@ def _default_generator(
         ),
         model=role_model("planner"),
         max_tokens=4096,
+        temperature=0.7,
     )
     raw_cases = response.get("cases") if isinstance(response, dict) else None
     if not isinstance(raw_cases, list):

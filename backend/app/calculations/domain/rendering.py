@@ -5,6 +5,10 @@ from typing import Any, Mapping
 from ..models import CalculationRequest, CalculationResult
 from ..numbers import as_decimal
 from .density import render_column_calculation
+from .proportion import (
+    is_proportion_calculation,
+    render_proportion_calculation,
+)
 from .trend import render_series_calculation
 
 
@@ -55,6 +59,12 @@ def render_calculation(
         return f"{label} = {result.value}（{result.formula}）。"
     if request.tool == "calculate_series":
         return render_series_calculation(result, request)
+    if is_proportion_calculation(request):
+        return render_proportion_calculation(
+            result,
+            request,
+            output_field,
+        )
     return render_column_calculation(
         result,
         request,

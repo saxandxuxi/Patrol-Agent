@@ -31,6 +31,12 @@ aliases:
     - left: device_code
       right: equipment_id
       reason: 病害设备编号与巡检任务设备关联值使用同一套设备编号
+  field_concepts:
+    damage_severity:
+      label: 损坏程度/严重程度
+      fields:
+      - disease.damage_type
+      - disease.history_damage_interval
   profiling:
     subjects:
     - 字段

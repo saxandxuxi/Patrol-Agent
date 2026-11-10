@@ -143,6 +143,33 @@ class SemanticAidTests(unittest.TestCase):
         self.assertEqual(binding.op, "between")
         self.assertEqual(binding.source, "code_rule")
 
+    def test_registered_identifier_overrides_the_wrong_model_field(self):
+        binding = resolve_value(
+            "task_number",
+            "=",
+            "XCBH202610310000",
+            "XCBH202610310000检出的病害数量",
+            subject="patrol",
+        )
+
+        self.assertEqual(binding.field, "patrol_number")
+        self.assertEqual(binding.storage_value, "XCBH202610310000")
+        self.assertEqual(binding.source, "user_explicit")
+        self.assertEqual(binding.resolver, "identifier_dictionary:XCBH")
+
+    def test_task_identifier_does_not_stay_bound_to_disease_problem_number(self):
+        binding = resolve_value(
+            "problem_number",
+            "=",
+            "XCBH202611040003",
+            "XCBH202611040003检出病害数量以及病害分布情况",
+            subject="disease",
+        )
+
+        self.assertEqual(binding.field, "patrol_number")
+        self.assertEqual(binding.storage_value, "XCBH202611040003")
+        self.assertEqual(binding.source, "user_explicit")
+
     def test_pile_meter_keeps_normalized_meters_and_zero(self):
         """值解析器给下游的桩号单位是米；数值不能再按公里换算一次（K120→1.2亿），
         K0 起点也必须是合法里程。"""
@@ -275,6 +302,19 @@ class SemanticAidTests(unittest.TestCase):
             "comparison_cue",
             {item.rule_id for item in evidence},
         )
+
+    def test_recent_patrol_window_is_untrusted_candidate_evidence(self):
+        evidence = detect_evidence(
+            "最近三次巡查里，出现次数最多的五种病害类型"
+        )
+        recent = next(
+            item for item in evidence if item.rule_id == "recent_window"
+        )
+
+        self.assertEqual(recent.candidate_type, "recent_window")
+        self.assertEqual(recent.candidate_field, "patrol_number")
+        self.assertEqual(recent.candidate_value, "3")
+        self.assertFalse(recent.trusted)
 
     @patch("app.query.analysis.chat_json")
     def test_planner_prompt_receives_untrusted_evidence(self, chat_json):

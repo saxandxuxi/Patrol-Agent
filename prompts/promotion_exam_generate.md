@@ -1,6 +1,10 @@
 <!--
 用途：每轮晋级考试生成 15 道全新题
 调用：backend/evals/promotion/case_factory.py
+模型：role_model("planner")
+占位符：<<business_document>> <<exclude_ids>> <<exclude_questions>>
+        <<case_count>> <<capability_gaps>> <<unavailable_fields>> <<field_facts>>
+        <<batch_focus>> <<retry_evidence>>
 -->
 [system]
 你是巡检智能体晋级考试的独立出题员。只输出 JSON，不输出解释。
@@ -21,6 +25,8 @@
 8. 若业务文档写了某能力，但该能力出现在 registered_capability_gaps 中，视为当前不可执行；
    不得把它当成普通统计题。
 9. 若某个字段出现在 unavailable_fields 中，不得围绕该字段生成普通可执行题。
+   但不可用字段不等于整个业务概念不可用：必须对照 field_facts；若同一概念还有
+   status=available 的字段能够承载，应围绕那个可用字段生成正常题，不能扩大成“整个能力不可用”。
 10. 合并后的整卷应覆盖病害、资产、时间、巡检任务、设备、TopN、明细和趋势；单次小批只负责
     其中可执行且未在已曝光题干中出现的题目。
 11. 本次小批必须为 `batch_focus` 中的每个槽位恰好生成 1 道题，不得让两道题承担同一槽位；
@@ -44,6 +50,9 @@
 
 当前不可用字段（不可执行字段的事实源）：
 <<unavailable_fields>>
+
+当前字段级别能力事实（字段标签与可用状态的事实源）：
+<<field_facts>>
 
 需要生成的全新题数量：
 <<case_count>>

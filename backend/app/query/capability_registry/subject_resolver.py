@@ -25,6 +25,8 @@ def resolve_subject(
     registry: CapabilityRegistry,
     grounded: dict[str, Any] | None = None,
     kind: str = "mysql",
+    conflicting_subject: str = "",
+    previous_resolution: SubjectResolution | None = None,
 ) -> SubjectResolution:
     grounded = grounded or {}
     candidates: list[str] = []
@@ -40,6 +42,20 @@ def resolve_subject(
             if subject.base_table == table and subject_id not in candidates:
                 candidates.append(subject_id)
                 evidence.append(f"field_grounding.table={table}")
+    conflicting = str(conflicting_subject or "").strip()
+    if conflicting in registry.snapshot.subjects:
+        if conflicting not in candidates:
+            candidates.append(conflicting)
+        evidence.append(f"planner_final_subject={conflicting}")
+    if previous_resolution is not None:
+        if previous_resolution.subject:
+            evidence.append(
+                f"previous_subject={previous_resolution.subject}"
+            )
+        evidence.extend(
+            f"previous_evidence={item}"
+            for item in previous_resolution.evidence
+        )
     # 已注册实体值是“用户明确提到的业务对象”，但它们常常同时出现在多张表的
     # 注释里（例如路线名出现在路段台账、病害类型出现在病害表）。表级检索因此
     # 只能提供候选，不能决定主体；这里把字典实体的精确命中补成主体候选证据。

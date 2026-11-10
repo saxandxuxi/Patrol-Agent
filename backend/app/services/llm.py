@@ -9,11 +9,27 @@ import httpx
 from ..store import get_default_model
 from ..config import settings
 from .llm_json import parse_json_lenient
+from .llm_rate_limit import (
+    model_request_key,
+    requests_per_minute,
+    shared_rate_limiter,
+)
 from .logging_service import log_error, log_event
 
 
 class LLMError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        category: str = "provider_error",
+        status_code: int | None = None,
+        retryable: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.category = category
+        self.status_code = status_code
+        self.retryable = retryable
 
 
 def _endpoint(base_url: str) -> str:
@@ -232,6 +248,17 @@ def chat_detail(
             reasoning_chars=len(reasoning),
         )
         return content, reasoning
+    except LLMError as exc:
+        if exc.category == "model_not_found":
+            raise LLMError(
+                f"LLM 调用失败（404 模型不存在）：当前模型 `{model_name}` 在你配置的供应商端点上不存在。"
+                "检查 .env 里该供应商的 BASE_URL/API_KEY，或在前端「模型设置」里换一个该供应商支持的模型名。"
+                f"原始错误：{str(exc)[:150]}",
+                category=exc.category,
+                status_code=exc.status_code,
+                retryable=False,
+            ) from exc
+        raise
     except Exception as exc:
         # 404 单独说清楚：它是"模型名不存在/供应商没配好"，不是"没钱"（那是 401/403/429）。
         # 用户实测看到裸的 404 完全不知道怎么办，这里给可操作的提示。
@@ -240,7 +267,8 @@ def chat_detail(
             raise LLMError(
                 f"LLM 调用失败（404 模型不存在）：当前模型 `{model_name}` 在你配置的供应商端点上不存在。"
                 "检查 .env 里该供应商的 BASE_URL/API_KEY，或在前端「模型设置」里换一个该供应商支持的模型名。"
-                f"原始错误：{text[:150]}"
+                f"原始错误：{text[:150]}",
+                category="model_not_found",
             ) from exc
         raise LLMError(f"LLM 调用失败：{exc}") from exc
 
@@ -248,8 +276,11 @@ def chat_detail(
 def _post(model: dict[str, Any], payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
     retryable_statuses = {408, 429, 500, 502, 503, 504}
     max_attempts = 3
+    rate_limit_key = model_request_key(model)
+    rpm = requests_per_minute(model)
     with httpx.Client(timeout=settings.llm_timeout_seconds) as client:
         for attempt in range(max_attempts):
+            shared_rate_limiter.acquire(rate_limit_key, rpm)
             try:
                 resp = client.post(
                     _endpoint(model["base_url"]),
@@ -258,8 +289,10 @@ def _post(model: dict[str, Any], payload: dict[str, Any], headers: dict[str, str
                 )
             except httpx.TransportError as exc:
                 if attempt + 1 >= max_attempts:
-                    raise RuntimeError(
-                        f"HTTP network error after {max_attempts} attempts: {exc}"
+                    raise LLMError(
+                        f"HTTP network error after {max_attempts} attempts: {exc}",
+                        category="transport",
+                        retryable=True,
                     ) from exc
                 delay = min(8, 2**attempt)
                 log_event(
@@ -274,6 +307,39 @@ def _post(model: dict[str, Any], payload: dict[str, Any], headers: dict[str, str
                 continue
             if not resp.is_error:
                 return resp.json()
+            detail = resp.text.strip()
+            error_code = ""
+            error_message = ""
+            try:
+                body = resp.json()
+                error = body.get("error") if isinstance(body, dict) else None
+                if isinstance(error, dict):
+                    error_code = str(error.get("code") or "").strip()
+                    error_message = str(error.get("message") or "").strip()
+                    detail = ": ".join(
+                        item for item in (error_code, error_message) if item
+                    )
+            except ValueError:
+                pass
+            quota_text = f"{error_code} {error_message or detail}".lower()
+            quota_exhausted = any(
+                marker in quota_text
+                for marker in (
+                    "insufficient balance",
+                    "insufficient_quota",
+                    "quota exhausted",
+                    "account overdue",
+                    "account is suspended",
+                    "arrearage",
+                )
+            )
+            if resp.status_code == 429 and quota_exhausted:
+                raise LLMError(
+                    f"HTTP 429: {detail[:500]}",
+                    category="quota_exhausted",
+                    status_code=429,
+                    retryable=False,
+                )
             if (
                 resp.status_code in retryable_statuses
                 and attempt + 1 < max_attempts
@@ -283,7 +349,10 @@ def _post(model: dict[str, Any], payload: dict[str, Any], headers: dict[str, str
                     delay = float(retry_after) if retry_after else 2**attempt
                 except ValueError:
                     delay = 2**attempt
-                delay = max(0.0, min(delay, 30.0))
+                if resp.status_code == 429 and not retry_after:
+                    delay = 60.0
+                delay = max(0.0, min(delay, 300.0))
+                shared_rate_limiter.defer(rate_limit_key, delay)
                 log_event(
                     "llm",
                     "WARNING",
@@ -292,22 +361,29 @@ def _post(model: dict[str, Any], payload: dict[str, Any], headers: dict[str, str
                     attempt=attempt + 1,
                     delay_seconds=delay,
                 )
-                time.sleep(delay)
+                if rpm <= 0:
+                    time.sleep(delay)
                 continue
-            detail = resp.text.strip()
-            try:
-                body = resp.json()
-                error = body.get("error") if isinstance(body, dict) else None
-                if isinstance(error, dict):
-                    code = str(error.get("code") or "").strip()
-                    message = str(error.get("message") or "").strip()
-                    detail = ": ".join(item for item in (code, message) if item)
-            except ValueError:
-                pass
-            raise RuntimeError(
-                f"HTTP {resp.status_code}: {detail[:500]}"
+            category = (
+                "model_not_found"
+                if resp.status_code == 404
+                else "rate_limited"
+                if resp.status_code == 429
+                else "provider_unavailable"
+                if resp.status_code in retryable_statuses
+                else "provider_error"
             )
-    raise RuntimeError("LLM request failed without a response")
+            raise LLMError(
+                f"HTTP {resp.status_code}: {detail[:500]}",
+                category=category,
+                status_code=resp.status_code,
+                retryable=resp.status_code in retryable_statuses,
+            )
+    raise LLMError(
+        "LLM request failed without a response",
+        category="transport",
+        retryable=True,
+    )
 
 
 def chat_json(
@@ -315,11 +391,12 @@ def chat_json(
     model: dict[str, Any] | None = None,
     allow_list: bool = False,
     max_tokens: int | None = None,
+    temperature: float = 0,
 ) -> dict[str, Any] | list[Any]:
     text = chat(
         messages,
         model=model,
-        temperature=0,
+        temperature=temperature,
         max_tokens=max_tokens,
     ).strip()
     text = text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -341,7 +418,7 @@ def chat_json(
             }
         ],
         model=model,
-        temperature=0,
+        temperature=temperature,
         max_tokens=max_tokens,
     ).strip()
     retry = retry.removeprefix("```json").removeprefix("```").removesuffix("```").strip()

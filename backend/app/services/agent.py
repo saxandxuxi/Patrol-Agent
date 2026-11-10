@@ -4238,6 +4238,9 @@ def _single_turn_failure_payload(
         "reply": reason,
         "source": "error",
         "error": reason,
+        "question": question,
+        "used_question": question,
+        "reviewable": False,
         "sections": [section],
         "rows": [],
         "columns": [],
@@ -4255,9 +4258,18 @@ def _single_turn_compiler_payload(turn: Any, ticket_token: str = "") -> dict[str
         from ..query.section_status import execution_failure_reasons
 
         failures = execution_failure_reasons(sections)
+        reviewable = any(
+            str(section.get("status") or "accepted") == "accepted"
+            and bool(section.get("sql"))
+            for section in sections
+            if isinstance(section, dict)
+        )
         payload = {
             "reply": turn.answer.text,
             "source": "single_turn_compiler",
+            "question": turn.plan.question,
+            "used_question": turn.plan.question,
+            "reviewable": reviewable,
             "sections": sections,
             "rows": [],
             "columns": [],
@@ -4354,6 +4366,7 @@ def _single_turn_compiler_payload(turn: Any, ticket_token: str = "") -> dict[str
         "reply": "请确认查询口径后再执行。",
         "source": "confirm",
         "await_confirm": True,
+        "reviewable": False,
         "choose_token": token,
         "capability_choices": cards,
         "recommended_id": cards[0]["id"] if cards else "",
@@ -4389,6 +4402,14 @@ def _maybe_single_turn_compiler(
 
     if choose_token:
         pending = single_turn_service.pending_confirmation(choose_token)
+        if capability_id in {"ai", "wren"}:
+            question = pending.plan.question if pending is not None else message
+            single_turn_service.discard_pending_confirmation(choose_token)
+            turn = single_turn_service.start_single_turn(
+                question,
+                providers=(),
+            )
+            return _single_turn_compiler_payload(turn)
         if pending is None or pending.candidate_set is None:
             if capabilities.has_pending(choose_token):
                 return _single_turn_failure_payload(

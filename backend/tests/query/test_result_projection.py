@@ -1,6 +1,6 @@
 import unittest
 
-from app.query.contracts import ExecutionObservation, QuerySpec
+from app.query.contracts import ExecutionObservation, QuerySpec, ValueBinding
 from app.query.result_projection import result_field_map
 from app.query.service import _observation_payload
 
@@ -23,6 +23,54 @@ def scalar_spec():
 
 
 class ResultProjectionTests(unittest.TestCase):
+    def test_observation_payload_preserves_route_filter_context(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="trend",
+            metrics=("count",),
+            dimensions=("collection_time_month",),
+            filters=(
+                ValueBinding(
+                    field="route_name",
+                    op="=",
+                    storage_value="route-id",
+                    display_value="怀化绕城高速",
+                    source="user_explicit",
+                    resolver="route_dictionary",
+                    raw_text="怀化绕城高速",
+                ),
+            ),
+            output_projection=("collection_time_month", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+            question="查询怀化绕城高速的月度趋势",
+        )
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT 1",
+            columns=("月份", "数量"),
+            preview_rows=({"月份": "2026-10", "数量": 10},),
+            result_rows=({"月份": "2026-10", "数量": 10},),
+            rows_fetched=1,
+        )
+
+        payload = _observation_payload(
+            observation,
+            spec=spec,
+            question="查询怀化绕城高速的月度趋势",
+            answer="",
+        )
+
+        self.assertEqual(
+            payload["group_labels"],
+            {"路线名称": "怀化绕城高速"},
+        )
+
     def test_order_by_field_does_not_break_positional_mapping(self):
         spec = QuerySpec(
             id="q1",

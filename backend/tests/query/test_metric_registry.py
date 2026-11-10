@@ -1,5 +1,6 @@
 import unittest
 
+from app.query.analysis import _metric_tuple
 from app.query.capability_registry import CapabilityRegistry
 from app.query.fields import FieldReachSet
 from app.query.metric_compiler import compile_registered_metric
@@ -79,6 +80,16 @@ class MetricRegistryTests(unittest.TestCase):
             expression = metrics[metric_id].expression
             self.assertIn("effective_disease_length", expression)
             self.assertNotIn("}.disease_length", expression)
+
+    def test_effective_length_aliases_resolve_to_registered_metric_ids(self):
+        self.assertEqual(
+            _metric_tuple(["AVG(effective_disease_length)"]),
+            ("avg_disease_length",),
+        )
+        self.assertEqual(
+            _metric_tuple(["avg_effective_disease_length"]),
+            ("avg_disease_length",),
+        )
 
     def test_distinct_type_count_metric_is_registered(self):
         """“多少种病害类型”是去重计数，不能拿 count 顶替。"""

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from ..services import parsers, route_resolver
@@ -20,6 +22,52 @@ _TIME_FIELDS = {
 }
 
 
+def _numeric_text(value: Any) -> str | None:
+    text = unicodedata.normalize("NFKC", str(value)).replace(",", "").strip()
+    try:
+        Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None
+    return text
+
+
+def _numeric_tokens(question: str) -> tuple[Decimal, ...]:
+    text = unicodedata.normalize("NFKC", question).replace(",", "")
+    tokens: list[Decimal] = []
+    start: int | None = None
+    dot_seen = False
+    for index, character in enumerate(text):
+        if character.isdigit() or (character == "." and not dot_seen):
+            if start is None:
+                start = index
+            dot_seen = dot_seen or character == "."
+            continue
+        if start is not None:
+            try:
+                tokens.append(Decimal(text[start:index]))
+            except InvalidOperation:
+                pass
+            start = None
+            dot_seen = False
+    if start is not None:
+        try:
+            tokens.append(Decimal(text[start:]))
+        except InvalidOperation:
+            pass
+    return tuple(tokens)
+
+
+def _explicit_value(value: Any, question: str) -> bool:
+    text = str(value if value is not None else "").strip()
+    numeric = _numeric_text(text)
+    if numeric is None:
+        normalized_question = unicodedata.normalize("NFKC", question)
+        normalized_text = unicodedata.normalize("NFKC", text)
+        return bool(normalized_text) and normalized_text in normalized_question
+    target = Decimal(numeric)
+    return any(token == target for token in _numeric_tokens(question))
+
+
 def _source(raw_value: Any, question: str) -> str:
     values = (
         list(raw_value)
@@ -33,7 +81,7 @@ def _source(raw_value: Any, question: str) -> str:
     ]
     return (
         "user_explicit"
-        if texts and all(text in question for text in texts)
+        if texts and all(_explicit_value(text, question) for text in texts)
         else "model_inference"
     )
 
@@ -59,12 +107,38 @@ def _strip_like_pattern(raw_value: Any) -> Any:
     return text.strip()
 
 
+def _exact_time_bound(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, pattern)
+        except ValueError:
+            continue
+    return None
+
+
 def _shift_months(moment: datetime, months: int) -> datetime:
     month_index = moment.year * 12 + moment.month - 1 + months
     year, month = divmod(month_index, 12)
     month += 1
     day = min(moment.day, 28)
     return moment.replace(year=year, month=month, day=day)
+
+
+def _explicit_month_range(question: str) -> tuple[datetime, datetime] | None:
+    """Return a full-month range only when that is the question's time scope."""
+
+    month_range = parsers.parse_month_range(question)
+    if month_range is None:
+        return None
+    return month_range if parsers.parse_time_range(question) == month_range else None
+
+
+def _is_inclusive_month_end(
+    value: datetime,
+    month_range: tuple[datetime, datetime],
+) -> bool:
+    return value.date() == (month_range[1] - timedelta(days=1)).date()
 
 
 def _relative_time_range(question: str) -> tuple[datetime, datetime] | None:
@@ -227,6 +301,56 @@ def _enum_location(registry: Any, subject: str, field: str) -> tuple[str, str]:
     return "", field
 
 
+def _registered_identifier(
+    raw_value: Any,
+    question: str,
+    registry: Any,
+) -> tuple[str, str]:
+    values = (
+        list(raw_value)
+        if isinstance(raw_value, (list, tuple, set))
+        else [raw_value]
+    )
+    texts = [
+        str(value).strip()
+        for value in values
+        if str(value if value is not None else "").strip()
+    ]
+    if not texts or registry is None:
+        return "", ""
+    document = registry.snapshot.identifiers
+    definitions = (
+        document.get("identifiers")
+        if isinstance(document, Mapping)
+        else None
+    )
+    if not isinstance(definitions, Mapping):
+        return "", ""
+
+    resolved: list[tuple[str, str]] = []
+    for text in texts:
+        if text not in question:
+            return "", ""
+        for prefix, definition in definitions.items():
+            if not isinstance(definition, Mapping):
+                continue
+            if not text.startswith(str(prefix)):
+                continue
+            if not text[len(str(prefix)):].isdigit():
+                continue
+            field = str(definition.get("filter_field") or "").strip()
+            if field:
+                resolved.append((str(prefix), field))
+            break
+    if len(resolved) != len(texts):
+        return "", ""
+    fields = {field for _, field in resolved}
+    prefixes = {prefix for prefix, _ in resolved}
+    if len(fields) != 1 or len(prefixes) != 1:
+        return "", ""
+    return next(iter(prefixes)), next(iter(fields))
+
+
 def resolve_value(
     field: str,
     op: str,
@@ -256,6 +380,17 @@ def resolve_value(
         for item in raw_value
     ):
         raw_value = _strip_like_pattern(raw_value)
+    if registry is None:
+        from .capability_registry import CapabilityRegistry
+
+        registry = CapabilityRegistry.load(kind)
+    identifier_prefix, registered_field = _registered_identifier(
+        raw_value,
+        question,
+        registry,
+    )
+    if registered_field:
+        field = registered_field
     if op == "like":
         # LIKE 没有编译语义；清洗后归一到等值/集合匹配。
         op = "="
@@ -267,10 +402,6 @@ def resolve_value(
         value = _resolve_damage_type(raw_value, question, kind, registry)
         return ValueBinding(**{**value.__dict__, "op": op})
     enum_registry = registry
-    if enum_registry is None:
-        from .capability_registry import CapabilityRegistry
-
-        enum_registry = CapabilityRegistry.load(kind)
     if _enum_location(enum_registry, subject, field) in enum_registry.snapshot.enums:
         value = _resolve_code(
             field,
@@ -340,9 +471,35 @@ def resolve_value(
             raw_text=text,
         )
     if field in _TIME_FIELDS:
+        question_parsed = parsers.parse_time_range(question)
+        month_range = _explicit_month_range(question)
+        if (
+            op == "between"
+            and isinstance(raw_value, (list, tuple))
+            and len(raw_value) == 2
+        ):
+            bounds = tuple(_exact_time_bound(item) for item in raw_value)
+            if all(item is not None for item in bounds):
+                if (
+                    month_range is not None
+                    and bounds[0].date() == month_range[0].date()
+                    and _is_inclusive_month_end(bounds[1], month_range)
+                ):
+                    bounds = (bounds[0], month_range[1])
+                start_text, end_text = (
+                    item.strftime("%Y-%m-%d %H:%M:%S") for item in bounds
+                )
+                return ValueBinding(
+                    field=field,
+                    op="between",
+                    storage_value=(start_text, end_text),
+                    display_value=f"{start_text} 至 {end_text}",
+                    source=_source(raw_value, question),
+                    resolver="time_range",
+                    raw_text=str(raw_value),
+                )
         relative = _relative_time_range(question)
         raw_parsed = parsers.parse_time_range(text)
-        question_parsed = parsers.parse_time_range(question)
         raw_years = set(re.findall(r"(?<!\d)(\d{4})(?!\d)", text))
         parsed = relative or raw_parsed or question_parsed
         if raw_parsed and not relative and raw_years and not any(
@@ -378,6 +535,12 @@ def resolve_value(
                 op = ">="
             elif op == "<":
                 boundary_text = start_text if raw_parsed is not None else end_text
+                if (
+                    month_range is not None
+                    and raw_parsed is not None
+                    and _is_inclusive_month_end(raw_parsed[0], month_range)
+                ):
+                    boundary_text = month_range[1].strftime("%Y-%m-%d %H:%M:%S")
                 storage_value = boundary_text
                 display_value = boundary_text
             elif op == "<=":
@@ -511,6 +674,10 @@ def resolve_value(
         storage_value=raw_value,
         display_value=text,
         source=_source(raw_value, question),
-        resolver=f"identity:{field}",
+        resolver=(
+            f"identifier_dictionary:{identifier_prefix}"
+            if identifier_prefix
+            else f"identity:{field}"
+        ),
         raw_text=text,
     )

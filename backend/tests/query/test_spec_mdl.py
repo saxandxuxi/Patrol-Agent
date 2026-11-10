@@ -43,6 +43,41 @@ class SpecMdlTests(unittest.TestCase):
         self.assertNotIn("GROUP BY", sql)
         self.assertNotIn("SELECT FROM", sql)
 
+    def test_disease_length_output_uses_the_same_effective_length_as_filter(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="list",
+                metrics=(),
+                dimensions=(),
+                filters=(binding("disease_length", ">", 4),),
+                output_projection=(
+                    "problem_number",
+                    "disease_length",
+                    "collection_time",
+                ),
+                order_by=({"field": "collection_time", "direction": "desc"},),
+                limit=500,
+                required_assertions=(),
+                question="列出长度大于4米的病害明细",
+            )
+        )
+
+        self.assertIn(
+            "disease.effective_disease_length > 4",
+            sql,
+        )
+        self.assertIn(
+            "disease.effective_disease_length AS 实际病害长度",
+            sql,
+        )
+        self.assertNotIn(
+            "disease.disease_length AS 实际病害长度",
+            sql,
+        )
+
     def test_top_groups_compiles_group_order_and_limit(self):
         sql = compile_spec_mdl(
             QuerySpec(
@@ -201,6 +236,33 @@ class SpecMdlTests(unittest.TestCase):
         self.assertIn("disease.confidence AS AI置信度", sql)
         self.assertIn("ORDER BY disease.confidence ASC", sql)
 
+    def test_disease_detail_displays_enum_label_instead_of_storage_code(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="list",
+                metrics=(),
+                dimensions=(),
+                filters=(),
+                output_projection=(
+                    "problem_number",
+                    "up_or_down",
+                ),
+                order_by=(),
+                limit=10,
+                required_assertions=("preserve_user_scope",),
+                question="列出病害编号和上下行方向",
+            )
+        )
+
+        self.assertIn("CASE disease.up_or_down", sql)
+        self.assertIn("THEN '上行'", sql)
+        self.assertIn("THEN '下行'", sql)
+        self.assertIn("AS 上下行", sql)
+        self.assertNotIn("disease.up_or_down AS 上下行", sql)
+
     def test_disease_category_name_filters_on_storage_code(
         self,
     ):
@@ -294,9 +356,13 @@ class SpecMdlTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("patrol.patrol_type AS 巡查类型", sql)
+        self.assertIn("CASE patrol.patrol_type", sql)
+        self.assertIn("THEN '定期巡查'", sql)
+        self.assertIn("AS 巡查类型", sql)
         self.assertIn("route.short_name AS 路线名称", sql)
-        self.assertIn("patrol.up_or_down AS 上下行", sql)
+        self.assertIn("CASE patrol.up_or_down", sql)
+        self.assertIn("THEN '上行'", sql)
+        self.assertIn("AS 上下行", sql)
         self.assertIn("LEFT JOIN patrol_route", sql)
         self.assertIn("LEFT JOIN route", sql)
 
@@ -362,6 +428,32 @@ class SpecMdlTests(unittest.TestCase):
             sql,
         )
         self.assertNotIn("COUNT(*) AS 数量", sql)
+
+    def test_disease_task_evidence_uses_real_task_number(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("task_number",),
+            filters=(
+                binding("problem_type_name", "=", "坑槽"),
+                binding("area", ">", 4),
+            ),
+            output_projection=("task_number", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="按巡检任务统计面积大于4平方米的坑槽",
+        )
+
+        sql = compile_spec_mdl(spec)
+
+        self.assertIn("JOIN patrol ON patrol.id = disease.patrol_id", sql)
+        self.assertIn("patrol.task_number AS 任务编号", sql)
+        self.assertIn("GROUP BY patrol.task_number", sql)
+        self.assertNotIn("disease.patrol_number AS 任务编号", sql)
 
     @patch("app.query.spec_mdl.dictionary.patrol_status_labels")
     def test_patrol_status_dimension_uses_display_labels(self, status_labels):

@@ -1,11 +1,34 @@
 import unittest
 from unittest.mock import patch
 
+from app.query.contracts import QuerySpec, ValueBinding
+from app.query.fields import PhysicalSchemaView
 from app.services import preset_lib
-from app.query.template_sources import contract_from_builtin, contract_from_preset
+from app.query.template_sources import (
+    BuiltinTemplateProvider,
+    contract_from_builtin,
+    contract_from_preset,
+)
+from app.query.templates import resolve_templates
+from app.services.nl2sql import builtin_registry_issues
+
+
+def _binding(field, value, op="="):
+    return ValueBinding(
+        field=field,
+        op=op,
+        storage_value=value,
+        display_value=str(value),
+        source="user_explicit",
+        resolver="user_explicit",
+        raw_text=str(value),
+    )
 
 
 class TemplateSourceTests(unittest.TestCase):
+    def test_builtin_template_registry_has_no_dangling_builders(self):
+        self.assertEqual(builtin_registry_issues(), [])
+
     def test_builtin_metrics_become_exact_support_set(self):
         contract = contract_from_builtin(
             {
@@ -87,3 +110,89 @@ class TemplateSourceTests(unittest.TestCase):
         self.assertIn("ai_maintain_routes_patrol", sql)
         self.assertIn("pr.routes_id = 'route-1'", sql)
         self.assertNotIn("p.routes_id", sql)
+
+    def test_numeric_distribution_has_a_confirmation_contract(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count", "sum_area", "sum_effective_disease_length"),
+            dimensions=("route_name", "problem_type_name"),
+            filters=(
+                _binding("collection_time", ("2026-11-01", "2026-12-01"), "between"),
+                _binding("effective_disease_length", 2, ">"),
+            ),
+            output_projection=("route_name",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+
+        result = resolve_templates(
+            spec,
+            PhysicalSchemaView(columns=frozenset()),
+            [BuiltinTemplateProvider()],
+        )
+
+        self.assertIn(
+            "disease_numeric_distribution",
+            {item.contract.id for item in result.candidates},
+        )
+
+    def test_numeric_record_list_has_a_confirmation_contract(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="list",
+            metrics=(),
+            dimensions=(),
+            filters=(_binding("area", 2.5, ">"),),
+            output_projection=(
+                "problem_number",
+                "work_order_id",
+                "area",
+                "collection_time",
+            ),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+
+        result = resolve_templates(
+            spec,
+            PhysicalSchemaView(columns=frozenset()),
+            [BuiltinTemplateProvider()],
+        )
+
+        self.assertIn(
+            "disease_numeric_records",
+            {item.contract.id for item in result.candidates},
+        )
+
+    def test_damage_type_top_has_a_confirmation_contract(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="top_groups",
+            metrics=("count", "sum_area"),
+            dimensions=("problem_type_name",),
+            filters=(_binding("route_name", "route-1"),),
+            output_projection=("problem_type_name",),
+            order_by=({"field": "count", "direction": "desc"},),
+            limit=3,
+            required_assertions=(),
+        )
+
+        result = resolve_templates(
+            spec,
+            PhysicalSchemaView(columns=frozenset()),
+            [BuiltinTemplateProvider()],
+        )
+
+        self.assertIn(
+            "disease_type_top",
+            {item.contract.id for item in result.candidates},
+        )

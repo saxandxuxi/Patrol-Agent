@@ -2808,6 +2808,30 @@ class ServiceTests(unittest.TestCase):
             "llm_output_invalid",
         )
 
+    @patch(
+        "app.query.service.analyze_single_turn",
+        side_effect=LLMError(
+            "HTTP 429: insufficient balance",
+            category="quota_exhausted",
+            status_code=429,
+            retryable=False,
+        ),
+    )
+    def test_model_quota_failure_keeps_infrastructure_code(self, _analyze):
+        result = start_single_turn(
+            "复杂问题",
+            schema=PhysicalSchemaView(columns=frozenset()),
+            reach=FieldReachSet(),
+        )
+
+        self.assertIsNotNone(result.answer)
+        self.assertIn("额度不足", result.answer.text)
+        self.assertEqual(result.answer.sections[0]["status"], "error")
+        self.assertEqual(
+            result.answer.sections[0]["failure_code"],
+            "llm_quota_exhausted",
+        )
+
     @patch("app.query.service._default_post_calc_executor")
     @patch("app.query.service.verify_result", return_value=VerificationReport(status="accepted"))
     @patch("app.query.service.execute_compiled")

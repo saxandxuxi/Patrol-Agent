@@ -234,15 +234,12 @@ class CapabilityRepairTests(unittest.TestCase):
 
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
     @patch("app.query.analysis._analyze_once")
-    def test_ordered_complete_result_is_repaired_from_top_groups_to_distribution(
+    def test_ordered_complete_result_normalizes_before_replanning(
         self,
         analyze_once,
         _audit,
     ):
-        analyze_once.side_effect = [
-            ordered_patrol_plan("top_groups", None),
-            ordered_patrol_plan("distribution", None),
-        ]
+        analyze_once.return_value = ordered_patrol_plan("top_groups", None)
 
         plan = analyze_single_turn(
             "2026 年 10 月期间，每台巡检设备分别完成了多少公里的巡检里程？"
@@ -255,10 +252,7 @@ class CapabilityRepairTests(unittest.TestCase):
             subject="patrol",
         )
 
-        self.assertEqual(analyze_once.call_count, 2)
-        feedback = analyze_once.call_args_list[1].args[4]
-        self.assertIn("TopN", feedback)
-        self.assertIn("distribution", feedback)
+        self.assertEqual(analyze_once.call_count, 1)
         self.assertEqual(plan.nodes[0].spec.view, "distribution")
         self.assertIsNone(plan.nodes[0].spec.limit)
 

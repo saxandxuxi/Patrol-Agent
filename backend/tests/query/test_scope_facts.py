@@ -88,6 +88,32 @@ class ScopeFactsTests(unittest.TestCase):
         self.assertEqual(facts["route_id"], "route-id-1")
         self.assertIn("routes_id = 'route-id-1'", query.call_args_list[1].args[0])
 
+    @patch("app.services.calibrate.db_manager.query")
+    def test_route_facts_retries_a_transient_scope_probe_once(self, query):
+        ledger = {
+            "route_id": "route-transient",
+            "short_name": "瞬时探测路线",
+            "start_num": "K0+000",
+            "end_num": "K10+000",
+        }
+        data = {
+            "min_pile": 0,
+            "max_pile": 10000,
+            "min_time": "2026-11-01 00:00:00",
+            "max_time": "2026-11-09 00:00:00",
+            "cnt": 10,
+        }
+        query.side_effect = [
+            {"rows": [ledger]},
+            RuntimeError("temporary database error"),
+            {"rows": [data]},
+        ]
+
+        facts = route_facts("瞬时探测路线")
+
+        self.assertEqual(facts["data_count"], 10)
+        self.assertEqual(query.call_count, 3)
+
     @patch("app.services.calibrate.route_facts", return_value=FACTS)
     def test_pile_range_beyond_coverage_is_outside(self, _facts):
         """K400~K410 超出该路线桩号覆盖（K0+235~K327+412），不能当成 0 处。"""
@@ -177,6 +203,30 @@ class ScopeFactsTests(unittest.TestCase):
         self.assertIn("路线乙", facts.detail)
         self.assertIn("2026-10-31 18:00", facts.detail)
         self.assertIn("2026-10-27 17:00", facts.detail)
+
+    @patch("app.services.calibrate.route_facts")
+    def test_unavailable_scope_probe_is_unknown_not_outside(self, route_facts):
+        route_facts.return_value = {
+            "route": "route-1",
+            "data_count": None,
+            "data_min_time": None,
+            "data_max_time": None,
+        }
+
+        facts = empty_scope_facts(
+            spec(
+                (
+                    binding("route_name", "=", "route-1"),
+                    binding(
+                        "collection_time",
+                        "between",
+                        ("2026-11-01 00:00:00", "2026-12-01 00:00:00"),
+                    ),
+                )
+            )
+        )
+
+        self.assertEqual(facts.verdict, "")
 
     @patch("app.services.calibrate.route_facts")
     def test_multi_route_time_window_inside_every_route_is_inside(self, route_facts):

@@ -809,6 +809,197 @@ class ScalarDifferenceRenderingTests(unittest.TestCase):
         )
 
 
+class ProportionRenderingTests(unittest.TestCase):
+    @patch(
+        "app.calculations.domain.analysis.chat",
+        side_effect=AssertionError("ratio rendering must not use the LLM"),
+    )
+    def test_ratio_rendering_scales_percent_and_cheng_from_the_same_value(
+        self,
+        _chat,
+    ):
+        payload = execute_calculation(
+            {
+                "id": "q2",
+                "question": "按病害类型统计数量及占比",
+                "depends_on": ["q1"],
+                "required_assertions": ["preserve_user_scope"],
+            },
+            CalculationRequest(
+                tool="calculate_columns",
+                operation="ratio",
+                operands=(
+                    CalculationOperand(
+                        name="numerator",
+                        source={"node": "q1", "field": "count"},
+                    ),
+                    CalculationOperand(
+                        name="denominator",
+                        source={"node": "total", "field": "count"},
+                    ),
+                ),
+                output=CalculationOutput(
+                    name="ratio",
+                    label="占比",
+                    unit="成",
+                ),
+                precision=4,
+            ),
+            {
+                "q1": {
+                    "field_labels": {
+                        "problem_type_name": "病害类型",
+                        "count": "数量",
+                    },
+                    "rows": [
+                        {"病害类型": "条状修补", "数量": "512"},
+                        {"病害类型": "横向裂缝", "数量": "43"},
+                        {"病害类型": "抛洒物", "数量": "24"},
+                    ],
+                },
+                "total": {
+                    "field_labels": {"count": "总数"},
+                    "rows": [{"总数": "669"}],
+                },
+            },
+        )
+
+        self.assertTrue(payload["accepted"])
+        reply = str(payload["reply"])
+        self.assertIn("条状修补", reply)
+        self.assertIn("76.53%", reply)
+        self.assertIn("7.65成", reply)
+        self.assertIn("横向裂缝", reply)
+        self.assertIn("6.43%", reply)
+        self.assertIn("0.64成", reply)
+        self.assertIn("抛洒物", reply)
+        self.assertIn("3.59%", reply)
+        self.assertIn("0.36成", reply)
+
+    @patch(
+        "app.calculations.domain.analysis.chat",
+        side_effect=AssertionError(
+            "divide with a cheng output must not use the LLM"
+        ),
+    )
+    def test_divide_with_cheng_output_uses_proportion_rendering(self, _chat):
+        payload = execute_calculation(
+            {
+                "id": "q3",
+                "question": "按病害类型计算各自占总数几成",
+                "depends_on": ["q2", "total"],
+                "required_assertions": ["preserve_user_scope"],
+            },
+            CalculationRequest(
+                tool="calculate_columns",
+                operation="divide",
+                operands=(
+                    CalculationOperand(
+                        name="numerator",
+                        source={"node": "q2", "field": "count"},
+                    ),
+                    CalculationOperand(
+                        name="denominator",
+                        source={"node": "total", "field": "count"},
+                    ),
+                ),
+                output=CalculationOutput(
+                    name="share",
+                    label="占比",
+                    unit="成",
+                ),
+                precision=4,
+            ),
+            {
+                "q2": {
+                    "field_labels": {
+                        "problem_type_name": "病害类型",
+                        "count": "数量",
+                    },
+                    "rows": [
+                        {"病害类型": "条状修补", "数量": "512"},
+                        {"病害类型": "横向裂缝", "数量": "43"},
+                        {"病害类型": "抛洒物", "数量": "24"},
+                    ],
+                },
+                "total": {
+                    "field_labels": {"count": "总数"},
+                    "rows": [{"总数": "669"}],
+                },
+            },
+        )
+
+        self.assertTrue(payload["accepted"])
+        reply = str(payload["reply"])
+        self.assertIn("76.53%", reply)
+        self.assertIn("7.65成", reply)
+        self.assertIn("6.43%", reply)
+        self.assertIn("0.64成", reply)
+        self.assertIn("3.59%", reply)
+        self.assertIn("0.36成", reply)
+
+    @patch(
+        "app.calculations.domain.analysis.chat",
+        side_effect=AssertionError("percentage rendering must not use the LLM"),
+    )
+    def test_percentage_share_rendering_does_not_scale_twice(self, _chat):
+        payload = execute_calculation(
+            {
+                "id": "q2",
+                "question": "按路线统计数量占比",
+                "depends_on": ["q1"],
+                "required_assertions": ["preserve_user_scope"],
+            },
+            CalculationRequest(
+                tool="calculate_columns",
+                operation="percentage_share",
+                operands=(
+                    CalculationOperand(
+                        name="numerator",
+                        source={"node": "q1", "field": "count"},
+                    ),
+                    CalculationOperand(
+                        name="total",
+                        source={"node": "total", "field": "count"},
+                    ),
+                ),
+                output=CalculationOutput(
+                    name="share",
+                    label="占比",
+                    unit="%",
+                ),
+                precision=2,
+            ),
+            {
+                "q1": {
+                    "field_labels": {
+                        "route_name": "路线名称",
+                        "count": "数量",
+                    },
+                    "rows": [
+                        {"路线名称": "路线A", "数量": "10"},
+                        {"路线名称": "路线B", "数量": "30"},
+                    ],
+                },
+                "total": {
+                    "field_labels": {"count": "总数"},
+                    "rows": [{"总数": "40"}],
+                },
+            },
+        )
+
+        self.assertTrue(payload["accepted"])
+        reply = str(payload["reply"])
+        self.assertIn("路线A", reply)
+        self.assertIn("25%", reply)
+        self.assertIn("2.5成", reply)
+        self.assertIn("路线B", reply)
+        self.assertIn("75%", reply)
+        self.assertIn("7.5成", reply)
+        self.assertNotIn("2500%", reply)
+        self.assertNotIn("7500%", reply)
+
+
 class SeriesCalculationTests(unittest.TestCase):
     def test_series_preserves_zero_batches_and_computes_differences(self):
         result = calculate_series(

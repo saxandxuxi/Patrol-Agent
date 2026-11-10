@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from app.query.capability_registry import CapabilityRegistry, resolve_subject
 from app.query.capability_registry.subject_resolver import SubjectResolution
-from app.query.analysis import _analyze_once
+from app.query.analysis import QuerySubjectConflict, _analyze_once
 from app.query.contracts import QueryPlan, QuerySpecError, QuerySpecUnsupported
 from app.query.fields import FieldReachHit, FieldReachSet, PhysicalSchemaView
 from app.query.service import _field_reach_from_ground, start_single_turn
@@ -83,6 +83,27 @@ class SubjectCapabilityViewTests(unittest.TestCase):
         self.assertEqual(
             {item.code: item.label for item in severity.enum_values},
             {"0": "轻度", "5": "中度", "10": "重度"},
+        )
+
+    def test_planner_view_exposes_disease_evidence_task_identity(self):
+        view = self.registry.planner_view("disease", FieldReachSet())
+
+        task_number = view.fields["task_number"]
+        self.assertEqual(task_number.label, "任务编号")
+        self.assertIn("dimension", task_number.roles)
+        prompt_dict = view.to_prompt_dict()
+        self.assertEqual(
+            prompt_dict["fields"]["task_number"]["label"],
+            "任务编号",
+        )
+        semantics = prompt_dict["query_semantics"]
+        self.assertEqual(
+            semantics["task_disease_evidence"]["allowed_subject"],
+            "disease",
+        )
+        self.assertEqual(
+            semantics["task_disease_evidence"]["batch_dimensions"],
+            ["task_number"],
         )
 
     def test_planner_view_exposes_declared_business_capability_gaps(self):
@@ -275,6 +296,35 @@ class SubjectCapabilityViewTests(unittest.TestCase):
         self.assertEqual(resolution.subject, "disease")
         chat_json.assert_called_once()
 
+    @patch("app.query.capability_registry.subject_resolver.chat_json")
+    def test_subject_reroute_passes_planner_result_as_evidence(self, chat_json):
+        chat_json.return_value = {
+            "subject": "disease",
+            "confidence": 0.9,
+            "evidence": ["用户最终问的是病害数量"],
+        }
+
+        resolution = resolve_subject(
+            "长沙－芷江高速公路11月2日的坑槽数量",
+            "data",
+            FieldReachSet(),
+            self.registry,
+            grounded={
+                "subject": "section",
+                "table": "basic_facilities_sections",
+            },
+            conflicting_subject="disease",
+            previous_resolution=SubjectResolution(
+                subject="section",
+                confidence=0.8,
+            ),
+        )
+
+        self.assertEqual(resolution.subject, "disease")
+        prompt = str(chat_json.call_args.args[0])
+        self.assertIn("planner_final_subject=disease", prompt)
+        self.assertIn("previous_subject=section", prompt)
+
     def test_reach_conversion_preserves_real_column_hits(self):
         reach = _field_reach_from_ground(
             {
@@ -328,6 +378,80 @@ class SubjectCapabilityViewTests(unittest.TestCase):
         passed_reach = analyze.call_args.args[3]
         self.assertTrue(passed_reach.hits)
         self.assertEqual(passed_reach.hits[0].column, "up_or_down")
+
+    @patch("app.query.service.resolve_templates")
+    @patch("app.query.service.analyze_single_turn")
+    @patch("app.query.service.field_grounding.ground")
+    @patch("app.query.service.resolve_subject")
+    def test_subject_conflict_reroutes_once_with_planner_evidence(
+        self,
+        resolve_subject,
+        ground,
+        analyze,
+        resolve_templates,
+    ):
+        question = "长沙－芷江高速公路11月2日的坑槽数量"
+        initial = SubjectResolution(subject="section", confidence=0.8)
+        rerouted = SubjectResolution(subject="disease", confidence=0.9)
+        resolve_subject.side_effect = [initial, rerouted]
+        ground.return_value = {
+            "subject": "section",
+            "table": "basic_facilities_sections",
+            "columns": [],
+        }
+        analyze.side_effect = [
+            QuerySubjectConflict(
+                initial_subject="section",
+                planner_subject="disease",
+            ),
+            QueryPlan(question=question, nodes=()),
+        ]
+        resolve_templates.return_value.candidates = ()
+
+        turn = start_single_turn(question, providers=[])
+
+        self.assertEqual(turn.plan.question, question)
+        self.assertEqual(analyze.call_count, 2)
+        self.assertEqual(analyze.call_args_list[0].kwargs["subject"], "section")
+        self.assertEqual(analyze.call_args_list[1].kwargs["subject"], "disease")
+        self.assertEqual(resolve_subject.call_count, 2)
+        reroute_kwargs = resolve_subject.call_args_list[1].kwargs
+        self.assertEqual(reroute_kwargs["conflicting_subject"], "disease")
+        self.assertEqual(reroute_kwargs["previous_resolution"], initial)
+
+    @patch("app.query.service.resolve_templates")
+    @patch("app.query.service.analyze_single_turn")
+    @patch("app.query.service.field_grounding.ground")
+    @patch("app.query.service.resolve_subject")
+    def test_repeated_subject_conflict_stops_after_one_reroute(
+        self,
+        resolve_subject,
+        ground,
+        analyze,
+        resolve_templates,
+    ):
+        question = "最近的巡检记录和检出的病害"
+        initial = SubjectResolution(subject="section", confidence=0.8)
+        resolve_subject.side_effect = [
+            initial,
+            SubjectResolution(subject="disease", confidence=0.9),
+        ]
+        ground.return_value = {}
+        conflict = QuerySubjectConflict(
+            initial_subject="section",
+            planner_subject="disease",
+        )
+        analyze.side_effect = [conflict, conflict]
+        resolve_templates.return_value.candidates = ()
+
+        turn = start_single_turn(question, providers=[])
+
+        self.assertEqual(analyze.call_count, 2)
+        self.assertEqual(resolve_subject.call_count, 2)
+        self.assertEqual(
+            turn.answer.sections[0]["failure_code"],
+            "query_subject_conflict",
+        )
 
 
 if __name__ == "__main__":

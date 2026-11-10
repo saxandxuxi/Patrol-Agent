@@ -16,7 +16,7 @@ from ..services import (
 from ..services.llm import LLMError
 from ..services.logging_service import console_json
 from ..services.route_resolver import QueryPlanError
-from .analysis import analyze_single_turn
+from .analysis import QuerySubjectConflict, analyze_single_turn
 from .capability_registry import CapabilityRegistry, resolve_subject
 from .compiler import CompiledQuery, compile_query
 from .confirmations import (
@@ -44,6 +44,7 @@ from .empty_results import (
 )
 from .executor import execute_compiled
 from .fields import FieldReachHit, FieldReachSet, PhysicalSchemaView
+from .llm_failures import describe_llm_failure
 from .patrol_batches import (
     PatrolBatchResolutionError,
     describe_batch_lookup_evidence,
@@ -62,6 +63,7 @@ from .presentation.boundaries import (
     explicit_range_note,
     partial_coverage_scope_notice,
 )
+from .presentation.conditions import observation_group_labels
 from .presentation.enumerations import (
     complete_explicit_enum_groups,
     missing_explicit_top_group_labels,
@@ -339,14 +341,17 @@ def _data_answer_text(section: dict[str, Any]) -> str:
             units=display_units,
             missing_labels=missing_labels,
         )
-        text = f"{prefix}查询完成，共 {shown} 行"
-        if digest:
-            # 结果很少时要说明“这就是全部”，否则用户分不清是完整清单
-            # 还是只看了前几名。
-            if shown <= 3:
-                text = f"{text}（已全部列出）：{digest}"
-            else:
-                text = f"{text}；按排序前列：{digest}"
+        if shown == 0:
+            text = f"{prefix}在查询范围内没有匹配记录（0 行）"
+        else:
+            text = f"{prefix}查询完成，共 {shown} 行"
+            if digest:
+                # 结果很少时要说明“这就是全部”，否则用户分不清是完整清单
+                # 还是只看了前几名。
+                if shown <= 3:
+                    text = f"{text}（已全部列出）：{digest}"
+                else:
+                    text = f"{text}；按排序前列：{digest}"
         spec = section.get("spec")
         requested_top = (
             spec.get("limit")
@@ -379,6 +384,12 @@ def _data_answer_text(section: dict[str, Any]) -> str:
             (
                 "范围内没有" + "、".join(filled) + "的记录，已按 0 计入"
                 if filled
+                else ""
+            ),
+            (
+                "在现有记录覆盖到的重叠区间内未观察到匹配记录"
+                if shown == 0
+                and section.get("coverage_verdict") == PARTIAL
                 else ""
             ),
             _empty_metric_note(
@@ -771,17 +782,7 @@ def _observation_payload(
         ]
     logical_fields = list(dict.fromkeys(str(field) for field in logical_fields))
     field_labels = result_field_map(spec, observation.columns)
-    group_labels: dict[str, Any] = {}
-    for item in spec.filters:
-        filter_field = str(item.field).rsplit(".", 1)[-1]
-        if filter_field == "problem_type_name":
-            group_labels["病害类型"] = item.display_value
-        elif filter_field == "up_or_down":
-            group_labels["上下行方向"] = item.display_value
-        elif str(getattr(item, "source", "")) == "previous_result":
-            # 上一节点传下来的条件也是这次结果的一部分，不能丢。
-            label = field_labels.get(filter_field) or filter_field
-            group_labels[str(label)] = item.display_value
+    group_labels = observation_group_labels(spec.filters, field_labels)
     return {
         "question": question,
         "view": spec.view,
@@ -1808,14 +1809,60 @@ def start_single_turn(
         kind=kind,
     )
     try:
-        plan = analyze_single_turn(
-            question,
-            kind,
-            schema,
-            reach,
-            audit=True,
-            registry=registry,
-            subject=subject_resolution.subject,
+        for subject_attempt in range(2):
+            try:
+                plan = analyze_single_turn(
+                    question,
+                    kind,
+                    schema,
+                    reach,
+                    audit=True,
+                    registry=registry,
+                    subject=subject_resolution.subject,
+                )
+                break
+            except QuerySubjectConflict as exc:
+                if subject_attempt == 1:
+                    raise
+                rerouted = resolve_subject(
+                    question,
+                    "data",
+                    reach,
+                    registry,
+                    grounded=grounded,
+                    kind=kind,
+                    conflicting_subject=exc.planner_subject,
+                    previous_resolution=subject_resolution,
+                )
+                if not rerouted.subject:
+                    raise QuerySubjectConflict(
+                        initial_subject=subject_resolution.subject,
+                        planner_subject=exc.planner_subject,
+                        reason=(
+                            "初始主体与 Planner 最终主体不一致，"
+                            "主体路由复核后仍未确定唯一主体"
+                        ),
+                    ) from exc
+                subject_resolution = rerouted
+    except QuerySubjectConflict as exc:
+        detail = (
+            "主体路由复核一次后仍未统一："
+            f"初始主体为 {exc.initial_subject or '未知'}，"
+            f"Planner 最终主体为 {exc.planner_subject or '未知'}；"
+            "本次查询没有执行，请补充问题最终要统计或列出的对象"
+        )
+        return TurnStart(
+            plan=QueryPlan(question=question, nodes=()),
+            answer=AnswerPackage(
+                detail,
+                (
+                    {
+                        "status": "unsupported",
+                        "failure_code": "query_subject_conflict",
+                        "answer": detail,
+                    },
+                ),
+            ),
         )
     except QueryPlanError as exc:
         return TurnStart(
@@ -1831,16 +1878,17 @@ def start_single_turn(
                 ),
             ),
         )
-    except LLMError:
+    except LLMError as exc:
+        failure_code, failure_text = describe_llm_failure(exc)
         return TurnStart(
             plan=QueryPlan(question=question, nodes=()),
             answer=AnswerPackage(
-                "模型没有返回可解析的结构化查询计划，请重试或切换模型。",
+                failure_text,
                 (
                     {
                         "status": "error",
-                        "failure_code": "llm_output_invalid",
-                        "answer": "模型输出格式无效，当前查询未执行。",
+                        "failure_code": failure_code,
+                        "answer": failure_text,
                     },
                 ),
             ),
@@ -2108,3 +2156,8 @@ def pending_confirmation(ticket_token: str) -> TurnStart | None:
         plan=pending.plan,
         candidate_set=pending.candidates,
     )
+
+
+def discard_pending_confirmation(ticket_token: str) -> None:
+    """Drop a pending template choice without executing it."""
+    _PENDING.pop(str(ticket_token or ""), None)

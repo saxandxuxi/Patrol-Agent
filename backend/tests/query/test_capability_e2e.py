@@ -71,6 +71,39 @@ class CapabilityEndToEndTests(unittest.TestCase):
         self.assertNotIn("换一种说法", result.answer.text)
         self.assertNotIn("切换模型重试", result.answer.text)
 
+    @patch("app.query.service.field_grounding.ground")
+    @patch("app.query.analysis.chat_json")
+    def test_structured_unknown_term_is_presented_as_business_reason(
+        self,
+        chat_json,
+        ground,
+    ):
+        ground.return_value = {
+            "subject": "problem",
+            "table": "ai_problem",
+            "columns": [],
+        }
+        chat_json.return_value = {
+            "final_goal": "按历史损坏程度区间统计病害",
+            "intent_family": "distribution",
+            "unknown_terms": [
+                {
+                    "term": "history_damage_interval",
+                    "status": "unavailable",
+                    "reason": "历史损坏程度字段当前全部为空，无法按严重程度筛选或分组",
+                }
+            ],
+            "views": [],
+        }
+
+        result = start_single_turn(
+            "按历史损坏程度区间统计各区间病害数量和累计面积",
+            providers=[],
+        )
+
+        self.assertIn("字段当前全部为空", result.answer.text)
+        self.assertNotIn("{'term':", result.answer.text)
+
     @patch("app.query.service._execute_plan", return_value=AnswerPackage("ok"))
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
     @patch("app.query.analysis.chat_json")

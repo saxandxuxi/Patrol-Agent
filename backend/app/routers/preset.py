@@ -92,6 +92,7 @@ def preset_queries(with_sql: int = 0) -> dict:
             name: {
                 "label": spec.get("label") or name,
                 **({"type": spec["type"]} if spec.get("type") else {}),
+                **({"hint": spec["hint"]} if spec.get("hint") else {}),
                 "options": _options_for(name, spec),
             }
             for name, spec in specs.items()

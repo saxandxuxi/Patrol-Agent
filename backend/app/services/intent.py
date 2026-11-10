@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from . import prompts
@@ -40,6 +41,88 @@ def wants_images(message: str) -> bool:
     return False
 
 
+def _capability_evidence(
+    message: str,
+) -> tuple[str, str]:
+    """Return table candidates plus registered field status facts for the intent LLM."""
+
+    from . import field_grounding
+
+    grounded = field_grounding.ground("mysql", message, column_limit=8)
+    tables = grounded.get("tables") or []
+    candidates = (
+        "\n".join(
+            f"- {item.get('name') or item.get('model')}（相关度 {item.get('score')}）："
+            "命中证据 "
+            + "；".join(item.get("hits") or ["（无）"])
+            for item in tables
+        )
+        or "（无候选：这句话可能不是在问表里的数据）"
+    )
+
+    facts: list[dict[str, Any]] = []
+    try:
+        from ..query.capability_registry import CapabilityRegistry
+
+        registry = CapabilityRegistry.load()
+        table = str(grounded.get("table") or "")
+        subject = next(
+            (
+                subject_id
+                for subject_id, capability in registry.snapshot.subjects.items()
+                if capability.base_table == table
+            ),
+            "",
+        )
+        fields = registry.snapshot.fields.get(subject, {})
+        for column in grounded.get("columns") or ():
+            table_name = str(column.get("table") or "")
+            column_name = str(column.get("column") or "")
+            capability = fields.get(column_name)
+            if capability is None:
+                capability = next(
+                    (
+                        item
+                        for item in fields.values()
+                        if item.physical_table == table_name
+                        and item.physical_column == column_name
+                    ),
+                    None,
+                )
+            if capability is None:
+                continue
+            facts.append(
+                {
+                    "field": f"{table_name}.{column_name}",
+                    "label": str(column.get("label") or ""),
+                    "score": column.get("score"),
+                    "status": capability.status,
+                    "reason": capability.unavailable_reason,
+                    "source": "capability_registry",
+                }
+            )
+        for gap_id, raw in registry.snapshot.capability_gaps.items():
+            if not isinstance(raw, dict):
+                continue
+            facts.append(
+                {
+                    "capability_gap": gap_id,
+                    "status": raw.get("status") or "unavailable",
+                    "reason": raw.get("reason") or "",
+                    "source": "capability_registry",
+                }
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+    evidence = (
+        json.dumps(facts, ensure_ascii=False, indent=2)
+        if facts
+        else "（统一能力注册表没有为该问题找到字段状态事实）"
+    )
+    return candidates, evidence
+
+
 def _classify(message: str) -> tuple[str, bool]:
     """返回 (意图, 是否拿到了 LLM 的判断)。"""
     key = message.strip()
@@ -53,21 +136,18 @@ def _classify(message: str) -> tuple[str, bool]:
     intent = quick
     answered = False
     try:
-        from . import wren_engine
-
         # 用户用的是自己的叫法（"拍的片子""标了多少个点"），意图模型认不出就容易把
         # 数据查询判成 knowledge（实测"病害工单的处理状态"被判成知识问答，回了"资料中
         # 没有相关内容"）。把表结构语义检索的候选当**证据**给它，判断权还在模型手里。
-        candidates = (
-            "\n".join(
-                f"- {item['name']}（相关度 {item['score']}）：命中证据 "
-                + "；".join(item.get("hits") or ["（无）"])
-                for item in wren_engine.search_models("mysql", message, limit=3)
-            )
-            or "（无候选：这句话可能不是在问表里的数据）"
-        )
+        candidates, capability_evidence = _capability_evidence(message)
         data = chat_json(
-            prompts.messages("intent", message=message, rule_hint=quick, candidates=candidates),
+            prompts.messages(
+                "intent",
+                message=message,
+                rule_hint=quick,
+                candidates=candidates,
+                capability_evidence=capability_evidence,
+            ),
             # 意图分类是"读懂人话"的环节：用语义理解模型（.env 的 SEMANTIC_MODEL）
             model=role_model("semantic"),
         )

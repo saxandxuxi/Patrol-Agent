@@ -157,6 +157,170 @@ templates:
       flags:
         require:
         - numeric_condition
+  - id: disease_numeric_distribution
+    title: 带数值阈值的病害分组统计
+    source: builtin
+    dialect: physical
+    trigger: disease 分布统计，允许范围、病害类型、方向和数值特征过滤
+    builder: _build_generic_metric_template
+    match:
+      shapes:
+      - distribution
+      subjects:
+      - disease
+      metrics:
+      - count
+      - total_area
+      - sum_area
+      - average_area
+      - avg_area
+      - max_area
+      - min_area
+      - sum_disease_length
+      - sum_effective_disease_length
+      - avg_disease_length
+      - max_disease_length
+      - min_disease_length
+      - converted_area
+      - strip_converted_area
+      - distinct_problem_type_count
+      - route_length_km
+      group_by:
+      - damage_type
+      - problem_type_name
+      - route
+      - route_name
+      - direction
+      - up_or_down
+      - device
+      - device_code
+      - collection_time_month
+      - month
+      - collection_time_quarter
+      - quarter
+      - collection_time_year
+      - year
+      - week
+      - pile_bucket
+      - pile_segment_500m
+      - pile_segment_1000m
+      output_projection:
+      - count
+      - total_area
+      - sum_area
+      - average_area
+      - avg_area
+      - max_area
+      - min_area
+      - sum_disease_length
+      - sum_effective_disease_length
+      - avg_disease_length
+      - max_disease_length
+      - min_disease_length
+      - converted_area
+      - strip_converted_area
+      - distinct_problem_type_count
+      - route_length_km
+      - damage_type
+      - problem_type_name
+      - route
+      - route_name
+      - direction
+      - up_or_down
+      - device
+      - device_code
+      - collection_time
+      - collection_time_month
+      - month
+      - collection_time_quarter
+      - quarter
+      - collection_time_year
+      - year
+      - week
+      - pile_bucket
+      - pile_segment_500m
+      - pile_segment_1000m
+      slots:
+      - damage_type
+      - problem_type_name
+      - route_name
+      - route_id
+      - routes_id
+      - up_or_down
+      - device_code
+      - problem_number
+      - patrol_number
+      - patrol_id
+      - collection_time
+      - create_time
+      - effective_disease_length
+      - disease_length
+      - area
+      - confidence
+      - area_width
+      - area_height
+      - pile_number
+      - pile_distance
+      - categories_type
+      - category_name
+      - problem_status
+      - problem_source
+      - luge_name
+  - id: disease_numeric_records
+    title: 带数值阈值的病害明细
+    source: builtin
+    dialect: physical
+    trigger: disease 明细，保留用户给定的范围、时间、路线和数值特征过滤
+    builder: _build_generic_metric_template
+    match:
+      shapes:
+      - list
+      subjects:
+      - disease
+      output_projection:
+      - problem_number
+      - work_order_id
+      - problem_type_name
+      - route_name
+      - up_or_down
+      - device_code
+      - pile_number
+      - collection_time
+      - effective_disease_length
+      - disease_length
+      - area
+      - area_width
+      - area_height
+      - confidence
+      - image
+      - memo
+      slots:
+      - damage_type
+      - problem_type_name
+      - route_name
+      - route_id
+      - routes_id
+      - up_or_down
+      - device_code
+      - problem_number
+      - work_order_id
+      - patrol_number
+      - patrol_id
+      - collection_time
+      - create_time
+      - effective_disease_length
+      - disease_length
+      - area
+      - confidence
+      - area_width
+      - area_height
+      - pile_number
+      - pile_distance
+      - categories_type
+      - category_name
+      - problem_status
+      - problem_source
+      - luge_name
   - id: coverage_compare
     title: 覆盖范围对比
     source: builtin
@@ -270,6 +434,69 @@ templates:
     match:
       shapes:
       - top
+  - id: disease_type_top
+    title: 病害类型 TopN
+    source: builtin
+    dialect: physical
+    trigger: disease 按病害类型分组后按数量或面积取前 N
+    builder: _build_generic_metric_template
+    match:
+      shapes:
+      - top_groups
+      subjects:
+      - disease
+      metrics:
+      - count
+      - total_area
+      - sum_area
+      - average_area
+      - avg_area
+      - sum_effective_disease_length
+      group_by:
+      - damage_type
+      - problem_type_name
+      output_projection:
+      - count
+      - total_area
+      - sum_area
+      - average_area
+      - avg_area
+      - sum_effective_disease_length
+      - damage_type
+      - problem_type_name
+      - route_name
+      - up_or_down
+      - device_code
+      - collection_time
+      - pile_bucket
+      - pile_segment_500m
+      - pile_segment_1000m
+      slots:
+      - damage_type
+      - problem_type_name
+      - route_name
+      - route_id
+      - routes_id
+      - up_or_down
+      - device_code
+      - problem_number
+      - patrol_number
+      - patrol_id
+      - collection_time
+      - create_time
+      - effective_disease_length
+      - disease_length
+      - area
+      - confidence
+      - area_width
+      - area_height
+      - pile_number
+      - pile_distance
+      - categories_type
+      - category_name
+      - problem_status
+      - problem_source
+      - luge_name
   - id: average
     title: 平均值 + 超过平均值的条数
     source: builtin

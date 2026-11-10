@@ -14,6 +14,14 @@ Judge = Callable[[ExamCase, dict[str, Any], str], dict[str, Any]]
 # 留在指纹里会让同一套题在跑完之后被判成“代码已变化”。
 RUNTIME_ARTIFACT_NAMES = frozenset({"auto_templates.json"})
 RUNTIME_ARTIFACT_SUFFIXES = frozenset({".log", ".cache"})
+INFRASTRUCTURE_ERROR_CATEGORIES = frozenset(
+    {
+        "quota_exhausted",
+        "rate_limited",
+        "transport",
+        "provider_unavailable",
+    }
+)
 
 
 class StaleExamError(RuntimeError):
@@ -76,10 +84,24 @@ def run_exam(
             "code fingerprint changed; generate a new 15-question exam"
         )
     results: list[ExamCaseResult] = []
-    for case in manifest.cases:
+    for case_index, case in enumerate(manifest.cases):
         try:
             payload = runner(case)
         except Exception as exc:  # noqa: BLE001
+            category = str(getattr(exc, "category", "") or "")
+            if category in INFRASTRUCTURE_ERROR_CATEGORIES:
+                results.append(
+                    ExamCaseResult(
+                        id=case.id,
+                        source=case.source,
+                        ok=False,
+                        verdict="infrastructure_blocked",
+                        failure_layer="infrastructure",
+                        reason=f"{category}: {exc}",
+                    )
+                )
+                _append_not_run(results, manifest.cases[case_index + 1 :])
+                break
             results.append(
                 ExamCaseResult(
                     id=case.id,
@@ -91,9 +113,41 @@ def run_exam(
                 )
             )
             continue
+        infrastructure = payload.get("infrastructure")
+        if isinstance(infrastructure, dict):
+            kind = str(infrastructure.get("kind") or "provider_error")
+            reason = str(infrastructure.get("reason") or kind)
+            results.append(
+                ExamCaseResult(
+                    id=case.id,
+                    source=case.source,
+                    ok=False,
+                    verdict="infrastructure_blocked",
+                    failure_layer="infrastructure",
+                    reason=f"{kind}: {reason}",
+                    answer=str(payload.get("answer") or ""),
+                )
+            )
+            _append_not_run(results, manifest.cases[case_index + 1 :])
+            break
         try:
             verdict = judge(case, payload, document)
         except Exception as exc:  # noqa: BLE001
+            category = str(getattr(exc, "category", "") or "")
+            if category in INFRASTRUCTURE_ERROR_CATEGORIES:
+                results.append(
+                    ExamCaseResult(
+                        id=case.id,
+                        source=case.source,
+                        ok=False,
+                        verdict="infrastructure_blocked",
+                        failure_layer="infrastructure",
+                        reason=f"{category}: {exc}",
+                        answer=str(payload.get("answer") or ""),
+                    )
+                )
+                _append_not_run(results, manifest.cases[case_index + 1 :])
+                break
             results.append(
                 ExamCaseResult(
                     id=case.id,
@@ -143,12 +197,17 @@ def run_exam(
     thresholds_met = (
         passed_fresh >= 12
         and passed_old >= 4
-        and passed_fresh + passed_old >= 16
+        and passed_fresh + passed_old >= 18
     )
     promoted = first_attempt and thresholds_met
+    infrastructure_blocked = any(
+        item.failure_layer == "infrastructure" for item in results
+    )
     reason = (
-        "达到 15 新题 80% 和 5 旧题 80% 晋级线"
+        "达到 15 新题 80%、5 旧题 80% 且总计 18/20 的晋级线"
         if promoted
+        else "考试未完成：模型基础设施阻塞，不产生业务能力成绩"
+        if infrastructure_blocked
         else "同一套题重跑只能用于诊断，不能作为晋级证据"
         if thresholds_met and not first_attempt
         else (
@@ -167,6 +226,23 @@ def run_exam(
         promotion_reason=reason,
         results=tuple(results),
     )
+
+
+def _append_not_run(
+    results: list[ExamCaseResult],
+    remaining: tuple[ExamCase, ...],
+) -> None:
+    for case in remaining:
+        results.append(
+            ExamCaseResult(
+                id=case.id,
+                source=case.source,
+                ok=False,
+                verdict="not_run",
+                failure_layer="infrastructure",
+                reason="前序模型基础设施故障，考试已停止，禁止继续消耗额度",
+            )
+        )
 
 
 def assert_promotion(report: ExamReport) -> None:

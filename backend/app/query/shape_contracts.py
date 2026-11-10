@@ -78,6 +78,15 @@ def _base_field(field: str) -> str:
 
 
 def normalize_top_view(spec: QuerySpec) -> QuerySpec:
+    if spec.view not in {"top", "top_records", "top_groups"}:
+        return spec
+    if spec.limit is None or int(spec.limit) <= 0:
+        if spec.metrics:
+            return replace(
+                spec,
+                view="distribution" if spec.dimensions else "count",
+            )
+        return replace(spec, view="list")
     if spec.view != "top":
         return spec
     return replace(

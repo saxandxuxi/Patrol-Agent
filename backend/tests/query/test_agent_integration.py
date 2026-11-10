@@ -292,6 +292,84 @@ class AgentIntegrationTests(unittest.TestCase):
         return_value={"single_turn_compiler_enabled": True},
     )
     @patch("app.query.service.start_single_turn")
+    def test_successful_single_section_is_reviewable_with_original_question(
+        self,
+        start,
+        _settings,
+        _intent,
+        _persist,
+    ):
+        start.return_value = TurnStart(
+            plan=count_plan(),
+            answer=AnswerPackage(
+                "共 10 处。",
+                (
+                    {
+                        "node_id": "q1",
+                        "question": "泛油有多少处？",
+                        "status": "accepted",
+                        "sql": "SELECT COUNT(*) FROM ai_problem",
+                        "rows": [{"count": 10}],
+                    },
+                ),
+            ),
+        )
+
+        payload = agent.handle_message("泛油有多少处？", session_id="s1")
+
+        self.assertTrue(payload["reviewable"])
+        self.assertEqual(payload["question"], "泛油有多少处？")
+        self.assertEqual(payload["used_question"], "泛油有多少处？")
+
+    @patch("app.services.agent._persist_conversation_turn")
+    @patch("app.services.agent.intent_service.classify_intent", return_value="composite")
+    @patch(
+        "app.services.agent.chat_settings.load",
+        return_value={"single_turn_compiler_enabled": True},
+    )
+    @patch("app.query.service.start_single_turn")
+    def test_successful_composite_is_reviewable_when_each_sql_child_is_accepted(
+        self,
+        start,
+        _settings,
+        _intent,
+        _persist,
+    ):
+        question = "分别统计泛油和坑槽数量"
+        start.return_value = TurnStart(
+            plan=replace(count_plan(), question=question),
+            answer=AnswerPackage(
+                "两类病害数量见结果工作台",
+                (
+                    {
+                        "node_id": "q1",
+                        "question": "泛油有多少处？",
+                        "status": "accepted",
+                        "sql": "SELECT COUNT(*) FROM ai_problem",
+                    },
+                    {
+                        "node_id": "q2",
+                        "question": "坑槽有多少处？",
+                        "status": "accepted",
+                        "sql": "SELECT COUNT(*) FROM ai_problem",
+                    },
+                ),
+            ),
+        )
+
+        payload = agent.handle_message(question, session_id="s1")
+
+        self.assertTrue(payload["reviewable"])
+        self.assertEqual(payload["question"], question)
+        self.assertEqual(payload["used_question"], question)
+
+    @patch("app.services.agent._persist_conversation_turn")
+    @patch("app.services.agent.intent_service.classify_intent", return_value="data")
+    @patch(
+        "app.services.agent.chat_settings.load",
+        return_value={"single_turn_compiler_enabled": True},
+    )
+    @patch("app.query.service.start_single_turn")
     def test_structured_query_failure_is_visible_in_process(
         self,
         start,
@@ -603,6 +681,47 @@ class AgentIntegrationTests(unittest.TestCase):
             payload["process"]["steps"][0]["failure_code"],
             "confirmation_candidate_missing",
         )
+
+    @patch("app.services.agent._persist_conversation_turn")
+    @patch(
+        "app.services.agent.chat_settings.load",
+        return_value={"single_turn_compiler_enabled": True},
+    )
+    @patch("app.query.service.discard_pending_confirmation")
+    @patch("app.query.service.start_single_turn")
+    @patch("app.query.service.pending_confirmation")
+    def test_ai_control_action_restarts_from_original_question_without_templates(
+        self,
+        pending_confirmation,
+        start_single_turn,
+        discard_pending_confirmation,
+        _settings,
+        _persist,
+    ):
+        pending = turn_with_confirmation_card()
+        pending_confirmation.return_value = pending
+        start_single_turn.return_value = TurnStart(
+            plan=pending.plan,
+            answer=AnswerPackage("AI 路径完成"),
+        )
+
+        payload = agent.handle_message(
+            pending.plan.question,
+            session_id="s1",
+            choose_token="ticket",
+            capability_id="ai",
+            slot_values={},
+        )
+
+        discard_pending_confirmation.assert_called_once_with("ticket")
+        start_single_turn.assert_called_once()
+        self.assertEqual(
+            start_single_turn.call_args.args[0],
+            pending.plan.question,
+        )
+        self.assertEqual(start_single_turn.call_args.kwargs["providers"], ())
+        self.assertFalse(payload.get("await_confirm"))
+        self.assertEqual(payload["reply"], "AI 路径完成")
 
     @patch("app.services.agent._persist_conversation_turn")
     @patch(

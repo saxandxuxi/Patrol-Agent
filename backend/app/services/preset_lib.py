@@ -29,6 +29,7 @@ _DATE_VALUE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MONTH_VALUE = re.compile(r"^\d{4}-\d{2}$")
 _QUARTER_VALUE = re.compile(r"^\d{4}-(?:0?[147]|10|Q[1-4])$", re.I)
 _YEAR_VALUE = re.compile(r"^\d{4}$")
+_NUMERIC_VALUE = re.compile(r"^-?(?:0|[1-9]\d*)(?:\.\d+)?$")
 _VERSION: tuple[float, int] | None = None
 _CACHE: dict[str, Any] = {}
 
@@ -354,7 +355,10 @@ def bind(query: dict[str, Any], values: dict[str, str]) -> tuple[str | None, str
         if not value:
             return None, f"缺少参数：{spec.get('label') or name}"
         allowed = [str(item.get("value")) for item in options_for(name, spec)]
-        if str(spec.get("type")) in {"time", "date"}:
+        if str(spec.get("type")) == "numeric":
+            if not _NUMERIC_VALUE.fullmatch(value):
+                return None, f"{spec.get('label') or name}必须是数值：{value}"
+        elif str(spec.get("type")) in {"time", "date"}:
             # 自由日期（起止日期）没有枚举白名单：按 YYYY-MM-DD 校验，别让任意串进 SQL
             if not _DATE_VALUE.match(value):
                 return None, f"日期格式应为 YYYY-MM-DD：{name}={value}"

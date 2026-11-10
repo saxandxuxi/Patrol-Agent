@@ -1,10 +1,18 @@
 import unittest
 from unittest.mock import patch
 
-from app.query.analysis import _query_plan_calculation_issue, analyze_single_turn
+from app.query.analysis import (
+    _normalize_group_share_calculation,
+    _query_plan_calculation_issue,
+    analyze_single_turn,
+)
 from app.query.capability_registry import CapabilityRegistry
 from app.query.contracts import PlanNode, QueryPlan, QuerySpec, QuerySpecError
 from app.query.fields import FieldReachSet, PhysicalSchemaView
+from app.query.semantic_operations import (
+    GROUP_SHARE,
+    semantic_operation_contract_issue,
+)
 from app.query.values import resolve_value
 
 
@@ -163,6 +171,118 @@ class CalculationContractTests(unittest.TestCase):
             plan.nodes[-1].spec.metrics,
             ("custom_ratio",),
         )
+
+    def test_group_share_with_separate_total_uses_columns_calculation(self):
+        from app.calculations.models import CalculationRequest
+
+        groups = QuerySpec(
+            id="top_types",
+            kind="mysql",
+            subject="disease",
+            view="top_groups",
+            metrics=("count",),
+            dimensions=("problem_type_name",),
+            filters=(),
+            output_projection=("problem_type_name", "count"),
+            order_by=({"field": "count", "direction": "desc"},),
+            limit=3,
+            required_assertions=(),
+            question="按数量取前三种病害类型",
+        )
+        total = QuerySpec(
+            id="total",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="统计病害总数",
+        )
+        calculation = CalculationRequest.from_dict(
+            {
+                "tool": "calculate_scalar",
+                "operation": "percentage_share",
+                "operands": [
+                    {
+                        "name": "numerator",
+                        "source": {
+                            "node": "top_types",
+                            "field": "count",
+                            "row_index": 0,
+                        },
+                    },
+                    {
+                        "name": "total",
+                        "source": {"node": "total", "field": "count"},
+                    },
+                ],
+                "output": {
+                    "name": "share",
+                    "label": "占比",
+                    "unit": "成",
+                },
+                "precision": 4,
+            }
+        )
+        post = QuerySpec(
+            id="shares",
+            kind="mysql",
+            subject="disease",
+            view="data",
+            metrics=("share",),
+            dimensions=("problem_type_name",),
+            filters=(),
+            output_projection=("problem_type_name", "share"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="计算每种病害类型的占比",
+            calculation=calculation,
+        )
+        plan = QueryPlan(
+            question="前三种病害类型各占总数几成",
+            nodes=(
+                PlanNode(id="total", spec=total),
+                PlanNode(id="top_types", spec=groups),
+                PlanNode(
+                    id="shares",
+                    spec=post,
+                    depends_on=("top_types", "total"),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+
+        normalized = _normalize_group_share_calculation(
+            plan,
+            answer_operation=GROUP_SHARE,
+        )
+        normalized_calculation = normalized.nodes[-1].spec.calculation
+
+        self.assertIsNotNone(normalized_calculation)
+        self.assertEqual(normalized_calculation.tool, "calculate_columns")
+        self.assertEqual(
+            normalized_calculation.operation,
+            "percentage_share",
+        )
+        numerator = next(
+            item
+            for item in normalized_calculation.operands
+            if item.name == "numerator"
+        )
+        self.assertNotIn("row_index", numerator.source)
+        issue = semantic_operation_contract_issue(
+            plan,
+            GROUP_SHARE,
+            self.registry,
+        )
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue.code, "group_share_requires_columns")
 
     def test_multi_metric_comparison_can_explain_existing_scalars(self):
         first = QuerySpec(

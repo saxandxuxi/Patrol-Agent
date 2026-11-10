@@ -15,7 +15,7 @@ result_words:
     sum_effective_disease_length:
     - 病害总长度
     - 有效病害总长度
-    average_length:
+    avg_disease_length:
     - 平均长度
     route_name:
     - 路线名称

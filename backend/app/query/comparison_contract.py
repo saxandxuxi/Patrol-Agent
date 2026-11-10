@@ -135,24 +135,36 @@ def complete_dataset_comparison_dependencies(
     changed = False
     for node in plan.nodes:
         if (
-            node.node_type == "post_calc"
-            and "dataset_comparison" in node.spec.required_assertions
-            and not node.spec.comparison_depends_on
+            node.node_type != "post_calc"
+            or "dataset_comparison" not in node.spec.required_assertions
         ):
-            dependency_ids, issue = infer_dataset_comparison_dependencies(
+            nodes.append(node)
+            continue
+        comparison_ids = tuple(node.spec.comparison_depends_on)
+        if not comparison_ids:
+            inferred, issue = infer_dataset_comparison_dependencies(
                 plan,
                 node.id,
                 registry,
             )
-            if issue is None and dependency_ids:
-                node = replace(
-                    node,
-                    spec=replace(
-                        node.spec,
-                        comparison_depends_on=dependency_ids,
-                    ),
-                )
-                changed = True
+            if issue is None:
+                comparison_ids = inferred
+        dependency_ids = tuple(
+            dict.fromkeys((*node.depends_on, *comparison_ids))
+        )
+        if (
+            comparison_ids != node.spec.comparison_depends_on
+            or dependency_ids != node.depends_on
+        ):
+            node = replace(
+                node,
+                spec=replace(
+                    node.spec,
+                    comparison_depends_on=comparison_ids,
+                ),
+                depends_on=dependency_ids,
+            )
+            changed = True
         nodes.append(node)
     return replace(plan, nodes=tuple(nodes)) if changed else plan
 

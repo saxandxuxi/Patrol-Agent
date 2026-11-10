@@ -421,6 +421,101 @@ class SegmentPatrolCapabilityTests(unittest.TestCase):
 
         self.assertEqual(_plan_subject_issue(plan, "patrol"), "")
 
+    def test_input_binding_counts_as_a_terminal_subject_dependency(self):
+        plan = QueryPlan(
+            question="从病害反查检出它的巡检设备和路线",
+            nodes=(
+                PlanNode(
+                    id="q1",
+                    spec=QuerySpec(
+                        id="q1",
+                        kind="mysql",
+                        subject="patrol",
+                        view="list",
+                        metrics=(),
+                        dimensions=("patrol_number",),
+                        filters=(),
+                        output_projection=("patrol_number",),
+                        order_by=(),
+                        limit=None,
+                        required_assertions=("preserve_user_scope",),
+                    ),
+                ),
+                PlanNode(
+                    id="q2",
+                    spec=QuerySpec(
+                        id="q2",
+                        kind="mysql",
+                        subject="disease",
+                        view="list",
+                        metrics=(),
+                        dimensions=(),
+                        filters=(),
+                        output_projection=("problem_number",),
+                        order_by=(),
+                        limit=500,
+                        required_assertions=("preserve_user_scope",),
+                        input_bindings=(
+                            InputBinding(
+                                from_node="q1",
+                                from_field="patrol_number",
+                                to_field="patrol_number",
+                                op="in",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        self.assertEqual(_plan_subject_issue(plan, "patrol"), "")
+
+    def test_patrol_conclusion_can_use_disease_query_as_evidence(self):
+        plan = QueryPlan(
+            question=(
+                "2026年11月，包头-茂名高速K2400到K2450这个桩号区间内"
+                "没有查到病害记录，能否据此判断该区间本月没有病害？"
+            ),
+            nodes=(
+                PlanNode(
+                    id="q1",
+                    spec=QuerySpec(
+                        id="q1",
+                        kind="mysql",
+                        subject="disease",
+                        view="count",
+                        metrics=("count",),
+                        dimensions=(),
+                        filters=(),
+                        output_projection=("count",),
+                        order_by=(),
+                        limit=None,
+                        required_assertions=(),
+                    ),
+                ),
+                PlanNode(
+                    id="q2",
+                    spec=QuerySpec(
+                        id="q2",
+                        kind="mysql",
+                        subject="patrol",
+                        view="data",
+                        metrics=(),
+                        dimensions=(),
+                        filters=(),
+                        output_projection=(),
+                        order_by=(),
+                        limit=None,
+                        required_assertions=("analysis_only",),
+                    ),
+                    depends_on=("q1",),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+
+        self.assertEqual(_plan_subject_issue(plan, "patrol"), "")
+
     def test_unrelated_terminal_subject_is_still_rejected(self):
         plan = QueryPlan(
             question="把最近一次巡查记录调出来",

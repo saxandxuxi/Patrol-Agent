@@ -70,6 +70,14 @@ class Settings(BaseSettings):
         return out
     llm_timeout_seconds: float = 120.0
     llm_max_tokens: int = 1024
+    # 同一供应商模型共享每分钟请求上限。格式：provider/model=rpm，逗号分隔。
+    # 留空的模型不预限速；收到 429 后仍会进入共享冷却。
+    llm_model_rate_limits: str = (
+        "dashscope/kimi-k2.7-code=3,"
+        "dashscope/kimi-k2.6=3,"
+        "moonshot/kimi-k2.7-code=3,"
+        "moonshot/kimi-k2.6=3"
+    )
     # 知识问答：开启思考模式与联网搜索（受模型支持情况影响）
     knowledge_enable_thinking: bool = True
     knowledge_enable_search: bool = True

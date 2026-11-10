@@ -61,6 +61,54 @@ def _is_batch_node(node: PlanNode) -> bool:
     )
 
 
+def missing_recent_window_dependency(
+    plan: QueryPlan,
+    assist_evidence: Any = (),
+) -> str:
+    recent = [
+        item
+        for item in assist_evidence or ()
+        if isinstance(item, dict)
+        and str(item.get("candidate_type") or "") == "recent_window"
+    ]
+    if not recent:
+        return ""
+    targets = [
+        node
+        for node in plan.nodes
+        if node.node_type == "query_data" and node.spec.subject != "patrol"
+    ]
+    if not targets:
+        return ""
+    batch_ids = {
+        node.id
+        for node in plan.nodes
+        if node.node_type == "query_data" and node.spec.subject == "patrol"
+    }
+    missing = next(
+        (
+            node
+            for node in targets
+            if not any(
+                binding.from_node in batch_ids
+                and _base_field(binding.to_field) == "patrol_number"
+                for binding in node.spec.input_bindings
+            )
+        ),
+        None,
+    )
+    if missing is None:
+        return ""
+    limit = str(recent[-1].get("candidate_value") or "").strip() or "N"
+    return (
+        "missing_recent_window_dependency: "
+        f"用户要求最近 {limit} 次巡查，但节点 {missing.id} "
+        "没有通过 patrol_number 依赖真实巡检批次节点；"
+        "必须补充巡检批次视图和输入绑定，病害分布应按 count 排序，"
+        "不能用 create_time 冒充病害数量排名"
+    )
+
+
 def _shared_scope_filters(spec: QuerySpec, registry: Any) -> tuple[Any, ...]:
     patrol_fields = (
         registry.snapshot.fields.get("patrol", {})
@@ -259,7 +307,6 @@ def complete_recent_window_plan(
                             for item in node.spec.filters
                             if _base_field(item.field) != "patrol_number"
                         ),
-                        order_by=(),
                         limit=None,
                         input_bindings=bindings,
                         required_assertions=assertions,

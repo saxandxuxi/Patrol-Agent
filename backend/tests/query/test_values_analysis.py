@@ -76,6 +76,21 @@ class ValueAnalysisTests(unittest.TestCase):
         self.assertEqual(exclusive.storage_value, "2026-11-03 00:00:00")
         self.assertEqual(exclusive.op, "<")
 
+    def test_exact_between_boundaries_are_not_expanded_again(self):
+        value = resolve_value(
+            "collection_time",
+            "between",
+            ("2026-11-01 00:00:00", "2026-12-01 00:00:00"),
+            "长沙－芷江高速今年11月哪种病害最多",
+            "mysql",
+        )
+
+        self.assertEqual(
+            value.storage_value,
+            ("2026-11-01 00:00:00", "2026-12-01 00:00:00"),
+        )
+        self.assertEqual(value.op, "between")
+
     @patch("app.query.values.route_resolver._resolve_route")
     def test_route_name_resolves_to_storage_id(self, resolve_route):
         resolve_route.return_value = {
@@ -215,6 +230,57 @@ class ValueAnalysisTests(unittest.TestCase):
 
         self.assertEqual(start.source, "user_explicit")
         self.assertEqual(end.source, "user_explicit")
+
+    def test_explicit_month_restores_inclusive_model_end_date(self):
+        value = resolve_value(
+            "collection_time",
+            "<",
+            "2026-11-30",
+            "统计2026年11月的病害数量",
+            "mysql",
+        )
+
+        self.assertEqual(value.op, "<")
+        self.assertEqual(value.storage_value, "2026-12-01 00:00:00")
+
+    def test_explicit_month_between_uses_half_open_calendar_end(self):
+        value = resolve_value(
+            "collection_time",
+            "between",
+            ("2026-11-01", "2026-11-30"),
+            "统计2026年11月的病害数量",
+            "mysql",
+        )
+
+        self.assertEqual(
+            value.storage_value,
+            ("2026-11-01 00:00:00", "2026-12-01 00:00:00"),
+        )
+
+    def test_numeric_threshold_source_uses_normalized_value(self):
+        value = resolve_value(
+            "area",
+            ">",
+            4.0,
+            "2026年11月，包头-茂名高速上存在单处面积超过4平方米的坑槽病害的巡检任务有哪些？",
+            "mysql",
+            subject="disease",
+        )
+
+        self.assertEqual(value.storage_value, 4.0)
+        self.assertEqual(value.source, "user_explicit")
+
+    def test_numeric_threshold_source_does_not_match_a_longer_number(self):
+        value = resolve_value(
+            "area",
+            ">",
+            4.0,
+            "筛选单处面积超过14平方米的坑槽病害",
+            "mysql",
+            subject="disease",
+        )
+
+        self.assertEqual(value.source, "model_inference")
 
     def test_quarter_value_is_normalized_to_exact_time_bounds(self):
         value = resolve_value(

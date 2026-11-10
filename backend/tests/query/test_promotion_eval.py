@@ -18,6 +18,7 @@ from evals.promotion.runner import (
     run_exam,
 )
 from evals.promotion.product_runner import run_product_case
+from evals.run_holdout_eval import _default_judge
 
 
 def cases(source, count, prefix):
@@ -53,6 +54,49 @@ def manifest(fresh_ok=15, old_ok=5, fingerprint="code-1"):
 
 
 class PromotionEvalTests(unittest.TestCase):
+    @patch("evals.run_holdout_eval.chat_json")
+    def test_default_judge_receives_authoritative_field_capabilities(
+        self,
+        chat_json,
+    ):
+        chat_json.return_value = {
+            "accepted": True,
+            "verdict": "correct_answer",
+        }
+
+        _default_judge(
+            {
+                "id": "severity",
+                "question": "按严重程度统计病害",
+                "focus": "核对损坏程度字段",
+                "source": "fresh",
+            },
+            {
+                "answer": "按损坏程度统计完成",
+                "sections": [
+                    {
+                        "subject": "disease",
+                        "spec": {
+                            "dimensions": ["damage_type"],
+                            "metrics": ["count", "total_area"],
+                            "output_projection": ["damage_type"],
+                        },
+                    }
+                ],
+            },
+            "",
+        )
+
+        prompt = "\n".join(
+            str(item.get("content") or "")
+            for item in chat_json.call_args.args[0]
+        )
+        self.assertIn('"damage_type"', prompt)
+        self.assertIn("损坏程度", prompt)
+        self.assertIn("轻度", prompt)
+        self.assertIn('"history_damage_interval"', prompt)
+        self.assertIn('"status": "unavailable"', prompt)
+
     @patch("evals.promotion.case_factory.chat_json")
     def test_default_generator_receives_actual_capability_gaps(self, chat_json):
         chat_json.return_value = {"cases": []}
@@ -72,6 +116,49 @@ class PromotionEvalTests(unittest.TestCase):
         self.assertIn("lane_level_distribution", prompt)
         self.assertIn("history_damage_interval", prompt)
         self.assertIn("最多 1 道", prompt)
+
+    @patch("evals.promotion.case_factory.chat_json")
+    def test_default_generator_receives_field_level_capability_facts(
+        self,
+        chat_json,
+    ):
+        chat_json.return_value = {"cases": []}
+
+        _default_generator(
+            "业务文档",
+            set(),
+            1,
+            set(),
+            batch_focus=("当前数据能力不足",),
+        )
+
+        prompt = "\n".join(
+            str(item.get("content") or "")
+            for item in chat_json.call_args.args[0]
+        )
+        self.assertIn("当前字段级别能力事实", prompt)
+        self.assertIn('"disease.damage_type"', prompt)
+        self.assertIn('"label": "损坏程度"', prompt)
+        self.assertIn('"status": "available"', prompt)
+        self.assertIn('"disease.history_damage_interval"', prompt)
+        self.assertIn('"status": "unavailable"', prompt)
+
+    @patch("evals.promotion.case_factory.chat_json")
+    def test_default_generator_uses_nonzero_temperature(self, chat_json):
+        chat_json.return_value = {"cases": []}
+
+        _default_generator(
+            "业务文档",
+            set(),
+            1,
+            set(),
+            batch_focus=("具体记录明细",),
+        )
+
+        self.assertGreater(
+            chat_json.call_args.kwargs["temperature"],
+            0,
+        )
 
     @patch("evals.promotion.case_factory.chat_json")
     def test_default_generator_receives_structured_retry_evidence(
@@ -245,7 +332,7 @@ class PromotionEvalTests(unittest.TestCase):
         )
 
     def test_promotes_at_exact_thresholds(self):
-        item = manifest(fresh_ok=12, old_ok=4)
+        item = manifest(fresh_ok=14, old_ok=4)
         results = run_exam(
             item,
             runner=lambda case: {"answer": case.question},
@@ -259,10 +346,29 @@ class PromotionEvalTests(unittest.TestCase):
             fingerprint_fn=lambda: "code-1",
         )
 
-        self.assertEqual(results.passed_fresh, 12)
+        self.assertEqual(results.passed_fresh, 14)
         self.assertEqual(results.passed_old, 4)
+        self.assertEqual(results.passed_total, 18)
         self.assertTrue(results.promoted)
         assert_promotion(results)
+
+    def test_sixteen_total_does_not_promote(self):
+        item = manifest(fresh_ok=12, old_ok=4)
+        results = run_exam(
+            item,
+            runner=lambda case: {"answer": case.question},
+            judge=lambda case, payload, document: {
+                "accepted": item.answers[case.id],
+                "verdict": "correct_answer" if item.answers[case.id] else "wrong_value",
+                "failure_layer": "" if item.answers[case.id] else "verification",
+                "reason": "",
+            },
+            document="业务文档",
+            fingerprint_fn=lambda: "code-1",
+        )
+
+        self.assertEqual(results.passed_total, 16)
+        self.assertFalse(results.promoted)
 
     def test_eleven_fresh_passes_do_not_promote(self):
         item = manifest(fresh_ok=11, old_ok=5)
@@ -329,6 +435,64 @@ class PromotionEvalTests(unittest.TestCase):
                 document="业务文档",
                 fingerprint_fn=lambda: "code-2",
             )
+
+    def test_infrastructure_failure_stops_without_semantic_judge(self):
+        item = manifest()
+
+        results = run_exam(
+            item,
+            runner=lambda case: {
+                "answer": "模型额度不足",
+                "infrastructure": {
+                    "kind": "quota_exhausted",
+                    "code": "llm_quota_exhausted",
+                    "reason": "模型账户余额不足",
+                },
+            },
+            judge=lambda case, payload, document: self.fail(
+                "infrastructure failures must not call the semantic judge"
+            ),
+            document="业务文档",
+            fingerprint_fn=lambda: "code-1",
+        )
+
+        self.assertEqual(len(results.results), 20)
+        first = results.results[0]
+        self.assertEqual(first.verdict, "infrastructure_blocked")
+        self.assertEqual(first.failure_layer, "infrastructure")
+        self.assertEqual(
+            {item.verdict for item in results.results[1:]},
+            {"not_run"},
+        )
+        self.assertFalse(results.promoted)
+
+    def test_infrastructure_failure_during_judge_stops_exam(self):
+        item = manifest()
+
+        class JudgeQuotaError(RuntimeError):
+            category = "quota_exhausted"
+
+        def judge(case, payload, document):
+            raise JudgeQuotaError("judge model quota exhausted")
+
+        results = run_exam(
+            item,
+            runner=lambda case: {"answer": case.question},
+            judge=judge,
+            document="业务文档",
+            fingerprint_fn=lambda: "code-1",
+        )
+
+        self.assertEqual(len(results.results), 20)
+        first = results.results[0]
+        self.assertEqual(first.verdict, "infrastructure_blocked")
+        self.assertEqual(first.failure_layer, "infrastructure")
+        self.assertIn("quota_exhausted", first.reason)
+        self.assertEqual(
+            {item.verdict for item in results.results[1:]},
+            {"not_run"},
+        )
+        self.assertFalse(results.promoted)
 
     def test_old_case_sampling_is_seeded_and_unique(self):
         first = sample_old_cases(seed=7, count=5)
@@ -529,6 +693,36 @@ class PromotionEvalTests(unittest.TestCase):
 
         self.assertEqual(payload["answer"], "共 10 处")
         self.assertEqual(calls[1][1]["capability_id"], "candidate-1")
+
+    def test_product_runner_marks_provider_failure_as_infrastructure(self):
+        case = ExamCase(
+            id="one",
+            category="病害",
+            question="泛油有多少处",
+            source="fresh",
+        )
+
+        with patch(
+            "evals.promotion.product_runner.agent.handle_message",
+            return_value={
+                "reply": "模型额度不足",
+                "error": "模型额度不足",
+                "sections": [
+                    {
+                        "status": "error",
+                        "failure_code": "llm_quota_exhausted",
+                        "answer": "模型额度不足",
+                    }
+                ],
+            },
+        ):
+            payload = run_product_case(case)
+
+        self.assertEqual(
+            payload["infrastructure"]["kind"],
+            "quota_exhausted",
+        )
+        self.assertIn("模型额度不足", payload["infrastructure"]["reason"])
 
 
 if __name__ == "__main__":

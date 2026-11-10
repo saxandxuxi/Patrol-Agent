@@ -411,6 +411,15 @@ def parse_time_range(message: str, now: datetime | None = None) -> tuple[datetim
         first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         next_month = (first + timedelta(days=32)).replace(day=1)
         return first, next_month
+    relative_month = re.search(
+        r"(今年|去年)\s*(\d{1,2})\s*月(?!\s*\d)",
+        message,
+    )
+    if relative_month:
+        year = now.year if relative_month.group(1) == "今年" else now.year - 1
+        bounds = _month_bounds(year, int(relative_month.group(2)))
+        if bounds:
+            return bounds
     if any(word in text for word in ("去年", "上一年")):
         return datetime(now.year - 1, 1, 1), datetime(now.year, 1, 1)
     if any(word in text for word in ("今年", "本年度")):

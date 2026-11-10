@@ -1,0 +1,149 @@
+version: 1
+exam_id: promotion-20261110-103144
+generated_at: '2026-11-10T10:31:44.963856+08:00'
+document_hash: 14290f2a97237ba9808dc872d90525eecb6d823d6384eb4430934fb2ba6bd477
+seed: 202611101030
+code_fingerprint: content:ab390d3645e618a4d1c8e9183b9432b2b047a8b3c25c63f97fd43553c4d9efc4
+fresh_case_ids:
+- fresh_batch112_asset_disease_total_202611
+- fresh_batch112_patrol_20261128_detail
+- fresh_batch112_route_compare_bt_cz_nov
+- fresh_batch113_type_share_erlian_nov
+- fresh_batch113_dir_split_erlian_nov
+- fresh_batch113_task_detail_20261129
+- fresh_batch113_device_task_count_oct_nov_erlian
+- fresh_batch114_topn_route_strip_repair_area_oct_nov
+- fresh_batch114_detail_pothole_sk_nov28_list
+- fresh_batch114_trend_monthly_bt_sk_hmz_oct_nov
+- fresh_batch114_threshold_len_lateral_crack_bt_nov_5m
+- fresh_cross_asset_route_surface_grade_202611
+- fresh_segment_pile_range_type_dist_bt_202611
+- fresh_cross_batch_new_compare_cz_nov_202611
+- fresh_capability_gap_device_runtime_status
+old_case_ids:
+- fresh_batch52_patrol_authenticity_position_change_bt_nov
+- asset2_dir_baotou_sides
+- type_huaihua_route_types
+- fresh_batch26_pile_range_type_dist_sh_nov
+- fresh_cross_asset_surface_grade_nov_v4
+cases:
+- id: fresh_batch112_asset_disease_total_202611
+  category: 病害数量与规模
+  question: 2026年11月全路网一共检出了多少处病害？这些病害的总面积是多少平方米？
+  focus: 病害数量与规模：验证系统能正确统计指定时间范围内全路网的病害总处数和总面积，并返回准确的数值。
+  source: fresh
+  coverage_slot: 病害数量与规模
+- id: fresh_batch112_patrol_20261128_detail
+  category: 指定日期或单次巡检
+  question: 2026年11月28日当天执行了哪些巡检任务？请列出每次任务的编号、覆盖路线以及该次任务检出的病害总数。
+  focus: 指定日期或单次巡检：验证系统能按指定日期检索巡检任务列表，并返回每个任务的编号、覆盖路线及病害总数。
+  source: fresh
+  coverage_slot: 指定日期或单次巡检
+- id: fresh_batch112_route_compare_bt_cz_nov
+  category: 路线范围与路线对比
+  question: 2026年11月，包头-茂名高速和长沙－芷江高速哪条路检出的病害总数更多？请分别给出两条路的病害总处数和总面积。
+  focus: 路线范围与路线对比：验证系统能针对两条指定路线分别统计病害总处数和总面积，并正确比较大小。
+  source: fresh
+  coverage_slot: 路线范围与路线对比
+- id: fresh_batch113_type_share_erlian_nov
+  category: 病害类型分布与占比
+  question: 2026年11月，二连浩特-广州高速上检出的病害按类型统计，数量最多的前三种类型分别是什么？各有多少处，分别占该路线病害总数的几成？
+  focus: 病害类型分布与占比：验证系统能否按病害类型分组统计二连浩特-广州高速11月的病害数量，并计算前三种类型各自的处数及占该路线病害总数的比例（以几成表示）。
+  source: fresh
+  coverage_slot: 病害类型分布与占比
+- id: fresh_batch113_dir_split_erlian_nov
+  category: 上下行等方向分组
+  question: 2026年11月，二连浩特-广州高速上行方向和下行方向分别检出了多少处病害？哪一侧更多，多多少处？
+  focus: 上下行等方向分组：验证系统能否按上行、下行方向对二连浩特-广州高速11月的病害进行分组计数，并比较两侧数量差异，给出更多的一侧及相差处数。
+  source: fresh
+  coverage_slot: 上下行等方向分组
+- id: fresh_batch113_task_detail_20261129
+  category: 巡检任务次数与任务明细
+  question: 2026年11月29日当天执行了哪些巡检任务？请列出每次任务的编号、覆盖路线以及该次任务检出的病害总数。
+  focus: 巡检任务次数与任务明细：验证系统能否按日期检索出2026年11月29日执行的全部巡检任务，并给出每个任务的编号、覆盖路线及该任务检出的病害总数。
+  source: fresh
+  coverage_slot: 巡检任务次数与任务明细
+- id: fresh_batch113_device_task_count_oct_nov_erlian
+  category: 设备巡检次数或工作量
+  question: 2026年10月1日至11月30日期间，在二连浩特-广州高速上执行过巡检任务的设备分别完成了多少次任务？请按任务次数从多到少列出设备编号及对应次数。
+  focus: 设备巡检次数或工作量：验证系统能否按设备统计在二连浩特-广州高速上执行过的巡检任务次数，并按次数从多到少列出设备编号及对应任务次数。
+  source: fresh
+  coverage_slot: 设备巡检次数或工作量
+- id: fresh_batch114_topn_route_strip_repair_area_oct_nov
+  category: 病害数量和规模
+  question: 2026年10月1日至11月30日期间，全路网中条状修补病害累计面积最大的前6条路线分别是哪些？请按面积从大到小列出路线名称及对应的条状修补累计面积。
+  focus: TopN 路线或分组排名；验证按条状修补累计面积排序取前6条路线，并正确列出路线名称与面积数值。
+  source: fresh
+  coverage_slot: TopN 路线或分组排名
+- id: fresh_batch114_detail_pothole_sk_nov28_list
+  category: 病害规模和尺寸
+  question: 2026年11月28日，上海-昆明高速上检出的坑槽病害，请把每一处的桩号、方向和面积都列出来，并先给出总处数。如果记录较多需要截断，请说明截断规则。
+  focus: 具体记录明细；验证按指定日期和路线筛选出坑槽病害，逐条列出桩号、方向、面积，并给出总处数，若记录过多需说明截断规则。
+  source: fresh
+  coverage_slot: 具体记录明细
+- id: fresh_batch114_trend_monthly_bt_sk_hmz_oct_nov
+  category: 长时间病害变化
+  question: 2026年10月和11月，包头-茂名高速、上海-昆明高速和怀化绕城高速每月检出的病害总数分别是多少？请展示三条路各自的月度变化趋势并对比。
+  focus: 时间范围趋势或月度变化；验证按月份和路线分组统计病害总数，展示三条路各自的月度变化趋势，并允许对比。
+  source: fresh
+  coverage_slot: 时间范围趋势或月度变化
+- id: fresh_batch114_threshold_len_lateral_crack_bt_nov_5m
+  category: 病害规模和尺寸
+  question: 2026年11月，包头-茂名高速上单条长度超过5米的横向裂缝共有多少处？这些长裂缝的累计总长度是多少米？
+  focus: 尺寸阈值与长度面积条件；验证按路线和病害类型筛选出单条长度超过5米的横向裂缝，统计其处数并计算累计总长度。
+  source: fresh
+  coverage_slot: 尺寸阈值与长度面积条件
+- id: fresh_cross_asset_route_surface_grade_202611
+  category: 资产角度病害统计
+  question: 2026年11月，在包头-茂名高速和长沙－芷江高速上，沥青混凝土路面和水泥混凝土路面分别检出了多少处病害？请按路线、路面类型交叉统计，并进一步按公路技术等级（一级、二级、三级、四级）细分，列出每个组合的病害数量。
+  focus: 跨资产维度分析：验证系统能否按路线、路面类型、公路技术等级三个维度交叉统计病害数量，并正确输出各组合的计数，确保无遗漏或重复。
+  source: fresh
+  coverage_slot: 跨资产维度分析
+- id: fresh_segment_pile_range_type_dist_bt_202611
+  category: 病害分段查询
+  question: 2026年11月，包头-茂名高速K2150到K2200区间内，各病害类型分别有多少处？请按每500米一段统计，列出每段内各病害类型的数量，并指出病害数量最多的前3段。
+  focus: 路段、桩号或分段范围：验证系统能否在指定桩号区间内按500米分段统计各病害类型的数量，并正确识别数量最多的前3段，确保边界处理正确。
+  source: fresh
+  coverage_slot: 路段、桩号或分段范围
+- id: fresh_cross_batch_new_compare_cz_nov_202611
+  category: 时间维度病害变化
+  question: 对比长沙－芷江高速在2026年11月8日和11月11日这两次巡检的结果，后一次比前一次新增了多少处泛油病害？这些新增泛油主要分布在哪些桩号段？请分别给出两次巡检的泛油总处数，并列出新增病害的桩号分布。
+  focus: 跨批次新增与前后对比：验证系统能否对比两次巡检的泛油病害，计算新增处数，并定位新增病害的桩号分布，确保逻辑清晰。
+  source: fresh
+  coverage_slot: 跨批次新增与前后对比
+- id: fresh_capability_gap_device_runtime_status
+  category: 设备与巡检任务
+  question: 我想了解2026年11月参与巡检的设备当前是否在线、有没有故障，以及每台设备最后一次上报数据的时间。如果系统目前无法提供设备在线状态和最后上报时间，请直接说明原因。
+  focus: 当前数据能力不足：验证系统能否明确说明设备运行状态和最后上报时间字段缺失，并解释原因，不提供虚假数据。
+  source: fresh
+  coverage_slot: 当前数据能力不足
+- id: fresh_batch52_patrol_authenticity_position_change_bt_nov
+  category: 巡检批次核验
+  question: 2026年11月5日和11月6日，包头-茂名高速各执行了一次巡检，请对比这两次巡检中坑槽病害的桩号分布，说明新增坑槽主要出现在哪些桩号段，并给出两次巡检各自的坑槽总处数。
+  focus: 巡检批次真实性核验与位置变化：验收是否基于两次真实巡检批次的病害记录对比坑槽桩号分布，指出新增坑槽集中的桩号段，并分别给出两次巡检的坑槽总处数；不得把无记录直接断言为无病害。
+  source: old
+  coverage_slot: ''
+- id: asset2_dir_baotou_sides
+  category: 资产/上下行/数量
+  question: 包头-茂名这条路上，上行和下行各检出多少处病害？
+  focus: 检查路线上下行数量分组。
+  source: old
+  coverage_slot: ''
+- id: type_huaihua_route_types
+  category: 病害类型/路段各类病害
+  question: 怀化市绕城高速公路上有哪些病害类型？各多少处？
+  focus: 检查单路线病害类型清单与数量。
+  source: old
+  coverage_slot: ''
+- id: fresh_batch26_pile_range_type_dist_sh_nov
+  category: 病害统计
+  question: 2026年11月，上海-昆明高速K1150到K1200区间内，各病害类型分别有多少处？请按类型列出数量。
+  focus: 桩号区间病害类型分布：验收是否在指定桩号区间内按病害类型分组给出数量。
+  source: old
+  coverage_slot: ''
+- id: fresh_cross_asset_surface_grade_nov_v4
+  category: 资产与病害交叉统计
+  question: 2026年11月，在行政等级为“县道”的路段上，沥青混凝土路面和水泥混凝土路面分别检出了多少处病害？
+  focus: 跨资产维度分析：需同时关联路线的行政等级（县道）和路面类型（沥青/水泥），分别统计两类路面上的病害数量，验证多维属性交叉筛选的准确性。
+  source: old
+  coverage_slot: ''

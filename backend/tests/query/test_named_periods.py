@@ -6,6 +6,7 @@ from app.query.periods import (
     normalize_named_period_window,
     resolve_named_period,
 )
+from app.services.parsers import parse_time_range
 
 from app.semantic_aids import detect_evidence
 
@@ -75,6 +76,18 @@ class NamedPeriodTests(unittest.TestCase):
         self.assertEqual(
             resolve_named_period("最近三个月", now),
             (datetime(2026, 8, 9), datetime(2026, 11, 10)),
+        )
+
+    def test_relative_year_with_explicit_month_keeps_month_granularity(self):
+        now = datetime(2026, 11, 9, 4, 18, 43)
+
+        self.assertEqual(
+            parse_time_range("今年11月", now),
+            (datetime(2026, 11, 1), datetime(2026, 12, 1)),
+        )
+        self.assertEqual(
+            parse_time_range("去年11月", now),
+            (datetime(2025, 11, 1), datetime(2025, 12, 1)),
         )
 
     def test_rolling_window_replaces_duplicate_equivalent_time_filters(self):

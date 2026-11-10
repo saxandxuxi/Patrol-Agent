@@ -224,6 +224,44 @@ class DatasetComparisonContractTests(unittest.TestCase):
 
         self.assertIsNone(issue)
 
+    def test_comparison_dependencies_are_mirrored_into_execution_edges(self):
+        from app.query.comparison_contract import (
+            complete_dataset_comparison_dependencies,
+            dataset_comparison_contract_issue,
+        )
+
+        plan = _comparison_plan(
+            "list",
+            "list",
+            projection=("problem_number",),
+        )
+        comparison = plan.nodes[-1]
+        comparison = replace(
+            comparison,
+            spec=replace(
+                comparison.spec,
+                comparison_depends_on=("before", "after"),
+            ),
+            depends_on=(),
+        )
+        plan = replace(plan, nodes=(*plan.nodes[:-1], comparison))
+
+        normalized = complete_dataset_comparison_dependencies(
+            plan,
+            CapabilityRegistry.load(),
+        )
+
+        self.assertEqual(
+            normalized.nodes[-1].depends_on,
+            ("before", "after"),
+        )
+        self.assertIsNone(
+            dataset_comparison_contract_issue(
+                normalized,
+                CapabilityRegistry.load(),
+            )
+        )
+
     def test_entity_set_operation_rejects_two_counts_even_when_labelled_comparison(self):
         from app.query.semantic_operations import (
             semantic_operation_contract_issue,
@@ -253,6 +291,74 @@ class DatasetComparisonContractTests(unittest.TestCase):
                 projection=("problem_number",),
             ),
             "entity_set_comparison",
+            CapabilityRegistry.load(),
+        )
+
+        self.assertIsNone(issue)
+
+    def test_scalar_difference_requires_a_real_subtract_calculation(self):
+        from app.query.semantic_operations import (
+            semantic_operation_contract_issue,
+        )
+
+        issue = semantic_operation_contract_issue(
+            _scalar_count_comparison_plan(),
+            "scalar_difference",
+            CapabilityRegistry.load(),
+        )
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(
+            issue.code,
+            "scalar_difference_requires_calculation",
+        )
+
+    def test_scalar_difference_accepts_a_subtract_calculation(self):
+        from app.calculations.models import CalculationRequest
+        from app.query.semantic_operations import (
+            semantic_operation_contract_issue,
+        )
+
+        plan = _scalar_count_comparison_plan()
+        compare = plan.nodes[-1]
+        calculation = CalculationRequest.from_dict(
+            {
+                "tool": "calculate_scalar",
+                "operation": "subtract",
+                "operands": [
+                    {
+                        "name": "left",
+                        "source": {"node": "before", "field": "count"},
+                    },
+                    {
+                        "name": "right",
+                        "source": {"node": "after", "field": "count"},
+                    },
+                ],
+                "output": {
+                    "name": "count_difference",
+                    "label": "数量差值",
+                    "unit": "处",
+                },
+            }
+        )
+        plan = replace(
+            plan,
+            nodes=(
+                *plan.nodes[:-1],
+                replace(
+                    compare,
+                    spec=replace(
+                        compare.spec,
+                        calculation=calculation,
+                    ),
+                ),
+            ),
+        )
+
+        issue = semantic_operation_contract_issue(
+            plan,
+            "scalar_difference",
             CapabilityRegistry.load(),
         )
 

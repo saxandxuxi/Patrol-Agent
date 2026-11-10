@@ -131,6 +131,21 @@ class ShapeContractTests(unittest.TestCase):
         self.assertIn("distribution", issues[0].reason)
         self.assertIn("查看全部对象", issues[0].reason)
 
+    def test_top_groups_without_limit_normalizes_to_ordered_distribution(self):
+        spec = normalize_top_view(
+            top_spec(
+                view="top_groups",
+                metrics=("count",),
+                dimensions=("patrol_number",),
+                output_projection=("patrol_number", "count"),
+                order_by=(order("count"),),
+                limit=None,
+            )
+        )
+
+        self.assertEqual(spec.view, "distribution")
+        self.assertEqual(issue_codes(spec), ())
+
     def test_unknown_view_is_rejected(self):
         spec = top_spec(view="not_a_view")
         self.assertEqual(issue_codes(spec), ("unsupported_view",))

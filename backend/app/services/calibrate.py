@@ -31,10 +31,15 @@ def fmt_pile(meter: Any) -> str:
 
 def _query(sql: str) -> list[dict[str, Any]]:
     """校准是"锦上添花"的层：查不通就安静降级，不能让整次回答失败。"""
-    try:
-        return db_manager.query("mysql", sql)["rows"]
-    except Exception:
-        return []
+    for attempt in range(2):
+        try:
+            return db_manager.query("mysql", sql)["rows"]
+        except Exception:
+            if attempt == 0:
+                time.sleep(0.05)
+                continue
+            return []
+    return []
 
 
 def route_facts(route_ref: str) -> dict[str, Any]:
@@ -59,11 +64,13 @@ def route_facts(route_ref: str) -> dict[str, Any]:
         ") LIMIT 1"
     ) or [{}])[0]
     route_id = str(ledger.get("route_id") or route_ref)
-    data = (_query(
+    data_rows = _query(
         "SELECT MIN(p.pile_distance) AS min_pile, MAX(p.pile_distance) AS max_pile, "
         "MIN(p.collection_time) AS min_time, MAX(p.collection_time) AS max_time, COUNT(*) AS cnt "
         f"FROM ai_problem p WHERE p.del_flag = 0 AND p.routes_id = '{route_id}'"
-    ) or [{}])[0]
+    )
+    data_available = bool(data_rows)
+    data = (data_rows or [{}])[0]
     route, section = ledger, ledger
 
     facts = {
@@ -82,9 +89,10 @@ def route_facts(route_ref: str) -> dict[str, Any]:
         "data_max_pile": data.get("max_pile"),
         "data_min_time": data.get("min_time"),
         "data_max_time": data.get("max_time"),
-        "data_count": data.get("cnt"),
+        "data_count": data.get("cnt") if data_available else None,
     }
-    _facts_cache[key] = (time.time(), facts)
+    if data_available:
+        _facts_cache[key] = (time.time(), facts)
     return facts
 
 

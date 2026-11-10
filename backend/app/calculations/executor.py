@@ -7,6 +7,7 @@ from typing import Any
 from .columns import calculate_columns
 from .datetime_interval import calculate_datetime_interval
 from .domain.analysis import analyze_evidence
+from .domain.proportion import is_proportion_calculation
 from .domain.rendering import render_calculation
 from .evidence import compact_table_evidence, row_with_group_labels
 from .models import CalculationOperand, CalculationRequest
@@ -534,7 +535,14 @@ def execute_calculation(
         output_label,
         operand_labels or None,
     )
-    if request.tool in {
+    if is_proportion_calculation(request):
+        analysis = {
+            "reply": fallback_reply,
+            "source": "calc",
+            "engine": "post_calc",
+            "accepted": bool(fallback_reply),
+        }
+    elif request.tool in {
         "calculate_scalar",
         "calculate_series",
         "calculate_datetime_interval",

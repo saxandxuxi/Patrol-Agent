@@ -553,6 +553,41 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertIn("现有覆盖范围内没有匹配记录", answer)
         self.assertIn("上下行方向 上行", answer)
 
+    def test_partial_coverage_zero_rows_reports_observed_overlap_and_unknown_remainder(
+        self,
+    ):
+        from app.query.service import assemble_answer
+
+        answer = assemble_answer(
+            [
+                {
+                    "type": "query_data",
+                    "view": "distribution",
+                    "status": "accepted",
+                    "rows_fetched": 0,
+                    "rows": [],
+                    "preview_rows": [],
+                    "coverage_verdict": PARTIAL,
+                    "coverage_detail": (
+                        "包头-茂名现有病害记录的采集时间在 "
+                        "2026-10-28 16:36 至 2026-11-04 09:43"
+                    ),
+                    "spec": {
+                        "subject": "disease",
+                        "view": "distribution",
+                    },
+                }
+            ],
+            response_mode="data",
+        )
+
+        self.assertIn("在查询范围内没有匹配记录（0 行）", answer.text)
+        self.assertIn(
+            "在现有记录覆盖到的重叠区间内未观察到匹配记录",
+            answer.text,
+        )
+        self.assertIn("2026-11-04", answer.text)
+
     def test_scalar_answer_does_not_unit_label_category_or_expose_null(self):
         from app.query.contracts import ExecutionObservation
         from app.query.service import _answer_text
@@ -941,6 +976,62 @@ class AnswerExperienceTests(unittest.TestCase):
             down["metrics"]["数量"]["max"]["row"],
             {"病害类型": "条状修补"},
         )
+
+    @patch("app.calculations.domain.analysis.chat")
+    def test_fixed_filter_context_is_not_a_group_main_item(self, chat):
+        chat.return_value = "上行和下行都由条状修补排在首位。"
+
+        payload = execute_post_calc(
+            {
+                "id": "p1",
+                "question": "比较上行、下行各自累计长度最高的病害类型",
+                "depends_on": ["up", "down"],
+                "required_assertions": [
+                    "multi_metric_comparison",
+                    "analysis_only",
+                ],
+            },
+            {
+                "up": {
+                    "question": "统计上行累计长度最高的病害类型",
+                    "rows": [
+                        {
+                            "病害类型": "条状修补",
+                            "上下行方向": "上行",
+                            "有效病害总长度": 115.36,
+                        }
+                    ],
+                    "row_count": 1,
+                    "field_labels": {
+                        "problem_type_name": "病害类型",
+                        "up_or_down": "上下行方向",
+                        "sum_effective_disease_length": "有效病害总长度",
+                    },
+                    "group_labels": {"上下行方向": "上行"},
+                },
+                "down": {
+                    "question": "统计下行累计长度最高的病害类型",
+                    "rows": [
+                        {
+                            "病害类型": "条状修补",
+                            "上下行方向": "下行",
+                            "有效病害总长度": 1340.8,
+                        }
+                    ],
+                    "row_count": 1,
+                    "field_labels": {
+                        "problem_type_name": "病害类型",
+                        "up_or_down": "上下行方向",
+                        "sum_effective_disease_length": "有效病害总长度",
+                    },
+                    "group_labels": {"上下行方向": "下行"},
+                },
+            },
+        )
+
+        self.assertTrue(payload["accepted"])
+        self.assertIn("各分组的主项相同", payload["reply"])
+        self.assertNotIn("各分组的主项不完全相同", payload["reply"])
 
     @patch(
         "app.calculations.domain.analysis.chat",

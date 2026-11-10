@@ -89,6 +89,36 @@ def _registered_field(
     return capability
 
 
+def _enum_display_output(
+    subject: str,
+    field: str,
+    resolved: tuple[str, str] | None,
+    registry: Any | None,
+) -> tuple[str, str] | None:
+    if resolved is None or registry is None:
+        return resolved
+    expression, label = resolved
+    if expression.lstrip().upper().startswith("CASE "):
+        return resolved
+    capability = registry.snapshot.fields.get(subject, {}).get(
+        _base_field(field)
+    )
+    if capability is None:
+        return resolved
+    if expression.strip().rsplit(".", 1)[-1] != capability.physical_column:
+        return resolved
+    enum = registry.snapshot.enums.get(
+        (capability.physical_table, capability.physical_column)
+    )
+    if enum is None or not enum.values:
+        return resolved
+    labels = {
+        str(code): str(item.display or item.label)
+        for code, item in enum.values.items()
+    }
+    return dictionary.case_expression(expression, labels), label
+
+
 def _append_filter_expression(
     expression: str,
     op: str,
@@ -721,6 +751,10 @@ def _disease_output(
         "problem_name": ("disease.problem_name", "病害名称"),
         "problem_type_name": ("disease.problem_type_name", "病害类型"),
         "area": ("disease.area", "面积"),
+        "disease_length": (
+            "disease.effective_disease_length",
+            "实际病害长度",
+        ),
         "effective_disease_length": ("disease.effective_disease_length", "长度"),
         "pile_number": ("disease.pile_number", "桩号"),
         "route_name": ("disease.route_name", "路线名称"),
@@ -739,14 +773,21 @@ def _disease_output(
         ),
     }
     resolved = mapping.get(normalized)
-    if resolved is not None or registry is None:
-        return resolved
+    if resolved is not None:
+        return _enum_display_output("disease", normalized, resolved, registry)
+    if registry is None:
+        return None
     capability = registry.snapshot.fields.get("disease", {}).get(normalized)
     if capability is None or capability.status != "available":
         return None
     if joins is not None:
         joins.update(capability.requires_join)
-    return capability.expression, capability.label
+    return _enum_display_output(
+        "disease",
+        normalized,
+        (capability.expression, capability.label),
+        registry,
+    )
 
 
 def _patrol_output(
@@ -778,14 +819,21 @@ def _patrol_output(
         "unit_id": ("patrol.unit_id", "管养单位ID"),
     }
     resolved = mapping.get(normalized)
-    if resolved is not None or registry is None:
-        return resolved
+    if resolved is not None:
+        return _enum_display_output("patrol", normalized, resolved, registry)
+    if registry is None:
+        return None
     capability = registry.snapshot.fields.get("patrol", {}).get(normalized)
     if capability is None or capability.status != "available":
         return None
     if joins is not None:
         joins.update(capability.requires_join)
-    return capability.expression, capability.label
+    return _enum_display_output(
+        "patrol",
+        normalized,
+        (capability.expression, capability.label),
+        registry,
+    )
 
 
 def _join_sql(

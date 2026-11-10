@@ -2,7 +2,7 @@
 用途：自动沉淀模板的 LLM 审核（复用前会不会给错答案）
 调用：templatizer.review_template() → chat_json()
 模型：role_model("sql")（.env 的 NL2SQL_MODEL = qwen3-coder-flash：便宜、代码能力强）
-占位符：<<question>> <<sql>> <<conditions>> <<partial>>
+占位符：<<question>> <<sql>> <<conditions>>
 说明：见 docs/模板沉淀标准与复用校验_系统性方案.md §5.1。只在"沉淀/巡检"时触发一次，
       结果缓存在模板记录里，同一模板不重复审。只审核、不修改 SQL（§八）。
 口径（实测校准，别改回去）：只有 parameter_misaligned 算 high；hardcoded_condition /

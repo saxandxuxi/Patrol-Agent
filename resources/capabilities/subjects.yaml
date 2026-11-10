@@ -8,6 +8,9 @@ subjects:
       route:
         table: basic_facilities_routes
         on: disease.routes_id = route.id
+      disease_patrol:
+        table: ai_maintain_patrol
+        on: disease.patrol_id = disease_patrol.id
     allowed_views: [count, distribution, list, detail, top_records, top_groups, trend]
   patrol:
     base_table: ai_maintain_patrol
