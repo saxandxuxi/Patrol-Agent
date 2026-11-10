@@ -1,4 +1,9 @@
 from .catalog import load_mdl_snapshot
+from .compiler import (
+    compile_queryspec_to_mdl_sql,
+    compile_queryspec_to_physical,
+    run_mdl_sql_pipeline,
+)
 from .contract_builder import build_mdl_query_contract
 from .context import build_relationship_subgraph
 from .errors import (
@@ -28,6 +33,7 @@ from .models import (
     MdlRelationship,
     MdlSnapshot,
     MdlSqlCandidate,
+    MdlSqlPipelineResult,
     RelationshipPath,
     RelationshipSubgraph,
 )
@@ -49,6 +55,7 @@ __all__ = [
     "MdlRelationship",
     "MdlSnapshot",
     "MdlSqlCandidate",
+    "MdlSqlPipelineResult",
     "MdlSqlConfigurationError",
     "MdlSqlContextError",
     "MdlSqlContractError",
@@ -60,6 +67,9 @@ __all__ = [
     "RelationshipSubgraph",
     "build_relationship_subgraph",
     "build_mdl_query_contract",
+    "compile_queryspec_to_mdl_sql",
+    "compile_queryspec_to_physical",
     "failure_message",
     "load_mdl_snapshot",
+    "run_mdl_sql_pipeline",
 ]

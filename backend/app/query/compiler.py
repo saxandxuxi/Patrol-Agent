@@ -18,7 +18,7 @@ class CompiledQuery:
 
 
 TemplateExecutor = Callable[[TemplateCandidate, dict[str, Any], QuerySpec], str]
-WrenExecutor = Callable[[QuerySpec], str]
+WrenExecutor = Callable[..., str]
 
 
 def compile_query(
@@ -27,6 +27,7 @@ def compile_query(
     candidate: TemplateCandidate | None,
     template_executor: TemplateExecutor | None,
     wren_executor: WrenExecutor | None,
+    plan_id: str = "",
 ) -> CompiledQuery:
     if candidate is not None:
         if not decision.token:
@@ -55,7 +56,14 @@ def compile_query(
         )
     if wren_executor is None:
         raise ValueError("wren executor is required when no template is selected")
-    sql = str(wren_executor(spec) or "").strip()
+    sql = str(
+        (
+            wren_executor(spec, plan_id=plan_id)
+            if plan_id
+            else wren_executor(spec)
+        )
+        or ""
+    ).strip()
     if not sql:
         raise ValueError("wren executor returned empty SQL")
     return CompiledQuery(sql=sql, engine="wren", source="wren")

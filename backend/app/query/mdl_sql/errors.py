@@ -48,7 +48,26 @@ _UNKNOWN_FAILURE_MESSAGE = "查询失败，原因未知，请查看结构化证�
 
 
 def failure_message(failure: CompilerFailure) -> str:
-    return FAILURE_CODES.get(failure.code, _UNKNOWN_FAILURE_MESSAGE)
+    base = FAILURE_CODES.get(failure.code, _UNKNOWN_FAILURE_MESSAGE)
+    evidence = failure.evidence
+    unavailable_reason = str(
+        evidence.get("unavailable_reason") or ""
+    ).strip()
+    if unavailable_reason:
+        return f"{base}：{unavailable_reason}"
+    available_metrics = tuple(
+        str(item)
+        for item in evidence.get("available_metrics") or ()
+        if str(item)
+    )
+    if available_metrics:
+        return f"{base}；可用指标：{'、'.join(available_metrics)}"
+    reason = str(evidence.get("reason") or "")
+    if reason == "invalid_pile_range":
+        return "桩号区间必须提供两个边界值"
+    if reason == "invalid_pile_value":
+        return "桩号无法解析为可执行的米数"
+    return base
 
 
 class MdlSqlError(RuntimeError):

@@ -1,7 +1,7 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from app.query.compiler import CompiledQuery
+from app.query.compiler import CompiledQuery, compile_query
 from app.query.capability_registry import CapabilityRegistry
 from app.query.contracts import (
     AnswerPackage,
@@ -18,6 +18,7 @@ from app.query.contracts import (
     VerificationReport,
 )
 from app.query.fields import FieldReachSet, PhysicalSchemaView
+from app.query.mdl_sql import CompilerFailure, MdlSqlPipelineError
 from app.query.service import (
     _answer_text,
     _default_post_calc_executor,
@@ -1048,42 +1049,70 @@ class ServiceTests(unittest.TestCase):
 
         self.assertEqual(terminal, [sections[2]])
 
-    @patch("app.query.service.wren_engine.compile_mdl_sql_verbose")
-    @patch("app.query.service.compile_spec_mdl", return_value="MDL SQL")
-    def test_wren_adapter_compiles_from_frozen_question(
+    @patch(
+        "app.query.service.compile_queryspec_to_physical",
+        return_value="SELECT COUNT(*) AS n FROM ai_problem",
+    )
+    def test_wren_adapter_delegates_to_pipeline_with_plan_id(
         self,
-        compile_spec,
-        compile_sql,
+        compile_pipeline,
     ):
-        compile_sql.return_value = ("SELECT COUNT(*) AS n FROM ai_problem", "")
         spec = count_plan().nodes[0].spec.__class__(
             **{
                 **count_plan().nodes[0].spec.__dict__,
                 "question": "泛油有多少处？",
             }
         )
-        sql = _default_wren_executor(spec)
+        sql = _default_wren_executor(spec, plan_id="plan:q1")
 
         self.assertEqual(sql, "SELECT COUNT(*) AS n FROM ai_problem")
-        compile_spec.assert_called_once_with(spec)
-        compile_sql.assert_called_once_with("mysql", "MDL SQL")
+        compile_pipeline.assert_called_once_with(
+            spec,
+            plan_id="plan:q1",
+        )
 
-    @patch("app.query.service.wren_engine.compile_mdl_sql_verbose")
-    @patch("app.query.service.compile_spec_mdl", return_value="MDL SQL")
-    def test_controlled_compile_failure_does_not_fall_back_to_llm(
+    @patch(
+        "app.query.service.compile_queryspec_to_physical",
+        side_effect=MdlSqlPipelineError(
+            CompilerFailure(
+                code="compiler_not_covered",
+                stage="deterministic",
+                evidence={"reason": "bad token"},
+                contract_hash="contract-hash",
+                mdl_sql="SELECT broken",
+            )
+        ),
+    )
+    def test_pipeline_failure_is_not_rewritten_by_service(
         self,
-        compile_spec,
-        compile_sql,
+        _compile_pipeline,
     ):
-        compile_sql.side_effect = [("", "bad token")]
         spec = count_plan().nodes[0].spec.__class__(
             **{**count_plan().nodes[0].spec.__dict__, "question": "泛油有多少处？"}
         )
-        with self.assertRaisesRegex(UnsupportedQuerySpec, "bad token"):
+        with self.assertRaises(MdlSqlPipelineError) as caught:
             _default_wren_executor(spec)
 
-        compile_spec.assert_called_once_with(spec)
-        self.assertEqual(compile_sql.call_count, 1)
+        self.assertEqual(
+            caught.exception.failure.code,
+            "compiler_not_covered",
+        )
+
+    def test_compile_query_passes_plan_id_to_wren_executor(self):
+        spec = count_plan().nodes[0].spec
+        executor = Mock(return_value="SELECT 1")
+
+        compiled = compile_query(
+            spec,
+            UserDecision(token="", choices={}, overrides={}),
+            candidate=None,
+            template_executor=None,
+            wren_executor=executor,
+            plan_id="plan:q1",
+        )
+
+        executor.assert_called_once_with(spec, plan_id="plan:q1")
+        self.assertEqual(compiled.sql, "SELECT 1")
 
     def test_count_answer_uses_domain_unit(self):
         answer = _answer_text(
@@ -2252,14 +2281,12 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("route.route_length_km", sql)
         self.assertNotIn("LIMIT 1", sql)
 
-    @patch("app.query.service.wren_engine.compile_mdl_sql_verbose", return_value=("SELECT 1", ""))
-    @patch("app.query.service.compile_spec_mdl", return_value="SELECT COUNT(*) FROM disease")
+    @patch("app.query.service.compile_queryspec_to_physical", return_value="SELECT 1")
     @patch("app.services.nl2sql.build_template_sql_for")
     def test_builtin_template_uses_controlled_queryspec_compiler(
         self,
         build_sql,
-        _compile_spec,
-        _compile_wren,
+        compile_queryspec,
     ):
         contract = TemplateContract(
             id="threshold_count",
@@ -2303,7 +2330,7 @@ class ServiceTests(unittest.TestCase):
             count_plan().nodes[0].spec,
         )
         self.assertEqual(sql, "SELECT 1")
-        _compile_spec.assert_called_once()
+        compile_queryspec.assert_called_once()
         build_sql.assert_not_called()
 
     def test_route_trend_compiles_route_filter_and_month_bucket(self):

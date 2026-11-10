@@ -100,6 +100,7 @@ class MdlFilterBinding:
     model: str
     column: str
     expression: str
+    between_inclusive: bool = False
 
 
 @dataclass(frozen=True)
@@ -291,3 +292,15 @@ class DryPlanResult:
     error: str = ""
     evidence: Mapping[str, Any] = field(default_factory=dict)
     contract_hash: str = ""
+
+
+@dataclass(frozen=True)
+class MdlSqlPipelineResult:
+    contract: MdlQueryContract
+    context: PromptContextBundle
+    relationship_subgraph: RelationshipSubgraph
+    candidate: MdlSqlCandidate
+    audit: SqlAuditReport
+    dry_plan: DryPlanResult
+    physical_sql: str
+    deterministic_failure: CompilerFailure | None = None

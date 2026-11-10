@@ -97,7 +97,7 @@ def _build_select(
             for output in contract.outputs
         ]
     ).from_(_table(contract.root_model))
-    _apply_joins(select, join_plan)
+    _apply_joins(select, join_plan, contract)
     _apply_where(select, contract)
 
     if contract.group_by:
@@ -169,7 +169,7 @@ def _build_ranked_top_groups(
         )
     )
     inner = inner.from_(_table(contract.root_model))
-    _apply_joins(inner, join_plan)
+    _apply_joins(inner, join_plan, contract)
     _apply_where(inner, contract)
     if contract.group_by:
         inner.set(
@@ -268,11 +268,22 @@ def _ordered_join_plan(
 def _apply_joins(
     select: exp.Select,
     join_plan: tuple[tuple[str, Mapping[str, Any], str], ...],
+    contract: MdlQueryContract,
 ) -> None:
     for _, relationship, joined_model in join_plan:
+        predicates = [_join_condition(relationship)]
+        predicates.extend(
+            expression
+            for binding in contract.mandatory_predicates
+            if binding.model == joined_model
+            for expression in _filter_expressions(binding)
+        )
         select.join(
             _table(joined_model),
-            on=_join_condition(relationship),
+            on=_conjoin(
+                predicates,
+                "join_condition_missing",
+            ),
             join_type="left",
             copy=False,
         )
@@ -298,7 +309,12 @@ def _apply_where(
     contract: MdlQueryContract,
 ) -> None:
     predicates: list[exp.Expression] = []
-    for binding in (*contract.filters, *contract.mandatory_predicates):
+    root_predicates = tuple(
+        binding
+        for binding in contract.mandatory_predicates
+        if binding.model == contract.root_model
+    )
+    for binding in (*contract.filters, *root_predicates):
         predicates.extend(_filter_expressions(binding))
     if predicates:
         select.set(
@@ -320,6 +336,14 @@ def _filter_expressions(
 
     if op == "between":
         values = _sequence(value, expected=2)
+        if binding.between_inclusive:
+            return (
+                exp.Between(
+                    this=column,
+                    low=exp.convert(values[0]),
+                    high=exp.convert(values[1]),
+                ),
+            )
         return (
             exp.GTE(
                 this=column.copy(),
@@ -385,7 +409,11 @@ def _output_expression(
     value: str,
     alias: str,
 ) -> exp.Alias:
-    return exp.alias_(_parse_expression(value), alias)
+    return exp.alias_(
+        _parse_expression(value),
+        alias,
+        quoted=False,
+    )
 
 
 def _ordered_expression(binding: MdlOrderBinding) -> exp.Ordered:

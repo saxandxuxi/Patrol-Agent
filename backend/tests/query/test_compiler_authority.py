@@ -10,12 +10,13 @@ from app.query.service import (
 
 
 class CompilerAuthorityTests(unittest.TestCase):
-    @patch("app.query.service.compile_spec_mdl", return_value="MDL")
-    @patch("app.query.service.wren_engine.compile_mdl_sql_verbose", return_value=("SELECT 1", ""))
-    def test_wren_compiles_the_frozen_queryspec_only(
+    @patch(
+        "app.query.service.compile_queryspec_to_physical",
+        return_value="SELECT 1",
+    )
+    def test_wren_compiles_the_frozen_queryspec_through_the_pipeline(
         self,
-        compile_sql,
-        compile_spec,
+        compile_pipeline,
     ):
         spec = QuerySpec(
             id="q1",
@@ -45,10 +46,15 @@ class CompilerAuthorityTests(unittest.TestCase):
             question="统计第三季度不同病害在不同道路上的新增情况",
         )
 
-        self.assertEqual(_default_wren_executor(spec), "SELECT 1")
+        self.assertEqual(
+            _default_wren_executor(spec, plan_id="plan:q1"),
+            "SELECT 1",
+        )
 
-        compile_spec.assert_called_once_with(spec)
-        compile_sql.assert_called_once_with("mysql", "MDL")
+        compile_pipeline.assert_called_once_with(
+            spec,
+            plan_id="plan:q1",
+        )
 
     @patch("app.query.service.sql_engine.execute_sql", return_value={"columns": [], "rows": []})
     def test_execution_uses_source_aware_sql_boundary(self, execute_sql):

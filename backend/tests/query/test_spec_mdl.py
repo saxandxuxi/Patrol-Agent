@@ -1,5 +1,7 @@
 import unittest
-from unittest.mock import patch
+
+import sqlglot
+from sqlglot import exp
 
 from app.query.contracts import QuerySpec, ValueBinding
 from app.query.spec_mdl import UnsupportedQuerySpec, compile_spec_mdl
@@ -15,6 +17,39 @@ def binding(field, op, value):
         resolver="test",
         raw_text=str(value),
     )
+
+
+def join_equality_pairs(sql, joined_model):
+    parsed = sqlglot.parse_one(sql, read="mysql")
+    for join in parsed.args.get("joins", ()):
+        if str(join.this.name or "") != joined_model:
+            continue
+        on = join.args.get("on")
+        if on is None:
+            return ()
+        pairs = []
+        for equality in on.find_all(exp.EQ):
+            if not (
+                isinstance(equality.this, exp.Column)
+                and isinstance(equality.expression, exp.Column)
+            ):
+                continue
+            pairs.append(
+                frozenset(
+                    {
+                        (
+                            str(equality.this.table or ""),
+                            str(equality.this.name or ""),
+                        ),
+                        (
+                            str(equality.expression.table or ""),
+                            str(equality.expression.name or ""),
+                        ),
+                    }
+                )
+            )
+        return tuple(pairs)
+    raise AssertionError(f"missing JOIN for model {joined_model}")
 
 
 class SpecMdlTests(unittest.TestCase):
@@ -450,15 +485,80 @@ class SpecMdlTests(unittest.TestCase):
 
         sql = compile_spec_mdl(spec)
 
-        self.assertIn("JOIN patrol ON patrol.id = disease.patrol_id", sql)
+        self.assertIn(
+            frozenset(
+                {
+                    ("patrol", "id"),
+                    ("disease", "patrol_id"),
+                }
+            ),
+            join_equality_pairs(sql, "patrol"),
+        )
         self.assertIn("patrol.task_number AS 任务编号", sql)
         self.assertIn("GROUP BY patrol.task_number", sql)
         self.assertNotIn("disease.patrol_number AS 任务编号", sql)
 
-    @patch("app.query.spec_mdl.dictionary.patrol_status_labels")
-    def test_patrol_status_dimension_uses_display_labels(self, status_labels):
-        status_labels.return_value = {"0": "未开始", "15": "已完成"}
+    def test_patrol_mileage_detail_uses_registered_km_unit(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="patrol",
+                view="list",
+                metrics=(),
+                dimensions=(),
+                filters=(),
+                output_projection=(
+                    "patrol_number",
+                    "patrol_status",
+                    "patrol_mileage",
+                ),
+                order_by=(),
+                limit=500,
+                required_assertions=(),
+                question="列出巡检任务编号、状态和实际完成里程",
+            )
+        )
 
+        self.assertIn(
+            "patrol.patrol_mileage / 1000.0 AS 巡检里程",
+            sql,
+        )
+
+    def test_task_route_dimension_is_aggregated_without_duplicating_task(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="patrol",
+                view="distribution",
+                metrics=("linked_disease_count",),
+                dimensions=("task_number", "route_name"),
+                filters=(),
+                output_projection=(
+                    "task_number",
+                    "route_name",
+                    "linked_disease_count",
+                ),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="每个巡检任务一行，并汇总其覆盖路线和关联病害数",
+            )
+        )
+
+        self.assertIn(
+            "GROUP_CONCAT(DISTINCT route.short_name "
+            "ORDER BY route.short_name SEPARATOR '、') AS 路线名称",
+            sql,
+        )
+        self.assertIn("GROUP BY patrol.task_number", sql)
+        self.assertNotIn(
+            "GROUP BY patrol.task_number, route.short_name",
+            sql,
+        )
+
+    def test_patrol_status_dimension_uses_display_labels(self):
         sql = compile_spec_mdl(
             QuerySpec(
                 id="q1",
@@ -848,7 +948,15 @@ class SpecMdlTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("JOIN patrol ON patrol.id = disease.patrol_id", sql)
+        self.assertIn(
+            frozenset(
+                {
+                    ("patrol", "id"),
+                    ("disease", "patrol_id"),
+                }
+            ),
+            join_equality_pairs(sql, "patrol"),
+        )
         self.assertIn("patrol.task_number = 'XJJL202611040003'", sql)
         self.assertIn("GROUP BY COALESCE(disease.problem_type_name", sql)
 
@@ -919,7 +1027,15 @@ class SpecMdlTests(unittest.TestCase):
             metrics=("count",),
             dimensions=("problem_type_name",),
             filters=(
-                binding("route_name", "=", "route-1"),
+                ValueBinding(
+                    field="route_name",
+                    op="=",
+                    storage_value="route-1",
+                    display_value="路线一",
+                    source="user_explicit",
+                    resolver="route_dictionary",
+                    raw_text="路线一",
+                ),
                 binding("pile_number", ">=", "K10+000"),
                 binding("pile_number", "<=", "K20+000"),
             ),

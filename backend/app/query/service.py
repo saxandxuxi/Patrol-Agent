@@ -34,6 +34,7 @@ from .contracts import (
     UserDecision,
     ValueBinding,
     immutable_scope_hash,
+    plan_scope_hash,
     scope_hash,
 )
 from .empty_results import (
@@ -45,6 +46,11 @@ from .empty_results import (
 from .executor import execute_compiled
 from .fields import FieldReachHit, FieldReachSet, PhysicalSchemaView
 from .llm_failures import describe_llm_failure
+from .mdl_sql import (
+    MdlSqlPipelineError,
+    compile_queryspec_to_physical,
+    failure_message as mdl_failure_message,
+)
 from .patrol_batches import (
     PatrolBatchResolutionError,
     describe_batch_lookup_evidence,
@@ -221,26 +227,12 @@ def _default_template_executor(
     )
 
 
-def _default_wren_executor(spec: Any) -> str:
-    return _compile_queryspec_to_physical(spec)
+def _default_wren_executor(spec: Any, *, plan_id: str = "") -> str:
+    return compile_queryspec_to_physical(spec, plan_id=plan_id)
 
 
 def _compile_queryspec_to_physical(spec: Any) -> str:
-    kind = str(getattr(spec, "kind", "mysql") or "mysql")
-    mdl_sql = compile_spec_mdl(spec)
-    if not mdl_sql:
-        raise UnsupportedQuerySpec(
-            "QuerySpec 受控编译器不支持当前表、字段或查询视图"
-        )
-    physical, error = wren_engine.compile_mdl_sql_verbose(
-        kind,
-        mdl_sql,
-    )
-    if physical:
-        return physical
-    raise UnsupportedQuerySpec(
-        f"QuerySpec 受控编译失败：{error or 'empty physical SQL'}"
-    )
+    return compile_queryspec_to_physical(spec)
 
 
 def _default_execute_sql(
@@ -915,6 +907,7 @@ def _execute_plan(
     candidate_set: CandidateSet | None = None,
     registry: CapabilityRegistry | None = None,
 ) -> AnswerPackage:
+    stable_plan_id = plan_scope_hash(plan)
     blocked_nodes: dict[str, str] = {}
     blocked_node_statuses: dict[str, str] = {}
     blocked_evidence: dict[str, dict[str, Any]] = {}
@@ -1292,7 +1285,25 @@ def _execute_plan(
                 candidate,
                 _default_template_executor,
                 _default_wren_executor,
+                plan_id=f"{stable_plan_id}:{node.id}",
             )
+        except MdlSqlPipelineError as exc:
+            failure = exc.failure
+            sections.append(
+                {
+                    **_section_identity(node),
+                    "answer": mdl_failure_message(failure),
+                    "status": "unsupported",
+                    "failure_code": failure.code,
+                    "failure_stage": failure.stage,
+                    "contract_id": failure.contract_id,
+                    "contract_hash": failure.contract_hash,
+                    "mdl_sql": failure.mdl_sql,
+                    "physical_sql": failure.physical_sql,
+                    "failure_evidence": dict(failure.evidence),
+                }
+            )
+            continue
         except UnsupportedQuerySpec as exc:
             sections.append(
                 {

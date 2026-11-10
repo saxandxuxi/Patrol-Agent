@@ -3,8 +3,8 @@ import unittest
 from unittest.mock import patch
 
 from app.query.contracts import QuerySpec
+from app.query.mdl_sql import CompilerFailure, MdlSqlPipelineError
 from app.query.service import _default_wren_executor
-from app.query.spec_mdl import UnsupportedQuerySpec
 from app.services import nl2sql, sql_engine
 
 
@@ -42,13 +42,21 @@ class LegacyQueryChainRemovedTests(unittest.TestCase):
         self.assertEqual(existing, [])
 
     @patch("app.services.nl2sql.build_query_plan")
-    @patch("app.query.service.compile_spec_mdl", return_value=None)
+    @patch(
+        "app.query.service.compile_queryspec_to_physical",
+        side_effect=MdlSqlPipelineError(
+            CompilerFailure(
+                code="compiler_not_covered",
+                stage="deterministic",
+            )
+        ),
+    )
     def test_unsupported_queryspec_never_falls_back_to_legacy_planner(
         self,
-        _compile_spec,
+        _compile_pipeline,
         build_plan,
     ):
-        with self.assertRaisesRegex(UnsupportedQuerySpec, "QuerySpec"):
+        with self.assertRaises(MdlSqlPipelineError):
             _default_wren_executor(_count_spec())
 
         build_plan.assert_not_called()

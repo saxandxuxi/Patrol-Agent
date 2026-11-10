@@ -10,6 +10,7 @@ from typing import Any
 import sqlglot
 from sqlglot import exp
 
+from ...semantic_aids import pile_meter
 from ..capability_registry import CapabilityRegistry
 from ..contracts import QuerySpec, scope_hash
 from ..shape_contracts import (
@@ -32,6 +33,7 @@ from .models import (
 
 _GROUPED_VIEWS = frozenset({"distribution", "trend", "top_groups"})
 _METRIC_ONLY_VIEWS = frozenset({"count", "sum", "avg"})
+_DISTINCT_RECORD_VIEWS = frozenset({"data", "detail", "list"})
 
 
 def build_mdl_query_contract(
@@ -183,8 +185,13 @@ def build_mdl_query_contract(
 
     filters: list[MdlFilterBinding] = []
     for index, value in enumerate(normalized.filters):
-        field_binding = add_field_reference(
+        filter_field_id = _filter_storage_field_id(
+            registry,
             value.field,
+            value.resolver,
+        )
+        field_binding = add_field_reference(
+            filter_field_id,
             "filters",
             path=f"filters[{index}].field",
         )
@@ -210,18 +217,33 @@ def build_mdl_query_contract(
             path=f"filters[{index}]",
             field=field_binding.field_id,
         )
+        filter_value, between_inclusive = _normalize_filter_value(
+            normalized,
+            registry,
+            field_capability,
+            str(value.op),
+            value.storage_value,
+            path=f"filters[{index}].storage_value",
+        )
+        filter_model, filter_column = _filter_location(
+            expression,
+            default_model=field_binding.model,
+            default_column=field_binding.column,
+            dialect=str(normalized.kind or "mysql"),
+        )
         filters.append(
             MdlFilterBinding(
                 field_id=field_binding.field_id,
                 op=str(value.op),
-                value=_freeze_value(value.storage_value),
+                value=_freeze_value(filter_value),
                 display_value=value.display_value,
                 source=value.source,
                 resolver=value.resolver,
                 raw_text=value.raw_text,
-                model=field_binding.model,
-                column=field_binding.column,
+                model=filter_model,
+                column=filter_column,
                 expression=expression,
+                between_inclusive=between_inclusive,
             )
         )
 
@@ -248,6 +270,9 @@ def build_mdl_query_contract(
                 "unknown_metric",
                 path=f"metrics[{index}]",
                 metric=metric_id,
+                available_metrics=sorted(
+                    registry.snapshot.metrics.get(subject, {})
+                ),
             )
         if (
             metric.allowed_views
@@ -300,16 +325,17 @@ def build_mdl_query_contract(
     outputs: list[MdlOutputBinding] = []
     output_aliases: dict[str, str] = {}
     for output_id in output_ids:
-        alias = output_id
-        if alias in output_aliases:
-            _raise_contract(
-                normalized,
-                "duplicate_output",
-                output=output_id,
-            )
-        output_aliases[alias] = alias
         metric = metrics_by_id.get(output_id)
         if metric is not None:
+            alias = metric.label or output_id
+            if alias in output_aliases:
+                _raise_contract(
+                    normalized,
+                    "duplicate_output",
+                    output=output_id,
+                    alias=alias,
+                )
+            output_aliases[alias] = output_id
             outputs.append(
                 MdlOutputBinding(
                     output_id=output_id,
@@ -323,6 +349,15 @@ def build_mdl_query_contract(
             )
             continue
         field_binding = field_refs[output_id]["binding"]
+        alias = field_binding.label or output_id
+        if alias in output_aliases:
+            _raise_contract(
+                normalized,
+                "duplicate_output",
+                output=output_id,
+                alias=alias,
+            )
+        output_aliases[alias] = output_id
         outputs.append(
             MdlOutputBinding(
                 output_id=output_id,
@@ -376,12 +411,32 @@ def build_mdl_query_contract(
             )
         )
 
+    active_models = {
+        root_model,
+        *metric_models,
+        *required_join_models,
+        *(
+            record["binding"].model
+            for record in field_refs.values()
+        ),
+    }
     mandatory_predicates: list[MdlFilterBinding] = []
     for field_id, field_capability in registry.snapshot.fields.get(
         subject,
         {},
     ).items():
         if "soft_delete" not in field_capability.roles:
+            continue
+        mandatory_model = (
+            root_model
+            if field_capability.physical_table
+            == capability.base_table
+            else snapshot.physical_table_to_model.get(
+                field_capability.physical_table,
+                "",
+            )
+        )
+        if mandatory_model not in active_models:
             continue
         field_binding = add_field_reference(
             field_id,
@@ -424,10 +479,45 @@ def build_mdl_query_contract(
             for field_id, record in field_refs.items()
         }
     )
+    has_identity_dimension = any(
+        "identity" in field_bindings[field_id].roles
+        for field_id in dimensions
+    )
+    effective_outputs: list[MdlOutputBinding] = []
+    for output in outputs:
+        binding = field_bindings.get(output.output_id)
+        if (
+            output.kind == "field"
+            and binding is not None
+            and has_identity_dimension
+            and "multi_value" in binding.roles
+        ):
+            output = replace(
+                output,
+                expression=(
+                    "GROUP_CONCAT("
+                    f"DISTINCT {binding.expression} "
+                    f"ORDER BY {binding.expression} SEPARATOR '、'"
+                    ")"
+                ),
+            )
+        effective_outputs.append(output)
+    group_dimensions = (
+        normalized.view in _GROUPED_VIEWS
+        or (
+            normalized.view in _DISTINCT_RECORD_VIEWS
+            and dimensions
+            and not metric_bindings
+        )
+    )
     group_by = tuple(
         field_bindings[field_id].expression
         for field_id in dimensions
-    ) if normalized.view in _GROUPED_VIEWS else ()
+        if not (
+            has_identity_dimension
+            and "multi_value" in field_bindings[field_id].roles
+        )
+    ) if group_dimensions else ()
 
     required_models = {
         field.model for field in field_bindings.values()
@@ -458,7 +548,7 @@ def build_mdl_query_contract(
         filters=tuple(filters),
         dimensions=dimensions,
         metrics=tuple(metric_bindings),
-        outputs=tuple(outputs),
+        outputs=tuple(effective_outputs),
         group_by=group_by,
         order_by=tuple(order_bindings),
         limit=normalized.limit,
@@ -502,6 +592,7 @@ def _normalize_and_validate_spec(
             normalized.dimensions,
         ),
     )
+    normalized = _normalize_trend_dimensions(normalized, registry)
     subject = registry.snapshot.subjects.get(normalized.subject)
     if subject is None:
         _raise_contract(
@@ -540,6 +631,51 @@ def _normalize_and_validate_spec(
     return normalized
 
 
+def _normalize_trend_dimensions(
+    spec: QuerySpec,
+    registry: CapabilityRegistry,
+) -> QuerySpec:
+    if spec.view != "trend":
+        return spec
+    semantics = registry.snapshot.query_shapes.get(
+        "planner_semantics"
+    ) or {}
+    answer_operations = semantics.get("answer_operations") or {}
+    trend = (
+        answer_operations.get("trend")
+        or semantics.get("trend")
+        or {}
+    )
+    grain = str(trend.get("default_time_dimension") or "")
+    if not grain:
+        return spec
+    fields = registry.snapshot.fields.get(spec.subject, {})
+    replacements: dict[str, str] = {}
+    for field_id in spec.dimensions:
+        base_field = _base_id(field_id)
+        capability = fields.get(base_field)
+        if capability is None or "time" not in capability.roles:
+            continue
+        candidate_id = f"{base_field}_{grain}"
+        candidate = fields.get(candidate_id)
+        if candidate is None or candidate.status != "available":
+            continue
+        replacements[base_field] = candidate_id
+    if not replacements:
+        return spec
+    return replace(
+        spec,
+        dimensions=tuple(
+            replacements.get(_base_id(field_id), _base_id(field_id))
+            for field_id in spec.dimensions
+        ),
+        output_projection=tuple(
+            replacements.get(_base_id(field_id), _base_id(field_id))
+            for field_id in spec.output_projection
+        ),
+    )
+
+
 def _capability_model(
     spec: QuerySpec,
     snapshot: MdlSnapshot,
@@ -558,6 +694,132 @@ def _capability_model(
             physical_table=physical_table,
         )
     return str(model)
+
+
+def _filter_storage_field_id(
+    registry: CapabilityRegistry,
+    field_id: str,
+    resolver: str,
+) -> str:
+    rules = registry.snapshot.predicates.get(
+        "filter_storage_fields"
+    )
+    if not isinstance(rules, Mapping):
+        return field_id
+    field_rules = rules.get(field_id)
+    if not isinstance(field_rules, Mapping):
+        return field_id
+    storage_field = str(field_rules.get(resolver) or "").strip()
+    return storage_field or field_id
+
+
+def _filter_location(
+    expression: str,
+    *,
+    default_model: str,
+    default_column: str,
+    dialect: str,
+) -> tuple[str, str]:
+    parsed = sqlglot.parse_one(expression, read=dialect)
+    if not isinstance(parsed, exp.Column):
+        return default_model, default_column
+    return (
+        str(parsed.table or default_model),
+        str(parsed.name or default_column),
+    )
+
+
+def _normalize_filter_value(
+    spec: QuerySpec,
+    registry: CapabilityRegistry,
+    field_capability: Any,
+    op: str,
+    value: Any,
+    *,
+    path: str,
+) -> tuple[Any, bool]:
+    normalized_op = op.lower()
+    if (
+        normalized_op in {"in", "not_in"}
+        and not isinstance(value, (list, tuple, set, frozenset))
+    ):
+        value = (value,)
+    pile_columns = {
+        str(item)
+        for item in (
+            registry.snapshot.predicates.get("pile_columns") or ()
+        )
+    }
+    filter_expression = str(
+        field_capability.filter_expression
+        or field_capability.expression
+        or ""
+    )
+    column = filter_expression.rsplit(".", 1)[-1].strip("` ")
+    if column not in pile_columns:
+        return (
+            _coerce_numeric_value(
+                value,
+                field_capability.data_type,
+            ),
+            False,
+        )
+
+    values = (
+        tuple(value)
+        if isinstance(value, (list, tuple, set, frozenset))
+        else (value,)
+    )
+    parsed = tuple(pile_meter(item) for item in values)
+    if any(item is None for item in parsed):
+        _raise_contract(
+            spec,
+            "invalid_pile_value",
+            path=path,
+            field=field_capability.field_id,
+            values=values,
+        )
+    if normalized_op == "between":
+        if len(parsed) != 2:
+            _raise_contract(
+                spec,
+                "invalid_pile_range",
+                path=path,
+                field=field_capability.field_id,
+                values=values,
+            )
+        return parsed, True
+    if normalized_op in {"in", "not_in"}:
+        return parsed, False
+    if len(parsed) == 1:
+        return parsed[0], False
+    return parsed, False
+
+
+def _coerce_numeric_value(value: Any, data_type: str) -> Any:
+    normalized_type = str(data_type or "").lower()
+    is_numeric = any(
+        token in normalized_type
+        for token in (
+            "decimal",
+            "double",
+            "float",
+            "int",
+            "number",
+            "numeric",
+        )
+    )
+    if not is_numeric:
+        return value
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return tuple(_coerce_numeric_value(item, data_type) for item in value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    try:
+        number = float(str(value).strip())
+    except (TypeError, ValueError):
+        return value
+    return int(number) if number.is_integer() else number
 
 
 def _normalize_expression(
