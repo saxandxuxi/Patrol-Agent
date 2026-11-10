@@ -214,6 +214,42 @@ class PromptContextBundle:
         }
 
 
+@dataclass(frozen=True)
+class SqlIssue:
+    code: str
+    message: str
+    path: str = ""
+    evidence: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ParsedMdlSql:
+    sql: str
+    dialect: str
+    valid: bool
+    root_query_type: str = ""
+    table_aliases: Mapping[str, str] = field(default_factory=dict)
+    qualified_columns: tuple[str, ...] = ()
+    joins: tuple[str, ...] = ()
+    projections: tuple[str, ...] = ()
+    group_expressions: tuple[str, ...] = ()
+    order_expressions: tuple[str, ...] = ()
+    limit: int | None = None
+    normalized_sql: str = ""
+    issues: tuple[SqlIssue, ...] = ()
+
+
+@dataclass(frozen=True)
+class SqlAuditReport:
+    accepted: bool
+    issues: tuple[SqlIssue, ...]
+    root_model: str = ""
+    used_models: tuple[str, ...] = ()
+    used_fields: tuple[str, ...] = ()
+    used_relationships: tuple[str, ...] = ()
+    normalized_structure: Mapping[str, Any] = field(default_factory=dict)
+
+
 def _plain(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {
