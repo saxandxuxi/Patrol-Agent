@@ -4,6 +4,7 @@ __pycache__/
 .idea/
 backend/.venv/
 .python/
+.superpowers/
 .uvcache/
 wren_projects/*/target/
 data/
@@ -11,3 +12,8 @@ logs/
 frontend/node_modules/
 frontend/dist/
 WrenAI-main/
+backend/scratch/
+qa-results/
+visual-check/
+知识库文件/
+*.log

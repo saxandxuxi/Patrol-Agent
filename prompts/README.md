@@ -1,69 +1,90 @@
 # 提示词总览
 
-所有给大模型的提示词都在这个目录里，**改这里就直接生效**（代码从文件读，不再散落在 service 的 f-string 里）。
-改完不用重启后端：加载器按文件缓存，`python -c "from app.services import prompts; prompts.clear_cache()"` 即可热更新
-（或者重启后端，最省事）。
+`prompts/` 目录里的 Markdown 是运行时提示词的唯一来源。代码通过
+`backend/app/services/prompts.py` 读取文件，修改后不需要改 service 里的字符串。
+
+当前共有 26 个提示词文件，另有本 README。文件头必须声明用途、调用点、模型和全部
+`<<占位符>>`；`backend/tests/query/test_prompt_contracts.py` 会校验声明与正文一致，
+并要求本文件列出每一个提示词文件。
 
 ## 文件格式
 
-```
-<!-- 说明注释，加载时会剥掉，不会发给模型 -->
+```text
+<!--
+用途：...
+调用：...
+模型：...
+占位符：<<name>> ...
+-->
 [system]
-系统提示词正文
+系统提示词
 
 [user]
-用户提示词正文，用 <<占位符>> 填空
+用户提示词，占位符写成 <<name>>
 ```
 
-占位符故意写成 `<<name>>` 而不是 `{name}`：提示词里有大量 JSON / SQL 花括号，用 `str.format` 会直接报错。
-如果占位符忘了传值，代码会往 `logs/app/app.log` 写一条 `prompts/unfilled` 错误，不会静默把 `<<xxx>>` 发给模型。
+占位符使用 `<<name>>`，不要改成 `{name}`。提示词里包含大量 JSON 和 SQL 花括号，
+`str.format` 会把它们误当成格式字段。调用方漏传占位符时，加载器会把错误写入
+`backend/logs/app/app.log`。
 
-## 清单
+修改完成后，从仓库根目录执行以下命令清缓存，或者重启后端：
 
-| 文件 | 用途 | 调用点 | 用哪个模型 | 占位符 |
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -c "from app.services import prompts; prompts.clear_cache()"
+```
+
+## 当前提示词
+
+| 文件 | 用途 | 调用点 | 模型 | 占位符 |
 |---|---|---|---|---|
-| `intent.md` | 意图分类（knowledge/data/analysis/image/composite/metadata） | `intent.classify_intent` | 默认模型 | `<<message>>` |
-| `metadata.md` | 宏观元数据查询解析（表/字段/库结构，只出 JSON，不写 SQL） | `metadata_service.parse_metadata_request` | `role_model("semantic")` | `<<databases>> <<tables>> <<message>>` |
-| `datasource.md` | 跨库判定（mysql/postgresql/seaweedfs） | `cross_db._llm_classify_dbs` | 默认模型 | `<<candidates>> <<example_datasource>> <<example_datasource_first>> <<message>>` |
-| `planning.md` | 任务规划（先想清楚几步再动手，分析类必须带 analyze 步） | `orchestrator._llm_tasks` | `role_model("planner")` | `<<question>> <<known_damage_types>>` |
-| `repair_plan.md` | 执行前规划契约校准（伪枚举、混合视图、依赖和字段组合） | `orchestrator._repair_plan` | `role_model("planner")` | `<<question>> <<planning_question>> <<plan>> <<issues>> <<known_damage_types>>` |
-| `react_controller.md` | ReAct 异常分支调度（重试、补证据、跳过或止损） | `react_agent._deviation_decision` | `role_model("controller")` | `<<goal>> <<current_step>> <<frozen_query>> <<observation_error>> <<failure>> <<allowed_tools>>` |
-| `dialogue_understanding.md` | 对话理解（关系/多对象/补全成完整问题） | `memory._llm_complete_followup` | `role_model("semantic")` | `<<history>> <<message>>` |
-| `followup_suggestion.md` | 回答末尾的后续建议 | `agent._followup_step` | `role_model("knowledge")` | `<<question>> <<reply>>` |
-| `knowledge.md` | 知识问答（只依据 RAGFlow 资料） | `agent._answer_knowledge` | `role_model("knowledge")` = 知识问答模型 | `<<context>> <<message>>` |
-| `result_summary.md` | 查询结果中文摘要（模板兜不住时） | `agent._summarize_result` | 默认模型 | `<<message>> <<columns>> <<preview>>` |
-| `templatize_sql.md` | 成功 SQL 自动模板化（离线挖槽兜底，只识别值不改结构） | `templatizer._llm_skeleton` | `role_model("semantic")` | `<<kind>> <<schema>> <<question>> <<sql>>` |
-| `example_direct_match.md` | L2 示例直达：严格同问判定（7 要素，不写 SQL） | `direct_match._score` | `role_model("semantic")` | `<<question>> <<candidates>>` |
-| `promotion_exam_generate.md` | 每轮晋级考试生成 15 道全新题（不给 SQL 映射） | `evals.promotion.case_factory` | `role_model("planner")` | `<<business_document>> <<exclude_ids>> <<exclude_questions>> <<case_count>>` |
+| `analysis.md` | 综合分析数据结果和知识库规范 | `agent._analysis_payload()` | knowledge | `question`, `data_result`, `knowledge_result`, `previous_table` |
+| `bucket_basis.md` | 判断分段依据是桩号还是时间 | `nl2sql._bucket_basis_dimension()` | semantic | `question` |
+| `datasource.md` | 判断问题涉及的数据源 | `cross_db._llm_classify_dbs()` | 默认模型 | `candidates`, `message` |
+| `dialogue_understanding.md` | 多轮对话补全和关系理解 | `memory._llm_complete_followup()` | semantic | `history`, `message` |
+| `example_direct_match.md` | 判断能否复用已验证示例 SQL | `direct_match._score()` | semantic | `question`, `candidates` |
+| `fix_sql.md` | 根据校验失败原因修正 MDL SQL | `nl2sql.fix_mdl_sql()` | semantic → verify → sql | `question`, `issue_type`, `reason`, `mdl_sql`, `rows`, `required`, `models`, `errors` |
+| `followup_suggestion.md` | 生成相关后续问题建议 | `agent._followup_suggestions_sync()` | knowledge | `question`, `reply` |
+| `intent.md` | 意图分类 | `intent.classify_intent()` | semantic | `message`, `rule_hint`, `candidates` |
+| `knowledge.md` | 仅依据 RAGFlow 片段回答知识题 | `agent._answer_knowledge()` | knowledge | `context`, `message` |
+| `metadata.md` | 解析数据库元数据问题 | `metadata_service.parse_metadata_request()` | semantic | `databases`, `tables`, `message` |
+| `planning.md` | 规划完整回答所需的执行步骤 | `orchestrator._llm_tasks()` | planner | `question`, `known_damage_types` |
+| `promotion_exam_generate.md` | 生成晋级考试题 | `evals.promotion.case_factory` | planner | `business_document`, `exclude_ids`, `exclude_questions`, `case_count`, `capability_gaps`, `unavailable_fields`, `batch_focus`, `retry_evidence` |
+| `query_holdout_judge.md` | held-out 语义验收裁判 | `evals.run_holdout_eval` | verify | `business_document`, `case_json`, `execution_json` |
+| `query_spec.md` | 把单轮问题转换为 QuerySpec | `query.analysis.analyze_single_turn()` | semantic | `question`, `kind`, `current_date`, `capabilities`, `schema`, `reach`, `assist_evidence`, `planning_feedback` |
+| `query_spec_audit.md` | 独立审计 QuerySpec 是否完整可执行 | `query.audit.audit_query_plan()` | verify | `question`, `current_date`, `plan_json`, `answer_operations`, `assist_evidence` |
+| `query_spec_repair.md` | 按结构化票据局部修复 QuerySpec | `query.planning_repair.request_repair()` | semantic | `question`, `draft`, `issue`, `capabilities`, `assist_evidence` |
+| `react_controller.md` | 异常发生时选择重试、补证据或止损 | `react_agent._deviation_decision()` | controller | `goal`, `current_step`, `frozen_query`, `observation_error`, `failure`, `allowed_tools`, `previous_attempts`, `helper_observations`, `coverage_and_values` |
+| `repair_plan.md` | 规划契约失败后的有界重规划 | `orchestrator._repair_plan()` | planner | `question`, `planning_question`, `plan`, `issues`, `known_damage_types` |
+| `repair_presentation.md` | 修正最终表达和单位，不改查询 | `agent._repair_result_presentation()` | semantic → verify | `question`, `reply`, `sql`, `columns`, `rows`, `reason` |
+| `result_summary.md` | 模板摘要失败时生成中文结果摘要 | `agent._llm_result_summary()` | semantic | `message`, `columns`, `preview`, `examples` |
+| `subject_router.md` | 从能力注册表中选择查询主体 | `capability_registry.resolve_subject()` | semantic | `question`, `subjects`, `grounding_evidence` |
+| `table_analysis.md` | 仅基于紧凑证据分析已有数值 | `calculations.domain.analysis.analyze_evidence()` | semantic | `question`, `evidence`, `requirements` |
+| `template_review.md` | 审核自动沉淀模板能否安全复用 | `templatizer.review_template()` | sql | `question`, `sql`, `conditions` |
+| `templatize_classify.md` | 判断剩余字面值能否参数化 | `templatizer.mine_sql()` | semantic | `question`, `sql`, `suspicious`, `table_fields`, `plan`, `hints` |
+| `templatize_sql.md` | 把成功 SQL 挖成参数化模板 | `templatizer._llm_template_fallback()` | semantic | `kind`, `schema`, `question`, `sql` |
+| `verify_answer.md` | 判断 SQL 结果和最终回复是否答所问 | `nl2sql.verify_answer()` | verify → semantic → sql | `question`, `sql`, `columns`, `rows`, `final_reply`, `question_optimization` |
 
-## 每条提示词的"已知坑"（改的时候别踩）
+## 维护原则
 
-### 结构（2026-09-16 按 docs/提示词逐文件评审报告.md 重构）
+- `system` 放不可违反的契约，`user` 放动态上下文、字段、示例和问题。
+- 先保留完整用户问题，再由 LLM 判断实体和查询口径；不要用关键词或正则拆业务语义。
+- `assist_evidence` 和代码规则候选只能作为线索，必须有用户原话或真实字段事实支撑。
+- 不存在的表、字段、指标和枚举继续硬拒绝；多租户、成本和预算等业务风险应反馈或标注，
+  不应在提示词层无条件阻断。
+- 规则只保留一个权威来源。审计提示词检查一致性，不重复抄写 QuerySpec 的业务规则。
+- 不要在示例里写可被模型复制成真实过滤条件的固定日期、周号、路线或编号。
+- 修改提示词后至少运行：
 
-- 所有提示词统一成：**system 放不可违反的硬规则，user 放动态上下文**（schema / 示例 / 槽位 / 问题）。
-  以前关键规则堆在 user 中间，模型遵守度明显更差。
-- 规则统一中文、编号连续、去掉重复项。
-- 信息不足时输出 `AMBIGUOUS: <缺什么>`；`sql_engine.raise_if_ambiguous()` 会把它转成
-  「请补充信息」的追问，而不是硬猜一个条件继续查。
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m unittest tests.query.test_prompt_contracts -v
+.\.venv\Scripts\python.exe -m unittest tests.query.test_query_audit tests.query.test_query_planning tests.query.test_answer_verifier_prompt -v
+```
 
-**knowledge.md**
-- "只依据给定资料、不编造、标注来源"这几条直接决定幻觉率，删改要慎重。
-- 已删掉"联网搜索必须标注"那条：这个链路没有联网检索，留着反而可能诱导模型编造搜索结果。
+更大范围的质量验证使用：
 
-**intent.md / datasource.md / planning.md / dialogue_understanding.md**
-- 都只在规则判不出来时才会被调用（规则优先，省一次 10~40 秒的 LLM 往返），所以提示词里不用重复规则判断。
-- `datasource` 现在带**数据源映射表**（以前没给 schema 却要求模型写"命中的表名"，只能编造），示例用真实
-  数据源名而不是 `<<占位符>>`。
-- `planning` 的 action（query_data/query_knowledge/analyze）由代码映射成 data/knowledge/analysis；
-  analysis 步骤自动依赖前面所有步骤（规划器不返回依赖关系）。
-- `dialogue_understanding` 输出 JSON（relation_type / multi_object / objects / full_question）。
-  `new_topic` 会**清掉**上轮继承；`multi_object=true` 时上一轮比过的对象会被带全（两路对比不再丢一条）。
-  补全后的文本还有一道代码护栏：凭空出现的年份会被摘掉（`query_rewrite.repair_fabricated_time`）。
-
-## 相关脚本 / 测试集
-
-- 看当前真实发给模型的文本（含替换后的值）：临时给 `chat` 打桩即可，参考 `backend/run_eval.py` 的用法。
-- 回归：`cd backend && .\.venv\Scripts\python.exe run_eval.py`（90 题）
-- 高难度专项：`cd backend && .\.venv\Scripts\python.exe run_hard_eval.py`
-  —— 15 题（题干与真实答案来自 `docs/NL2SQL高难度问题答案集-含真实答案.md`），专门盯
-  分别统计 / Top N / 列表查询 / 置信度 / 有无图片 / 大类翻译 / 跨表聚合。
+```powershell
+.\.venv\Scripts\python.exe -m evals.run_single_turn_eval
+.\.venv\Scripts\python.exe -m evals.run_holdout_eval
+```
