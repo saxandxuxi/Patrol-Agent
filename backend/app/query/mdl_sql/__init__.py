@@ -2,6 +2,7 @@ from .catalog import load_mdl_snapshot
 from .compiler import (
     compile_queryspec_to_mdl_sql,
     compile_queryspec_to_physical,
+    preflight_mdl_sql,
     run_mdl_sql_pipeline,
 )
 from .contract_builder import build_mdl_query_contract
@@ -71,5 +72,6 @@ __all__ = [
     "compile_queryspec_to_physical",
     "failure_message",
     "load_mdl_snapshot",
+    "preflight_mdl_sql",
     "run_mdl_sql_pipeline",
 ]

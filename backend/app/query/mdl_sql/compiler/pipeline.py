@@ -55,33 +55,94 @@ def run_mdl_sql_pipeline(
     registry = registry or CapabilityRegistry.load()
     resolved_kind = str(kind or spec.kind or "mysql")
     snapshot = mdl_snapshot or load_mdl_snapshot(resolved_kind)
+    result = preflight_mdl_sql(
+        spec,
+        plan_id=plan_id,
+        kind=resolved_kind,
+        registry=registry,
+        mdl_snapshot=snapshot,
+    )
+    if result is not None:
+        return result
 
     contract = _build_contract(spec, registry, snapshot, plan_id)
-    context = _build_context(contract, registry, snapshot)
+    context = _build_context(
+        contract,
+        registry,
+        snapshot,
+        kind=resolved_kind,
+    )
+    subgraph = _build_subgraph(contract, snapshot, registry)
+    policy = registry.snapshot.mdl_compilation
+    deterministic = compile_contract_to_mdl_sql(contract, context)
+    deterministic_failure = deterministic.failure
+    if (
+        deterministic_failure is None
+        and deterministic.mdl_sql.strip()
+    ):
+        raise MdlSqlPipelineError(
+            _failure(
+                contract,
+                code="compiler_exception",
+                stage="deterministic",
+                reason="preflight_not_covered_but_sql_was_generated",
+            )
+        )
+    if (
+        deterministic_failure is not None
+        and deterministic_failure.code != "compiler_not_covered"
+    ):
+        raise MdlSqlPipelineError(deterministic_failure)
+    return _run_fallback(
+        contract=contract,
+        context=context,
+        subgraph=subgraph,
+        snapshot=snapshot,
+        kind=resolved_kind,
+        policy=policy,
+        deterministic_failure=(
+            deterministic_failure
+            or _failure(
+                contract,
+                code="compiler_not_covered",
+                stage="deterministic",
+                reason="empty_deterministic_mdl_sql",
+            )
+        ),
+        generate=generate_mdl_sql or generate_mdl_sql_once,
+    )
+
+
+def preflight_mdl_sql(
+    spec: QuerySpec,
+    *,
+    plan_id: str = "",
+    kind: str | None = None,
+    registry: CapabilityRegistry | None = None,
+    mdl_snapshot: MdlSnapshot | None = None,
+) -> MdlSqlPipelineResult | None:
+    registry = registry or CapabilityRegistry.load()
+    resolved_kind = str(kind or spec.kind or "mysql")
+    snapshot = mdl_snapshot or load_mdl_snapshot(resolved_kind)
+
+    contract = _build_contract(spec, registry, snapshot, plan_id)
+    context = _build_context(
+        contract,
+        registry,
+        snapshot,
+        kind=resolved_kind,
+    )
     subgraph = _build_subgraph(contract, snapshot, registry)
     policy = registry.snapshot.mdl_compilation
 
     deterministic = compile_contract_to_mdl_sql(contract, context)
     deterministic_failure = deterministic.failure
-    if deterministic_failure is not None or not deterministic.mdl_sql.strip():
-        return _run_fallback(
-            contract=contract,
-            context=context,
-            subgraph=subgraph,
-            snapshot=snapshot,
-            kind=resolved_kind,
-            policy=policy,
-            deterministic_failure=(
-                deterministic_failure
-                or _failure(
-                    contract,
-                    code="compiler_not_covered",
-                    stage="deterministic",
-                    reason="empty_deterministic_mdl_sql",
-                )
-            ),
-            generate=generate_mdl_sql or generate_mdl_sql_once,
-        )
+    if deterministic_failure is not None:
+        if deterministic_failure.code == "compiler_not_covered":
+            return None
+        raise MdlSqlPipelineError(deterministic_failure)
+    if not deterministic.mdl_sql.strip():
+        return None
 
     audit = audit_mdl_sql(
         deterministic,
@@ -91,19 +152,12 @@ def run_mdl_sql_pipeline(
         policy,
     )
     if not audit.accepted:
-        return _run_fallback(
-            contract=contract,
-            context=context,
-            subgraph=subgraph,
-            snapshot=snapshot,
-            kind=resolved_kind,
-            policy=policy,
-            deterministic_failure=_audit_failure(
+        raise MdlSqlPipelineError(
+            _audit_failure(
                 contract,
                 deterministic,
                 audit,
-            ),
-            generate=generate_mdl_sql or generate_mdl_sql_once,
+            )
         )
 
     dry_plan = dry_plan_candidate(
@@ -112,19 +166,12 @@ def run_mdl_sql_pipeline(
         snapshot,
     )
     if not dry_plan.accepted:
-        return _run_fallback(
-            contract=contract,
-            context=context,
-            subgraph=subgraph,
-            snapshot=snapshot,
-            kind=resolved_kind,
-            policy=policy,
-            deterministic_failure=_dry_plan_failure(
+        raise MdlSqlPipelineError(
+            _dry_plan_failure(
                 contract,
                 deterministic,
                 dry_plan,
-            ),
-            generate=generate_mdl_sql or generate_mdl_sql_once,
+            )
         )
 
     return MdlSqlPipelineResult(
@@ -169,7 +216,12 @@ def compile_queryspec_to_mdl_sql(
     resolved_kind = str(spec.kind or "mysql")
     snapshot = mdl_snapshot or load_mdl_snapshot(resolved_kind)
     contract = _build_contract(spec, registry, snapshot, plan_id)
-    context = _build_context(contract, registry, snapshot)
+    context = _build_context(
+        contract,
+        registry,
+        snapshot,
+        kind=resolved_kind,
+    )
     candidate = compile_contract_to_mdl_sql(contract, context)
     if candidate.failure is not None:
         if candidate.failure.code == "compiler_not_covered":
@@ -270,9 +322,16 @@ def _build_context(
     contract: MdlQueryContract,
     registry: CapabilityRegistry,
     snapshot: MdlSnapshot,
+    *,
+    kind: str,
 ) -> PromptContextBundle:
     try:
-        context = build_prompt_context(contract, registry, snapshot)
+        context = build_prompt_context(
+            contract,
+            registry,
+            snapshot,
+            kind=kind,
+        )
         serialize_prompt_context(
             context,
             max_context_bytes=(

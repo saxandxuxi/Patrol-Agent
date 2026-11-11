@@ -9,6 +9,8 @@ from app.query.capability_registry import CapabilityRegistry
 from app.query.capability_registry.failures import CapabilityIssue
 from app.query.contracts import QuerySpecError
 from app.query.fields import FieldReachSet, PhysicalSchemaView
+from app.query.mdl_sql.errors import MdlSqlPipelineError
+from app.query.mdl_sql.models import CompilerFailure
 from app.query.planning_repair import (
     RepairIssue,
     RepairTicket,
@@ -563,6 +565,61 @@ class PlannerSelfRepairTests(unittest.TestCase):
         self.assertEqual(plan.nodes[0].spec.metrics, ("sum_area",))
         self.assertEqual(chat_json.call_count, 1)
         self.assertEqual(repair_chat_json.call_count, 1)
+
+    @patch("app.query.mdl_sql.compiler.pipeline.generate_mdl_sql_once")
+    @patch("app.query.spec_mdl.preflight_mdl_sql")
+    @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
+    @patch("app.query.planning_repair.controller.chat_json")
+    @patch("app.query.analysis.chat_json")
+    def test_audit_preflight_failure_repairs_spec_without_sql_fallback(
+        self,
+        chat_json,
+        repair_chat_json,
+        _audit,
+        preflight,
+        generate_mdl_sql_once,
+    ):
+        draft = invalid_distribution_draft()
+        draft["views"][0]["order_by"] = [
+            {"field": "count", "direction": "desc"}
+        ]
+        chat_json.return_value = draft
+        preflight.side_effect = [
+            MdlSqlPipelineError(
+                CompilerFailure(
+                    code="invalid_view_shape",
+                    stage="audit",
+                    evidence={"reason": "deterministic SQL view mismatch"},
+                )
+            ),
+            None,
+        ]
+        repair_chat_json.return_value = {
+            "patches": [
+                {
+                    "op": "set",
+                    "path": "/views/0/order_by",
+                    "value": [{"field": "count", "direction": "asc"}],
+                }
+            ]
+        }
+
+        plan = analyze_single_turn(
+            "按路线统计坑槽数量",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+            registry=self.registry,
+            subject="disease",
+        )
+
+        self.assertEqual(
+            plan.nodes[0].spec.order_by[0]["direction"],
+            "asc",
+        )
+        self.assertEqual(repair_chat_json.call_count, 1)
+        generate_mdl_sql_once.assert_not_called()
 
     @patch("app.query.analysis._query_plan_compile_error")
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})

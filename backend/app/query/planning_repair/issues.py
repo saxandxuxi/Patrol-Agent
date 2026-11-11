@@ -407,6 +407,8 @@ def _capability_paths(
                 ),
             ),
         )
+    if code in _AUDIT_CODE_PATHS:
+        return ((subject, _AUDIT_CODE_PATHS[code]),)
     if field_id:
         return ((subject, _VIEW_STRUCTURE_PATHS),)
     return ((subject, _VIEW_STRUCTURE_PATHS),)

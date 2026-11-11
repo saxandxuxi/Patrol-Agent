@@ -171,7 +171,7 @@ class MdlSqlPipelineTests(unittest.TestCase):
         )
         self.assertIsNone(result.deterministic_failure)
 
-    def test_deterministic_compile_failure_uses_one_fallback(self):
+    def test_only_compiler_not_covered_calls_llm_fallback(self):
         fallback_candidate = self.candidate("llm_fallback")
         failure = CompilerFailure(
             code="compiler_not_covered",
@@ -210,74 +210,72 @@ class MdlSqlPipelineTests(unittest.TestCase):
             "compiler_not_covered",
         )
 
-    def test_each_deterministic_post_compile_failure_uses_one_fallback(self):
-        fallback_candidate = self.candidate("llm_fallback")
-        deterministic = self.candidate("deterministic")
-        cases = {
-            "audit": {
-                "audit": [failed_audit(), accepted_audit()],
-                "dry": [accepted_dry_plan(fallback_candidate)],
-                "stage": "audit",
-                "code": "missing_filter",
-            },
-            "dry_plan": {
-                "audit": [
-                    accepted_audit(),
-                    accepted_audit(),
-                ],
-                "dry": [
-                    failed_dry_plan(deterministic),
-                    accepted_dry_plan(fallback_candidate),
-                ],
-                "stage": "dry_plan",
-                "code": "dry_plan_failed",
-            },
-            "physical": {
-                "audit": [
-                    accepted_audit(),
-                    accepted_audit(),
-                ],
-                "dry": [
-                    failed_dry_plan(
-                        deterministic,
-                        code="physical_sql_invalid",
-                    ),
-                    accepted_dry_plan(fallback_candidate),
-                ],
-                "stage": "physical",
-                "code": "physical_sql_invalid",
-            },
-        }
+    def test_deterministic_audit_failure_does_not_call_fallback(self):
+        fallback = Mock()
+        failure = CompilerFailure(
+            code="invalid_view_shape",
+            stage="audit",
+            evidence={"reason": "audit rejected deterministic SQL"},
+        )
 
-        for name, case in cases.items():
-            with self.subTest(stage=name):
-                fallback = Mock(return_value=fallback_candidate)
-                with (
-                    patch(
-                        "app.query.mdl_sql.compiler.pipeline.compile_contract_to_mdl_sql",
-                        return_value=deterministic,
-                    ),
-                    patch(
-                        "app.query.mdl_sql.compiler.pipeline.audit_mdl_sql",
-                        side_effect=case["audit"],
-                    ),
-                    patch(
-                        "app.query.mdl_sql.compiler.pipeline.dry_plan_candidate",
-                        side_effect=case["dry"],
-                    ),
-                ):
-                    result = self.run_pipeline(fallback)
+        with (
+            patch(
+                "app.query.mdl_sql.compiler.pipeline.preflight_mdl_sql",
+                side_effect=MdlSqlPipelineError(failure),
+            ),
+            self.assertRaises(MdlSqlPipelineError) as caught,
+        ):
+            self.run_pipeline(fallback)
 
-                fallback.assert_called_once()
-                self.assertEqual(result.candidate.source, "llm_fallback")
-                self.assertEqual(
-                    result.deterministic_failure.stage,
-                    case["stage"],
-                )
-                self.assertEqual(
-                    result.deterministic_failure.code,
-                    case["code"],
-                )
+        fallback.assert_not_called()
+        self.assertEqual(caught.exception.failure.code, "invalid_view_shape")
+        self.assertEqual(caught.exception.failure.stage, "audit")
+
+    def test_dry_plan_failure_does_not_call_fallback(self):
+        fallback = Mock()
+        failure = CompilerFailure(
+            code="dry_plan_failed",
+            stage="dry_plan",
+            evidence={"reason": "dry plan rejected deterministic SQL"},
+        )
+
+        with (
+            patch(
+                "app.query.mdl_sql.compiler.pipeline.preflight_mdl_sql",
+                side_effect=MdlSqlPipelineError(failure),
+            ),
+            self.assertRaises(MdlSqlPipelineError) as caught,
+        ):
+            self.run_pipeline(fallback)
+
+        fallback.assert_not_called()
+        self.assertEqual(caught.exception.failure.code, "dry_plan_failed")
+        self.assertEqual(caught.exception.failure.stage, "dry_plan")
+
+    def test_non_compiler_not_covered_failure_does_not_call_fallback(self):
+        fallback = Mock()
+        failure = CompilerFailure(
+            code="compiler_exception",
+            stage="deterministic",
+            evidence={"reason": "unexpected compiler failure"},
+        )
+        failed = replace(
+            self.candidate("deterministic"),
+            mdl_sql="",
+            failure=failure,
+        )
+
+        with (
+            patch(
+                "app.query.mdl_sql.compiler.pipeline.compile_contract_to_mdl_sql",
+                return_value=failed,
+            ),
+            self.assertRaises(MdlSqlPipelineError) as caught,
+        ):
+            self.run_pipeline(fallback)
+
+        fallback.assert_not_called()
+        self.assertEqual(caught.exception.failure.code, "compiler_exception")
 
     def test_contract_context_and_relationship_failures_never_call_fallback(self):
         fallback = Mock()

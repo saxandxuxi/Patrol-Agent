@@ -74,7 +74,7 @@ from .shape_contracts import (
     normalize_segment_projection,
     normalize_top_view,
 )
-from .spec_mdl import UnsupportedQuerySpec, compile_spec_mdl
+from .spec_mdl import UnsupportedQuerySpec, preflight_spec_mdl
 from .validator import validate_query_spec
 from .values import resolve_value
 
@@ -2009,7 +2009,7 @@ def _query_plan_compile_error(plan: QueryPlan) -> CapabilityIssue | None:
         if node.node_type != "query_data":
             continue
         try:
-            sql = compile_spec_mdl(node.spec)
+            sql = preflight_spec_mdl(node.spec)
         except UnsupportedQuerySpec as exc:
             message = str(exc) or f"节点 {node.id} 无法编译"
             return _capability_issue_from_compile_error(
@@ -2018,10 +2018,8 @@ def _query_plan_compile_error(plan: QueryPlan) -> CapabilityIssue | None:
                 getattr(exc, "failure", None),
             )
         if not sql:
-            # 确定性编译器没有覆盖并不等于 QuerySpec 非法：
-            # 执行入口仍可走受控 LLM MDL-SQL 兜底，并在同一套合同审计后执行。
-            # 真正不存在的字段/关系已经由 compile_spec_mdl 抛出
-            # UnsupportedQuerySpec 并在上面被拦住。
+            # 只有确实没有覆盖时才留给执行入口做一次受控兜底；
+            # 合同、审计或 dry-plan 失败已经由预检抛成可修复证据。
             continue
     return None
 
@@ -2808,11 +2806,13 @@ def _capability_issue_from_compile_error(
             ),
             node_id=node_id,
         )
+    failure_code = str(getattr(failure, "code", "") or "").strip()
     return CapabilityIssue(
-        code="unsupported_capability",
+        code=failure_code or "unsupported_capability",
         original_value=node_id,
         reason=message,
         node_id=node_id,
+        evidence=dict(evidence) if isinstance(evidence, Mapping) else {},
     )
 
 
