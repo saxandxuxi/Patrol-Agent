@@ -186,6 +186,15 @@ metrics:
       fanout_safe: false
       aliases: [sum_patrol_mileage]
       allowed_views: [count, sum, distribution, top_groups, trend]
+    active_day_count:
+      expression: COUNT(DISTINCT DATE({alias}.create_time))
+      label: 有效巡查天数
+      unit: 天
+      aggregation: count_distinct
+      grain: patrol
+      identity: patrol.id
+      fanout_safe: false
+      allowed_views: [count, distribution]
   route:
     count:
       expression: COUNT(*)
@@ -196,6 +205,15 @@ metrics:
       identity: route.id
       fanout_safe: false
       allowed_views: [count, distribution, top_groups]
+    total_route_length_km:
+      expression: SUM({alias}.route_length_km)
+      label: 路线总长度
+      unit: km
+      aggregation: sum
+      grain: route
+      identity: route.id
+      fanout_safe: false
+      allowed_views: [count, sum, distribution]
   section:
     count:
       expression: COUNT(*)

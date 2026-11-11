@@ -3,7 +3,16 @@ derived_metrics:
     disease_density:
       label: 病害密度
       unit: 处/km
-      expression: count / route_length_km
-      operands: [count, route_length_km]
+      expression: count / total_route_length_km
+      operands: [count, total_route_length_km]
+      evaluator: post_calc
+      lower_is_better: true
+    disease_length_density:
+      label: 病害长度密度
+      unit: 米/km
+      expression: sum_effective_disease_length / total_route_length_km
+      operands:
+      - sum_effective_disease_length
+      - total_route_length_km
       evaluator: post_calc
       lower_is_better: true

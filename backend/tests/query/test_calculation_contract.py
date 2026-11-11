@@ -1,7 +1,9 @@
 import unittest
 from unittest.mock import patch
 
+from app.calculations.models import CalculationRequest
 from app.query.analysis import (
+    _normalize_plan_shapes,
     _normalize_group_share_calculation,
     _query_plan_calculation_issue,
     analyze_single_turn,
@@ -10,10 +12,100 @@ from app.query.capability_registry import CapabilityRegistry
 from app.query.contracts import PlanNode, QueryPlan, QuerySpec, QuerySpecError
 from app.query.fields import FieldReachSet, PhysicalSchemaView
 from app.query.semantic_operations import (
+    GROUP_CHANGE,
     GROUP_SHARE,
     semantic_operation_contract_issue,
 )
 from app.query.values import resolve_value
+
+
+def scalar_calculation_plan(
+    *,
+    numerator_subject: str,
+    numerator_metric: str,
+    denominator_subject: str,
+    denominator_metric: str,
+    output_name: str,
+    output_unit: str,
+    post_subject: str,
+) -> QueryPlan:
+    numerator = QuerySpec(
+        id="q1",
+        kind="mysql",
+        subject=numerator_subject,
+        view="sum",
+        metrics=(numerator_metric,),
+        dimensions=(),
+        filters=(),
+        output_projection=(numerator_metric,),
+        order_by=(),
+        limit=None,
+        required_assertions=("preserve_user_scope",),
+        question="统计分子事实",
+    )
+    denominator = QuerySpec(
+        id="q2",
+        kind="mysql",
+        subject=denominator_subject,
+        view="sum",
+        metrics=(denominator_metric,),
+        dimensions=(),
+        filters=(),
+        output_projection=(denominator_metric,),
+        order_by=(),
+        limit=None,
+        required_assertions=("preserve_user_scope",),
+        question="统计分母事实",
+    )
+    calculation = CalculationRequest.from_dict(
+        {
+            "tool": "calculate_scalar",
+            "operation": "divide",
+            "operands": [
+                {
+                    "name": "numerator",
+                    "source": {"node": "q1", "field": numerator_metric},
+                },
+                {
+                    "name": "denominator",
+                    "source": {"node": "q2", "field": denominator_metric},
+                },
+            ],
+            "output": {
+                "name": output_name,
+                "label": output_name,
+                "unit": output_unit,
+            },
+        }
+    )
+    result = QuerySpec(
+        id="q3",
+        kind="mysql",
+        subject=post_subject,
+        view="data",
+        metrics=(output_name,),
+        dimensions=(),
+        filters=(),
+        output_projection=(output_name,),
+        order_by=(),
+        limit=None,
+        required_assertions=(),
+        question="组合得到密度",
+        calculation=calculation,
+    )
+    return QueryPlan(
+        question="组合两个事实",
+        nodes=(
+            PlanNode(id="q1", spec=numerator),
+            PlanNode(id="q2", spec=denominator),
+            PlanNode(
+                id="q3",
+                spec=result,
+                depends_on=("q1", "q2"),
+                node_type="post_calc",
+            ),
+        ),
+    )
 
 
 def calculation_payload(
@@ -92,6 +184,63 @@ class CalculationContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.registry = CapabilityRegistry.load()
+
+    def setUp(self):
+        repair_patcher = patch(
+            "app.query.planning_repair.controller.chat_json",
+            return_value={"patches": []},
+        )
+        repair_patcher.start()
+        self.addCleanup(repair_patcher.stop)
+
+    def test_density_uses_two_fact_nodes_and_one_scalar_division(self):
+        plan = scalar_calculation_plan(
+            numerator_subject="disease",
+            numerator_metric="sum_effective_disease_length",
+            denominator_subject="route",
+            denominator_metric="total_route_length_km",
+            output_name="disease_length_density",
+            output_unit="米/km",
+            post_subject="disease",
+        )
+
+        issue = _query_plan_calculation_issue(plan, self.registry)
+
+        self.assertIsNone(issue)
+        self.assertEqual(
+            [node.spec.subject for node in plan.nodes],
+            ["disease", "route", "disease"],
+        )
+        self.assertEqual(
+            plan.nodes[-1].spec.calculation.operation,
+            "divide",
+        )
+        self.assertEqual(
+            plan.nodes[-1].spec.calculation.output.unit,
+            "米/km",
+        )
+
+    def test_patrol_density_uses_count_and_active_days(self):
+        plan = scalar_calculation_plan(
+            numerator_subject="patrol",
+            numerator_metric="count",
+            denominator_subject="patrol",
+            denominator_metric="active_day_count",
+            output_name="patrol_density",
+            output_unit="次/天",
+            post_subject="patrol",
+        )
+
+        issue = _query_plan_calculation_issue(plan, self.registry)
+
+        self.assertIsNone(issue)
+        self.assertEqual(
+            [
+                item.source["field"]
+                for item in plan.nodes[-1].spec.calculation.operands
+            ],
+            ["count", "active_day_count"],
+        )
 
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
     @patch("app.query.analysis.chat_json")
@@ -283,6 +432,290 @@ class CalculationContractTests(unittest.TestCase):
         )
         self.assertIsNotNone(issue)
         self.assertEqual(issue.code, "group_share_requires_columns")
+
+    def test_group_change_requires_two_same_shape_grouped_nodes(self):
+        from app.calculations.models import CalculationRequest
+
+        before = QuerySpec(
+            id="before",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("problem_type_name",),
+            filters=(),
+            output_projection=("problem_type_name", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="统计前一次巡查各病害数量",
+        )
+        after = QuerySpec(
+            id="after",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("problem_type_name",),
+            filters=(),
+            output_projection=("problem_type_name", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question="统计后一次巡查各病害数量",
+        )
+        calculation = CalculationRequest.from_dict(
+            {
+                "tool": "calculate_group_change",
+                "operation": "subtract",
+                "operands": [
+                    {
+                        "name": "labels",
+                        "source": {
+                            "node": "before",
+                            "field": "problem_type_name",
+                        },
+                    },
+                    {
+                        "name": "before",
+                        "source": {"node": "before", "field": "count"},
+                    },
+                    {
+                        "name": "after",
+                        "source": {"node": "after", "field": "count"},
+                    },
+                ],
+                "output": {
+                    "name": "count_increase",
+                    "label": "增加数量",
+                    "unit": "处",
+                },
+            }
+        )
+        compare = QuerySpec(
+            id="compare",
+            kind="mysql",
+            subject="disease",
+            view="data",
+            metrics=("count_increase",),
+            dimensions=("problem_type_name",),
+            filters=(),
+            output_projection=("problem_type_name", "count_increase"),
+            order_by=(
+                {"field": "count_increase", "direction": "desc"},
+            ),
+            limit=None,
+            required_assertions=(),
+            question="找出增加最多的一种病害",
+            calculation=calculation,
+        )
+        plan = QueryPlan(
+            question="两次巡查相比，哪种病害增加最多？",
+            nodes=(
+                PlanNode(id="before", spec=before),
+                PlanNode(id="after", spec=after),
+                PlanNode(
+                    id="compare",
+                    spec=compare,
+                    depends_on=("before", "after"),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+
+        calculation_issue = _query_plan_calculation_issue(
+            plan,
+            self.registry,
+        )
+        operation_issue = semantic_operation_contract_issue(
+            plan,
+            GROUP_CHANGE,
+            self.registry,
+        )
+
+        self.assertIsNone(calculation_issue)
+        self.assertIsNone(operation_issue)
+
+    def test_group_change_rejects_mismatched_group_dimensions(self):
+        from app.calculations.models import CalculationRequest
+
+        before = QuerySpec(
+            id="before",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("problem_type_name",),
+            filters=(),
+            output_projection=("problem_type_name", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+        after = QuerySpec(
+            id="after",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("up_or_down",),
+            filters=(),
+            output_projection=("up_or_down", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+        )
+        calculation = CalculationRequest.from_dict(
+            {
+                "tool": "calculate_group_change",
+                "operation": "subtract",
+                "operands": [
+                    {
+                        "name": "labels",
+                        "source": {
+                            "node": "before",
+                            "field": "problem_type_name",
+                        },
+                    },
+                    {
+                        "name": "before",
+                        "source": {"node": "before", "field": "count"},
+                    },
+                    {
+                        "name": "after",
+                        "source": {"node": "after", "field": "count"},
+                    },
+                ],
+                "output": {"name": "count_increase", "label": "增加数量"},
+            }
+        )
+        compare = QuerySpec(
+            id="compare",
+            kind="mysql",
+            subject="disease",
+            view="data",
+            metrics=("count_increase",),
+            dimensions=("problem_type_name",),
+            filters=(),
+            output_projection=("problem_type_name", "count_increase"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            calculation=calculation,
+        )
+        plan = QueryPlan(
+            question="两次巡查相比，哪种病害增加最多？",
+            nodes=(
+                PlanNode(id="before", spec=before),
+                PlanNode(id="after", spec=after),
+                PlanNode(
+                    id="compare",
+                    spec=compare,
+                    depends_on=("before", "after"),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+
+        issue = _query_plan_calculation_issue(plan, self.registry)
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(issue.code, "calculation_group_shape_mismatch")
+
+    def test_group_change_role_map_is_normalized_to_operands(self):
+        from app.calculations.models import CalculationRequest
+
+        request = CalculationRequest.from_dict(
+            {
+                "tool": "calculate_group_change",
+                "operation": "subtract",
+                "labels": {
+                    "source": {
+                        "node": "after",
+                        "field": "problem_type_name",
+                    }
+                },
+                "before": {
+                    "source": {"node": "before", "field": "count"}
+                },
+                "after": {
+                    "source": {"node": "after", "field": "count"}
+                },
+                "output": {
+                    "name": "count_increase",
+                    "label": "增加数量",
+                },
+            }
+        )
+
+        self.assertEqual(
+            [item.name for item in request.operands],
+            ["labels", "before", "after"],
+        )
+        self.assertEqual(
+            request.operands[1].source,
+            {"node": "before", "field": "count"},
+        )
+
+    def test_group_change_drops_incompatible_dataset_assertion(self):
+        from app.calculations.models import CalculationRequest
+
+        calculation = CalculationRequest.from_dict(
+            {
+                "tool": "calculate_group_change",
+                "operation": "subtract",
+                "operands": [
+                    {
+                        "name": "labels",
+                        "source": {
+                            "node": "before",
+                            "field": "problem_type_name",
+                        },
+                    },
+                    {
+                        "name": "before",
+                        "source": {"node": "before", "field": "count"},
+                    },
+                    {
+                        "name": "after",
+                        "source": {"node": "after", "field": "count"},
+                    },
+                ],
+                "output": {"name": "count_increase", "label": "增加数量"},
+            }
+        )
+        compare = QuerySpec(
+            id="compare",
+            kind="mysql",
+            subject="disease",
+            view="data",
+            metrics=("count_increase",),
+            dimensions=("problem_type_name",),
+            filters=(),
+            output_projection=("problem_type_name", "count_increase"),
+            order_by=(),
+            limit=None,
+            required_assertions=("dataset_comparison",),
+            calculation=calculation,
+        )
+        plan = QueryPlan(
+            question="两次巡查相比，哪种病害增加最多？",
+            nodes=(
+                PlanNode(
+                    id="compare",
+                    spec=compare,
+                    depends_on=("before", "after"),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+
+        normalized = _normalize_plan_shapes(plan)
+
+        self.assertEqual(
+            normalized.nodes[0].spec.required_assertions,
+            (),
+        )
 
     def test_multi_metric_comparison_can_explain_existing_scalars(self):
         first = QuerySpec(

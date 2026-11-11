@@ -63,6 +63,7 @@ class MetricRegistryTests(unittest.TestCase):
 
         route_length = view["metrics"]["route_length_km"]
         density = view["derived_metrics"]["disease_density"]
+        length_density = view["derived_metrics"]["disease_length_density"]
 
         self.assertEqual(route_length["unit"], "km")
         self.assertEqual(route_length["aggregation"], "row")
@@ -72,9 +73,34 @@ class MetricRegistryTests(unittest.TestCase):
         self.assertEqual(route_length["source_kind"], "resources")
         self.assertEqual(
             density["operands"],
-            ["count", "route_length_km"],
+            ["count", "total_route_length_km"],
         )
         self.assertEqual(density["evaluator"], "post_calc")
+        self.assertEqual(density["unit"], "处/km")
+        self.assertEqual(
+            length_density["operands"],
+            [
+                "sum_effective_disease_length",
+                "total_route_length_km",
+            ],
+        )
+        self.assertEqual(length_density["unit"], "米/km")
+
+    def test_route_total_length_and_patrol_active_days_are_atomic_facts(self):
+        route_metric = self.registry.snapshot.metrics["route"][
+            "total_route_length_km"
+        ]
+        active_days = self.registry.snapshot.metrics["patrol"][
+            "active_day_count"
+        ]
+
+        self.assertEqual(route_metric.aggregation, "sum")
+        self.assertEqual(route_metric.grain, "route")
+        self.assertEqual(route_metric.identity, "route.id")
+        self.assertEqual(route_metric.unit, "km")
+        self.assertEqual(active_days.aggregation, "count_distinct")
+        self.assertEqual(active_days.grain, "patrol")
+        self.assertEqual(active_days.unit, "天")
 
     def test_every_registered_metric_has_valid_semantics(self):
         for subject, metrics in self.registry.snapshot.metrics.items():

@@ -16,6 +16,10 @@ from ..calculations.models import (
     CalculationRequest,
 )
 from ..calculations.operations import roles_for_tool
+from ..calculations.semantics import (
+    CalculationSourceShape,
+    validate_calculation_sources,
+)
 from ..semantic_aids import canonical_field, detect_evidence
 from .analysis_contracts import complete_analysis_answer
 from .audit import audit_query_plan
@@ -2549,7 +2553,81 @@ def _query_plan_calculation_issue(
             )
             if group_change_issue is not None:
                 return group_change_issue
+        source_shapes: list[CalculationSourceShape] = []
+        operands_by_name = {
+            operand.name: operand for operand in calculation.operands
+        }
+        for role in roles:
+            shape = _calculation_source_shape(
+                nodes_by_id,
+                operands_by_name.get(role),
+                registry,
+            )
+            if shape is not None:
+                source_shapes.append(shape)
+        semantic_issues = validate_calculation_sources(
+            calculation.tool,
+            calculation.operation,
+            tuple(source_shapes),
+            calculation.output.unit if calculation.output else "",
+        )
+        if semantic_issues:
+            issue = semantic_issues[0]
+            return CapabilityIssue(
+                code=issue.code,
+                original_value=calculation.operation,
+                reason=issue.message,
+                node_id=node.id,
+                evidence={
+                    **issue.evidence,
+                    "tool": calculation.tool,
+                    "operation": calculation.operation,
+                },
+            )
     return None
+
+
+def _calculation_source_shape(
+    nodes_by_id: Mapping[str, PlanNode],
+    operand: Any,
+    registry: CapabilityRegistry,
+) -> CalculationSourceShape | None:
+    if operand is None or not operand.source:
+        return None
+    node = nodes_by_id.get(str(operand.source.get("node") or ""))
+    if node is None:
+        return None
+    field = str(operand.source.get("field") or "")
+    metric = registry.snapshot.metric(node.spec.subject, field)
+    dimensions = (
+        ()
+        if operand.source.get("row_index") is not None
+        else tuple(node.spec.dimensions)
+    )
+    if metric is not None:
+        result_grain = metric.grain
+        identity = metric.identity
+        unit = metric.unit
+    else:
+        output = (
+            node.spec.calculation.output
+            if node.spec.calculation is not None
+            else None
+        )
+        if output is None or output.name != field:
+            return None
+        result_grain = node.spec.subject
+        identity = output.name
+        unit = output.unit
+    if dimensions:
+        result_grain = "group:" + "|".join(dimensions)
+        identity = "group:" + "|".join(dimensions)
+    return CalculationSourceShape(
+        result_grain=result_grain,
+        dimensions=dimensions,
+        identity=identity,
+        unit=unit,
+    )
 
 
 def _group_change_shape_issue(
