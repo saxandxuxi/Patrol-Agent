@@ -72,6 +72,64 @@ def technical_filter_fields(
     return tuple(sorted(fields))
 
 
+def _unresolved_filter_paths(
+    draft: dict[str, Any],
+    field: str,
+) -> tuple[str, ...]:
+    paths: list[str] = []
+    normalized = str(field or "").rsplit(".", 1)[-1]
+    for view_index, view in enumerate(draft.get("views") or []):
+        if not isinstance(view, dict):
+            continue
+        for filter_index, item in enumerate(view.get("filters") or []):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("field") or "").rsplit(".", 1)[-1] != normalized:
+                continue
+            paths.append(
+                f"/views/{view_index}/filters/{filter_index}/raw_value"
+            )
+    return tuple(paths)
+
+
+def _field_reference_paths(
+    draft: dict[str, Any],
+    view_index: int,
+    field: str,
+) -> tuple[str, ...]:
+    views = draft.get("views") or []
+    if view_index < 0 or view_index >= len(views):
+        return ()
+    view = views[view_index]
+    if not isinstance(view, dict):
+        return ()
+    normalized = str(field or "").rsplit(".", 1)[-1]
+    if not normalized:
+        return ()
+    paths: list[str] = []
+    for name in ("metrics", "dimensions", "output_projection"):
+        values = view.get(name) or []
+        if any(
+            str(item or "").rsplit(".", 1)[-1] == normalized
+            for item in values
+        ):
+            paths.append(f"/views/{view_index}/{name}")
+    for index, item in enumerate(view.get("order_by") or []):
+        value = (
+            item.get("field") or item.get("metric")
+            if isinstance(item, Mapping)
+            else item
+        )
+        if str(value or "").rsplit(".", 1)[-1] == normalized:
+            paths.append(f"/views/{view_index}/order_by/{index}")
+    for index, item in enumerate(view.get("filters") or []):
+        if not isinstance(item, Mapping):
+            continue
+        if str(item.get("field") or "").rsplit(".", 1)[-1] == normalized:
+            paths.append(f"/views/{view_index}/filters/{index}")
+    return tuple(dict.fromkeys(paths))
+
+
 def _with_scope_evidence(
     issue: RepairIssue,
     draft: dict[str, Any],
@@ -193,6 +251,31 @@ def repair_issue_from_error(
             ),
             mutable_filter_fields=mutable_time_fields,
         )
+    elif reason.startswith("过滤值 ") and "来源为" in reason:
+        field = reason.split("过滤值 ", 1)[1].split(" ", 1)[0]
+        if field in mutable_technical_fields:
+            issue = RepairIssue(
+                code="query_spec_contract_violation",
+                path="/views",
+                reason=reason,
+                allowed_paths=_VIEW_STRUCTURE_PATHS,
+                mutable_filter_fields=mutable_technical_fields,
+            )
+        else:
+            paths = _unresolved_filter_paths(draft, field)
+            issue = RepairIssue(
+                code="unresolved_provenance",
+                path=paths[0] if paths else "/views/*/filters",
+                reason=reason,
+                expected=(
+                    "只把该过滤值恢复为用户原问题中的明确值或受控解析值，"
+                    "不得删除过滤条件或扩大用户范围"
+                ),
+                actual=field,
+                allowed_paths=paths or ("/views/*/filters",),
+                mutable_filter_fields=(field,),
+                evidence={"field": field},
+            )
     elif "排序字段" in reason or "order_by" in reason:
         issue = RepairIssue(
             code="invalid_order_field",
@@ -414,6 +497,25 @@ def _capability_paths(
     return ((subject, _VIEW_STRUCTURE_PATHS),)
 
 
+def _contract_patch_path(
+    raw_path: str,
+    view_index: int | None,
+) -> tuple[str, tuple[str, ...]]:
+    if view_index is None or not raw_path:
+        return "", ()
+    context = raw_path.split("[", 1)[0].split(".", 1)[0]
+    if not context:
+        return "", ()
+    suffix = (
+        raw_path[len(context):]
+        .replace("[", "/")
+        .replace("]", "")
+        .replace(".", "/")
+    )
+    exact_path = f"/views/{view_index}/{context}{suffix}"
+    return exact_path, (f"/views/{view_index}/{context}",)
+
+
 def repair_issue_from_capability(
     failure: Any,
     draft: dict[str, Any],
@@ -432,6 +534,17 @@ def repair_issue_from_capability(
     )
     reason = str(getattr(failure, "reason", "") or "").strip()
     actual = str(getattr(failure, "original_value", "") or "")
+    evidence = getattr(failure, "evidence", {}) or {}
+    evidence = evidence if isinstance(evidence, Mapping) else {}
+    nested_reason = str(evidence.get("reason") or "").strip()
+    if nested_reason and nested_reason not in reason:
+        reason = f"{nested_reason}: {reason}"
+    exact_failure_path, contract_paths = _contract_patch_path(
+        str(evidence.get("path") or "").strip(),
+        index,
+    )
+    if evidence.get("field"):
+        actual = str(evidence["field"])
     paths = next(
         iter(
             _capability_paths(
@@ -441,15 +554,22 @@ def repair_issue_from_capability(
             )
         )
     )[1]
+    if contract_paths:
+        paths = (
+            *contract_paths,
+            *(
+                _field_reference_paths(draft, index, actual)
+                if index is not None
+                else ()
+            ),
+        )
+        paths = tuple(dict.fromkeys(paths))
     if code in {
         "dataset_comparison_requires_entity_details",
         "dataset_comparison_missing_identity",
     }:
-        evidence = getattr(failure, "evidence", {}) or {}
         dependency_id = str(
             evidence.get("dependency") or ""
-            if isinstance(evidence, dict)
-            else ""
         ).strip()
         dependency_index = _view_index(draft, dependency_id)
         if dependency_index is not None:
@@ -474,6 +594,8 @@ def repair_issue_from_capability(
                     f"/views/{dependency_index}/output_projection",
                 )
     failure_path = paths[0]
+    if exact_failure_path:
+        failure_path = exact_failure_path
     if index is not None:
         failure_path = failure_path.replace(
             "/views/*",

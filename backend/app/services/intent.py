@@ -43,7 +43,7 @@ def wants_images(message: str) -> bool:
 
 def _capability_evidence(
     message: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, bool]:
     """Return table candidates plus registered field status facts for the intent LLM."""
 
     from . import field_grounding
@@ -61,6 +61,7 @@ def _capability_evidence(
     )
 
     facts: list[dict[str, Any]] = []
+    unavailable_field = False
     try:
         from ..query.capability_registry import CapabilityRegistry
 
@@ -91,6 +92,8 @@ def _capability_evidence(
                 )
             if capability is None:
                 continue
+            if capability.status in {"unavailable", "lookup_required"}:
+                unavailable_field = True
             facts.append(
                 {
                     "field": f"{table_name}.{column_name}",
@@ -120,7 +123,7 @@ def _capability_evidence(
         if facts
         else "（统一能力注册表没有为该问题找到字段状态事实）"
     )
-    return candidates, evidence
+    return candidates, evidence, unavailable_field
 
 
 def _classify(message: str) -> tuple[str, bool]:
@@ -139,7 +142,9 @@ def _classify(message: str) -> tuple[str, bool]:
         # 用户用的是自己的叫法（"拍的片子""标了多少个点"），意图模型认不出就容易把
         # 数据查询判成 knowledge（实测"病害工单的处理状态"被判成知识问答，回了"资料中
         # 没有相关内容"）。把表结构语义检索的候选当**证据**给它，判断权还在模型手里。
-        candidates, capability_evidence = _capability_evidence(message)
+        candidates, capability_evidence, unavailable_field = (
+            _capability_evidence(message)
+        )
         data = chat_json(
             prompts.messages(
                 "intent",
@@ -156,6 +161,8 @@ def _classify(message: str) -> tuple[str, bool]:
         # 见 docs/宏观元数据查询_语义理解方案.md：这类问题走 metadata_service，不进业务 plan。
         allowed = {"knowledge", "data", "analysis", "image", "composite", "metadata"}
         if candidate in allowed:
+            if candidate == "metadata" and unavailable_field:
+                candidate = "analysis"
             intent = candidate
             answered = True
     except (LLMError, Exception):

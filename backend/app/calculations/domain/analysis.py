@@ -434,7 +434,7 @@ def _trend_series_conclusion(
             for row in dependency.get("rows") or ()
             if isinstance(row, dict)
         ]
-        if len(rows) < 2:
+        if not rows:
             continue
         numeric_columns = [
             column
@@ -466,6 +466,18 @@ def _trend_series_conclusion(
                 for label, value in points
                 if value is not None
             ]
+            if len(points) == 1:
+                label, value = points[0]
+                bucket = (
+                    f"{label} {_format_number(value)}"
+                    if label
+                    else _format_number(value)
+                )
+                summaries.append(
+                    f"{caption}：{column}只有一个时间桶（{bucket}），"
+                    "无法判断趋势"
+                )
+                continue
             if len(points) < 2:
                 continue
             changes = [

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from typing import Any
 
 from .capability_registry import CapabilityRegistry
 from .contracts import QuerySpec, PUBLIC_QUERY_VIEWS
@@ -37,6 +39,24 @@ _ANALYSIS_VIEW_ALIASES = frozenset(
 # 指标会被编译器静默丢掉（用户要“总面积”，拿到的却是明细行）。
 _RECORD_VIEWS = frozenset({"list", "detail", "data"})
 _SEGMENT_IMPLIED_OUTPUTS = frozenset({"start_pile", "end_pile"})
+
+
+def normalize_order_items(value: Any) -> tuple[Any, ...]:
+    items = value if isinstance(value, (list, tuple)) else ()
+    normalized: list[Any] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            normalized.append(item)
+            continue
+        order = dict(item)
+        field = order.get("field") or order.get("metric")
+        if field:
+            order["field"] = field
+            order.pop("metric", None)
+        if "direction" not in order and order.get("order"):
+            order["direction"] = order["order"]
+        normalized.append(order)
+    return tuple(normalized)
 
 
 def canonical_view(
@@ -99,6 +119,8 @@ def normalize_post_calc_shape(spec: QuerySpec) -> QuerySpec:
     """Keep explanatory post-calc nodes on the executable data contract."""
 
     spec = normalize_top_view(spec)
+    if spec.view == "single_result":
+        return replace(spec, view="data")
     if (
         spec.calculation is None
         and "analysis_only" in spec.required_assertions

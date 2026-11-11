@@ -262,6 +262,102 @@ class PlannerSelfRepairTests(unittest.TestCase):
             "坑槽",
         )
 
+    @patch("app.query.analysis._query_plan_compile_error", return_value=None)
+    @patch("app.query.analysis.audit_query_plan")
+    @patch("app.query.planning_repair.controller.chat_json")
+    @patch("app.query.analysis.chat_json")
+    def test_audit_evidence_without_set_uses_local_metric_repair(
+        self,
+        chat_json,
+        repair_chat_json,
+        audit_query_plan,
+        _compile_error,
+    ):
+        chat_json.return_value = {
+            "final_goal": "列出巡检任务及关联病害数量",
+            "intent_family": "list",
+            "answer_operation": "single_result",
+            "unknown_terms": [],
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "question": "列出巡检任务及关联病害数量",
+                    "subject": "patrol",
+                    "view": "list",
+                    "metrics": ["count"],
+                    "dimensions": ["task_number", "route_name"],
+                    "filters": [
+                        {
+                            "field": "create_time",
+                            "op": "between",
+                            "raw_value": ["2026-10-28", "2026-10-29"],
+                        }
+                    ],
+                    "output_projection": [
+                        "task_number",
+                        "route_name",
+                        "count",
+                    ],
+                    "order_by": [],
+                    "limit": 500,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        audit_query_plan.side_effect = [
+            {
+                "complete": False,
+                "answer_operation": "single_result",
+                "issues": [
+                    {
+                        "code": "missing_metric",
+                        "node_id": "q1",
+                        "reason": "任务关联病害数量不能使用任务行数指标 count",
+                        "repair_hint": "改用任务关联病害数 linked_disease_count",
+                    }
+                ],
+            },
+            {"complete": True, "answer_operation": "single_result", "issues": []},
+        ]
+        repair_chat_json.return_value = {
+            "patches": [
+                {
+                    "op": "set",
+                    "path": "/views/0/metrics",
+                    "value": ["linked_disease_count"],
+                },
+                {
+                    "op": "set",
+                    "path": "/views/0/output_projection",
+                    "value": [
+                        "task_number",
+                        "route_name",
+                        "linked_disease_count",
+                    ],
+                },
+            ],
+            "reason": "把任务行数替换为任务关联病害数",
+        }
+
+        plan = analyze_single_turn(
+            "2026年10月28日执行了哪些巡检任务，以及每个任务检出的病害数量",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+            registry=self.registry,
+            subject="patrol",
+        )
+
+        self.assertEqual(
+            plan.nodes[0].spec.metrics,
+            ("linked_disease_count",),
+        )
+        self.assertEqual(repair_chat_json.call_count, 1)
+
     @patch("app.query.analysis.audit_query_plan")
     @patch("app.query.planning_repair.controller.chat_json")
     @patch("app.query.analysis.chat_json")

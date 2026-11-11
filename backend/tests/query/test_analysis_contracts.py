@@ -2,11 +2,55 @@ import unittest
 from unittest.mock import patch
 
 from app.query.analysis import analyze_single_turn
-from app.query.contracts import ValueBinding
+from app.query.analysis_contracts import complete_analysis_answer
+from app.query.contracts import (
+    PlanNode,
+    QueryPlan,
+    QuerySpec,
+    ValueBinding,
+)
 from app.query.fields import FieldReachSet, PhysicalSchemaView
 
 
 class AnalysisContractTests(unittest.TestCase):
+    def test_trend_without_analysis_intent_does_not_add_route_length(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="trend",
+            metrics=("total_area",),
+            dimensions=("collection_time_day",),
+            filters=(
+                ValueBinding(
+                    field="route_name",
+                    op="=",
+                    storage_value="route-51ca",
+                    display_value="长沙－芷江高速公路",
+                    source="user_explicit",
+                    resolver="route_dictionary",
+                ),
+            ),
+            output_projection=("collection_time_day", "total_area"),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+        )
+        plan = QueryPlan(
+            question="长沙－芷江高速公路2026年11月病害总面积的每日变化趋势",
+            nodes=(PlanNode(id="q1", spec=spec),),
+        )
+
+        completed = complete_analysis_answer(plan, "trend")
+
+        self.assertEqual(completed.nodes, plan.nodes)
+        self.assertFalse(
+            any(
+                node.spec.metrics == ("route_length_km",)
+                for node in completed.nodes
+            )
+        )
+
     @patch("app.query.analysis.chat_json")
     def test_independent_analysis_intent_adds_terminal_analysis(self, chat_json):
         chat_json.return_value = {

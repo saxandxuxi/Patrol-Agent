@@ -18,6 +18,9 @@
    `query_semantics.task_disease_evidence` 的 `allowed_subject`、
    `required_identity_join` 和 `batch_dimensions`。病害属性只能作为证据；
    不得把另一个批次字段冒充 `task_number`，也不得把病害字段直接过滤到任务主体。
+6. 用户按某主体指标给另一个实体分组或排名时，严格执行
+   `query_semantics.subject_selection.metric_owner`：查询主体是指标所属主体，
+   被排名的实体是分组维度。候选主体中的 `metrics` 是所有权证据。
 
 输出：
 {

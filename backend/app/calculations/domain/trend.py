@@ -16,6 +16,8 @@ def render_series_calculation(
     )
     if not points:
         return "序列计算没有可用数据。"
+    if len(result.rows) == 1:
+        return f"只有一个时间桶：{points}，无法判断趋势。"
     change_name = (
         "difference"
         if request.operation == "subtract"

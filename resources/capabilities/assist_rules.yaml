@@ -39,10 +39,7 @@ field_aliases:
   collection_month: collection_time_month
   year_start_date: collection_time_year
   quarter_start_date: collection_time_quarter
-  collection_time_day: day
-  create_time_day: day
-  collection_time_month: month
-  create_time_month: month
+  up_or_down_name: up_or_down
 
 regex_rules:
   - id: recent_window
@@ -72,19 +69,19 @@ regex_rules:
   - id: trend_granularity_day
     pattern: "(?:按(?:天|日)|每(?:一)?天|每日|逐日|逐天|各天|日趋势|日粒度)"
     candidate_type: time_granularity
-    candidate_field: day
+    candidate_field: collection_time_day
     requires_field: true
     reason: "用户要求按天统计时，趋势或分组维度必须落到日粒度。"
   - id: trend_granularity_week
     pattern: "(?:按周|每周|逐周|各周|周趋势|周粒度|哪一周)"
     candidate_type: time_granularity
-    candidate_field: week
+    candidate_field: collection_time_week
     requires_field: true
     reason: "用户要求按周统计时，趋势或分组维度必须落到周粒度。"
   - id: trend_granularity_month
     pattern: "(?:按月|每月|逐月|月度(?:趋势)?|各月|每个月|各月份)"
     candidate_type: time_granularity
-    candidate_field: month
+    candidate_field: collection_time_month
     requires_field: true
     reason: "用户要求按月统计时，趋势或分组维度必须落到月粒度。"
   - id: trend_granularity_quarter

@@ -1,6 +1,11 @@
 import unittest
 from unittest.mock import Mock, patch
 
+from app.calculations.models import (
+    CalculationOperand,
+    CalculationOutput,
+    CalculationRequest,
+)
 from app.query.compiler import CompiledQuery, compile_query
 from app.query.capability_registry import CapabilityRegistry
 from app.query.contracts import (
@@ -701,6 +706,168 @@ class ServiceTests(unittest.TestCase):
         )
         self.assertIn("未覆盖部分", sections["q2"]["answer"])
         post_calc_executor.assert_not_called()
+
+    @patch("app.query.service._default_post_calc_executor")
+    @patch("app.query.service.empty_scope_facts")
+    @patch("app.query.service.coverage_facts")
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    def test_scalar_post_calc_accepts_observed_zero_count_in_partial_scope(
+        self,
+        compile_query,
+        execute_compiled,
+        coverage_facts,
+        empty_scope_facts,
+        post_calc_executor,
+    ):
+        def count_spec(node_id: str, direction: str) -> QuerySpec:
+            return QuerySpec(
+                id=node_id,
+                kind="mysql",
+                subject="disease",
+                view="count",
+                metrics=("count",),
+                dimensions=(),
+                filters=(
+                    ValueBinding(
+                        field="route_name",
+                        op="=",
+                        storage_value="route-1",
+                        display_value="二连浩特-广州",
+                        source="user_explicit",
+                        resolver="route_dictionary",
+                    ),
+                    ValueBinding(
+                        field="up_or_down",
+                        op="=",
+                        storage_value=direction,
+                        display_value=(
+                            "上行" if direction == "1" else "下行"
+                        ),
+                        source="user_explicit",
+                        resolver="enum",
+                    ),
+                    ValueBinding(
+                        field="collection_time",
+                        op="between",
+                        storage_value=(
+                            "2026-10-01 00:00:00",
+                            "2026-11-01 00:00:00",
+                        ),
+                        display_value="2026年10月",
+                        source="user_explicit",
+                        resolver="time_range",
+                    ),
+                ),
+                output_projection=(),
+                order_by=(),
+                limit=None,
+                required_assertions=("preserve_user_scope",),
+                question=f"统计{direction}方向病害数量",
+            )
+
+        post_calc_spec = QuerySpec(
+            id="compare",
+            kind="mysql",
+            subject="disease",
+            view="data",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("multi_metric_comparison",),
+            question="比较上下行病害数量并计算差值",
+            calculation=CalculationRequest(
+                tool="calculate_scalar",
+                operation="subtract",
+                operands=(
+                    CalculationOperand(
+                        name="left",
+                        source={"node": "q1_up", "field": "count"},
+                    ),
+                    CalculationOperand(
+                        name="right",
+                        source={"node": "q2_down", "field": "count"},
+                    ),
+                ),
+                output=CalculationOutput(
+                    name="difference",
+                    label="数量差值",
+                    unit="处",
+                ),
+            ),
+        )
+        compile_query.return_value = CompiledQuery(
+            "SELECT COUNT(*) AS n",
+            "wren",
+            "wren",
+        )
+        execute_compiled.side_effect = (
+            ExecutionObservation(
+                node_id="q1_up",
+                ok=True,
+                engine="wren",
+                sql="SELECT COUNT(*) AS n",
+                columns=("病害数量",),
+                row_count=1,
+                preview_rows=({"病害数量": "939"},),
+                result_rows=({"病害数量": "939"},),
+                rows_fetched=1,
+            ),
+            ExecutionObservation(
+                node_id="q2_down",
+                ok=True,
+                engine="wren",
+                sql="SELECT COUNT(*) AS n",
+                columns=("病害数量",),
+                row_count=1,
+                preview_rows=({"病害数量": "0"},),
+                result_rows=({"病害数量": "0"},),
+                rows_fetched=1,
+            ),
+        )
+        coverage_facts.return_value = ScopeFacts(
+            verdict=PARTIAL,
+            detail="查询区间仅部分落在路线台账覆盖内",
+        )
+        empty_scope_facts.return_value = ScopeFacts(
+            verdict=PARTIAL,
+            detail="查询区间仅部分落在路线台账覆盖内",
+        )
+        post_calc_executor.return_value = {
+            "accepted": True,
+            "reply": "上行 939 处，下行 0 处，上行多 939 处。",
+            "rows": (),
+            "columns": (),
+        }
+
+        answer = _execute_plan(
+            QueryPlan(
+                question="统计2026年10月二连浩特-广州上下行病害数量并比较",
+                nodes=(
+                    PlanNode(id="q1_up", spec=count_spec("q1_up", "1")),
+                    PlanNode(id="q2_down", spec=count_spec("q2_down", "2")),
+                    PlanNode(
+                        id="compare",
+                        spec=post_calc_spec,
+                        depends_on=("q1_up", "q2_down"),
+                        node_type="post_calc",
+                    ),
+                ),
+            ),
+            UserDecision(token=""),
+            registry=CapabilityRegistry.load(),
+        )
+
+        post_calc_executor.assert_called_once()
+        upstream = post_calc_executor.call_args.args[1]
+        self.assertEqual(upstream["q2_down"]["rows"][0]["病害数量"], "0")
+        sections = {section["node_id"]: section for section in answer.sections}
+        self.assertEqual(sections["compare"]["status"], "accepted")
+        self.assertEqual(sections["compare"]["coverage_verdict"], PARTIAL)
+        self.assertIn("未覆盖部分仍无法判断", sections["compare"]["answer"])
 
     @patch("app.query.service.resolve_entity_comparison_batches")
     @patch("app.query.service.validate_explicit_patrol_batches")

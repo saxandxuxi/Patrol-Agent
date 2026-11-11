@@ -1,9 +1,11 @@
 import unittest
 
+from app.calculations.models import CalculationRequest
 from app.query.capability_registry import CapabilityRegistry
 from app.query.contracts import QuerySpec
 from app.query.shape_contracts import (
     canonical_view,
+    normalize_post_calc_shape,
     normalize_top_view,
     validate_shape_contract,
 )
@@ -177,4 +179,24 @@ class ShapeContractTests(unittest.TestCase):
             ),
             "distribution",
         )
+
+    def test_post_calc_answer_operation_is_normalized_to_data_view(self):
+        spec = top_spec(
+            id="difference",
+            view="single_result",
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            calculation=CalculationRequest(
+                tool="calculate_scalar",
+                operation="subtract",
+                operands=(),
+            ),
+            required_assertions=("preserve_user_scope",),
+        )
+
+        normalized = normalize_post_calc_shape(spec)
+
+        self.assertEqual(normalized.view, "data")
+        self.assertIsNotNone(normalized.calculation)
 

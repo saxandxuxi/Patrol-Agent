@@ -20,6 +20,17 @@ query_shapes:
         meaning: 除比较大小外，还必须给出两个数值之间的差值等新算术结果。
         required_tool: calculate_scalar
         required_operation: subtract
+        same_scope_member_comparison:
+          meaning: 用户只给出一个路线、时间和业务范围，要求比较同一分组维度的多个成员并给出差值。
+          node_shape: scalar_per_member
+          required_scope: same_non_dimension_filters
+          selected_member_filter: 每个标量节点只改变用户点名的成员过滤值
+          final_tool: calculate_scalar
+          final_operation: subtract
+          rules:
+          - 这是同一业务范围内的成员比较，不是前次与后次的跨周期变化。
+          - 每个点名成员生成一个同 subject、view、metrics 和非维度 filters 的标量节点。
+          - 最终计算必须消费这些真实标量节点，不得增加未授权的上一周期、下一周期或基线批次。
       group_share:
         meaning: 对多个分组逐行计算各自占同一总量的比例、百分比或成数。
         required_tool: calculate_columns
@@ -42,11 +53,15 @@ query_shapes:
           no_dimensions: true
           same_metrics: true
       group_change:
-        meaning: 对齐前次与后次两个同形分组结果，逐组计算数量差值或百分比变化，并识别最大增加。
+        meaning: 用户明确给出两个时间周期或两个真实巡检批次时，对齐前次与后次两个同形分组结果，逐组计算变化。
         required_tool: calculate_group_change
         required_operation:
         - subtract
         - percentage_change
+        comparison_axes:
+        - time_period
+        - patrol_batch
+        required_comparison_scopes: 2
         required_dependency_views:
         - distribution
         - top_groups
@@ -67,6 +82,12 @@ query_shapes:
         default_time_dimension: month
       ranking:
         meaning: 用户要求按真实指标返回极值或前 N 名。
+      subject_selection:
+        metric_owner:
+          meaning: 用户按某个主体的指标对另一个实体分组或排名时，查询主体是该指标所属主体，被排名的实体是分组维度。
+          rules:
+          - 指标必须在其登记的 subject 下读取，不能只因为最终每一行是另一个实体就把该实体当查询主体。
+          - 例如“按病害总面积给路线排名”应选 disease 主体，route_name 是分组维度；只有查询路线自身字段时才选 route 主体。
       analysis:
         meaning: 用户要求基于已有事实解释、归纳或比较多个指标。
       unsupported:
@@ -101,6 +122,17 @@ query_shapes:
         meaning: 用户明确要求与上一周期、上一季度或上一次巡查比较。
         required_shape: 为每个周期生成同形数据节点，再由 post_calc 计算或解释差值。
         entity_scope_note: 如果比较对象是“新增或消失的病害/任务实体”，按 entity_set_comparison 的明细与身份字段契约执行，不能只见“比较”就做 COUNT 相减。
+      single_explicit_period:
+        meaning: 用户只给出一个时间范围，并要求在该范围内比较多个成员、指标或对象。
+        preserve:
+        - 用户明确给出的唯一时间范围
+        prohibited_defaults:
+        - previous_period
+        - next_period
+        - baseline_patrol_batch
+        rules:
+        - 唯一时间范围不能被扩展成相邻周期比较。
+        - 同一范围内的成员差值按 scalar_difference.same_scope_member_comparison 生成。
       recent_patrol_batches:
         meaning: 用户要求最近 N 次巡查或最近 N 个巡检批次时，先建立真实巡检批次序列，再由后续病害事实消费该序列。
         trusted: false

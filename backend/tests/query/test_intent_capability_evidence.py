@@ -56,6 +56,45 @@ class IntentCapabilityEvidenceTests(unittest.TestCase):
         self.assertIn("unavailable", prompt_text)
         self.assertIn("字段当前全部为空", prompt_text)
 
+    @patch("app.services.intent.chat_json")
+    @patch("app.services.field_grounding.ground")
+    def test_unavailable_analysis_field_cannot_be_routed_to_metadata(
+        self,
+        ground,
+        chat_json,
+    ):
+        ground.return_value = {
+            "table": "ai_problem",
+            "subject": "problem",
+            "tables": [
+                {
+                    "name": "ai_problem",
+                    "score": 70,
+                    "hits": ["表说明：病害记录"],
+                }
+            ],
+            "columns": [
+                {
+                    "table": "ai_problem",
+                    "column": "lane_index",
+                    "label": "车道",
+                    "score": 30,
+                    "hits": ["列名命中：车道"],
+                }
+            ],
+        }
+        chat_json.return_value = {
+            "intent": "metadata",
+            "reason": "用户询问字段能力",
+        }
+
+        self.assertEqual(
+            intent.classify_intent(
+                "目前系统能否按车道统计病害数量，如果不能请说明原因"
+            ),
+            "analysis",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

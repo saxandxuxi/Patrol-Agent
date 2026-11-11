@@ -531,7 +531,10 @@ def resolve_value(
             resolver="route_dictionary",
             raw_text=text,
         )
-    if field in _TIME_FIELDS:
+    if field in _TIME_FIELDS or (
+        field_capability is not None
+        and "time" in field_capability.roles
+    ):
         question_parsed = parsers.parse_time_range(question)
         month_range = _explicit_month_range(question)
         if (
@@ -625,6 +628,10 @@ def resolve_value(
                     "user_explicit"
                     if relative
                     or explicit_time_candidate
+                    or (
+                        question_parsed is not None
+                        and raw_parsed is None
+                    )
                     or (
                         question_parsed is not None
                         and raw_parsed is not None

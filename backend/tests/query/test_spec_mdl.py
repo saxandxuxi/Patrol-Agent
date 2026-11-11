@@ -113,6 +113,34 @@ class SpecMdlTests(unittest.TestCase):
             sql,
         )
 
+    def test_strip_converted_area_filters_each_disease_before_aggregation(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="count",
+                metrics=("count",),
+                dimensions=(),
+                filters=(
+                    binding("strip_converted_unit_area", ">", 50),
+                ),
+                output_projection=(),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="统计按0.2米宽折算后面积超过50平方米的条状修补数量",
+            )
+        )
+
+        self.assertIn(
+            "CASE WHEN disease.problem_type_name = '条状修补'",
+            sql,
+        )
+        self.assertIn("disease.effective_disease_length * 0.2", sql)
+        self.assertIn("> 50", sql)
+        self.assertIn("COUNT(*) AS", sql)
+
     def test_top_groups_compiles_group_order_and_limit(self):
         sql = compile_spec_mdl(
             QuerySpec(
@@ -135,6 +163,27 @@ class SpecMdlTests(unittest.TestCase):
         self.assertIn("disease.route_name AS 路线名称", sql)
         self.assertIn("GROUP BY disease.route_name", sql)
         self.assertIn("ORDER BY COUNT(*) DESC", sql)
+        self.assertIn("LIMIT 5", sql)
+
+    def test_order_by_metric_alias_is_normalized_to_field(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="top_groups",
+                metrics=("total_area",),
+                dimensions=("route_name",),
+                filters=(),
+                output_projection=("route_name", "total_area"),
+                order_by=({"metric": "total_area", "direction": "desc"},),
+                limit=5,
+                required_assertions=(),
+                question="按病害总面积取前5条路线",
+            )
+        )
+
+        self.assertIn("ORDER BY SUM(disease.area) DESC", sql)
         self.assertIn("LIMIT 5", sql)
 
     def test_unsupported_metric_error_lists_supported_metrics(self):
@@ -1371,6 +1420,31 @@ class SpecMdlTests(unittest.TestCase):
         )
         self.assertIn("patrol.create_time AS 巡检时间", sql)
         self.assertIn("ORDER BY patrol.create_time DESC", sql)
+
+    def test_patrol_week_trend_uses_patrol_create_time(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="patrol",
+                view="trend",
+                metrics=("count",),
+                dimensions=("collection_time_week",),
+                filters=(),
+                output_projection=("collection_time_week", "count"),
+                order_by=(
+                    {"field": "collection_time_week", "direction": "asc"},
+                ),
+                limit=None,
+                required_assertions=(),
+                question="按周统计2026年10月巡检任务数量趋势",
+            )
+        )
+
+        self.assertIn("DATE_FORMAT(patrol.create_time, '%x')", sql)
+        self.assertIn("DATE_FORMAT(patrol.create_time, '%v')", sql)
+        self.assertIn("AS 周", sql)
+        self.assertNotIn("disease.collection_time", sql)
 
     def test_business_unavailable_field_is_rejected_before_sql(self):
         spec = QuerySpec(

@@ -17,9 +17,14 @@ def _single_route(spec: QuerySpec) -> bool:
     return len(values) == 1
 
 
-def complete_single_route_trend_context(plan: QueryPlan) -> QueryPlan:
+def complete_single_route_trend_context(
+    plan: QueryPlan,
+    intent: str,
+) -> QueryPlan:
     """Carry the route-size fact into a single-route trend result."""
 
+    if str(intent or "").strip() != "analysis":
+        return plan
     trends = [
         node
         for node in plan.nodes
@@ -313,7 +318,7 @@ def _inherit_single_dimension_comparison(plan: QueryPlan) -> QueryPlan:
 def complete_analysis_answer(plan: QueryPlan, intent: str) -> QueryPlan:
     """Ensure an independently classified analysis question has a final answer node."""
 
-    plan = complete_single_route_trend_context(plan)
+    plan = complete_single_route_trend_context(plan, intent)
     plan = complete_route_metric_identity(plan)
     if str(intent or "").strip() != "analysis":
         return plan
@@ -341,6 +346,14 @@ def complete_analysis_answer(plan: QueryPlan, intent: str) -> QueryPlan:
         if issue:
             raise QuerySpecError(issue)
         return completed
+    if (
+        len(data_nodes) == 1
+        and data_nodes[0].spec.view in {"top_groups", "top_records"}
+        and data_nodes[0].spec.order_by
+        and data_nodes[0].spec.limit is not None
+        and data_nodes[0].spec.limit > 0
+    ):
+        return plan
     subjects = {node.spec.subject for node in data_nodes}
     if len(subjects) != 1:
         return plan

@@ -255,6 +255,34 @@ class CapabilityConfigGuardTests(unittest.TestCase):
         self.assertIn("mdl_compilation.yaml", index["files"])
         self.assertTrue((CAPABILITY_ROOT / "mdl_compilation.yaml").is_file())
 
+    def test_same_scope_value_comparison_is_distinct_from_group_change(self):
+        shapes = yaml.safe_load(
+            (CAPABILITY_ROOT / "query_shapes.yaml").read_text(encoding="utf-8")
+        )["query_shapes"]
+        semantics = shapes["planner_semantics"]
+        operations = semantics["answer_operations"]
+
+        same_scope = operations["scalar_difference"][
+            "same_scope_member_comparison"
+        ]
+        group_change = operations["group_change"]
+        single_period = semantics["time_scope"]["single_explicit_period"]
+
+        self.assertEqual(same_scope["node_shape"], "scalar_per_member")
+        self.assertEqual(
+            same_scope["required_scope"],
+            "same_non_dimension_filters",
+        )
+        self.assertEqual(
+            group_change["comparison_axes"],
+            ["time_period", "patrol_batch"],
+        )
+        self.assertEqual(group_change["required_comparison_scopes"], 2)
+        self.assertIn(
+            "previous_period",
+            single_period["prohibited_defaults"],
+        )
+
     def test_subject_to_mdl_mapping_is_not_duplicated_in_python(self):
         forbidden_symbols = (
             "_SUBJECT_MODELS",

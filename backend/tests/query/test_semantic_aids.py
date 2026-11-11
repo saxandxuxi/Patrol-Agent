@@ -67,7 +67,7 @@ class SemanticAidTests(unittest.TestCase):
             if item.rule_id == "trend_granularity_day"
         )
         self.assertTrue(day.requires_field)
-        self.assertEqual(day.candidate_field, "day")
+        self.assertEqual(day.candidate_field, "collection_time_day")
 
     def test_trend_granularity_is_a_required_field_evidence(self):
         ranged = detect_evidence(
@@ -98,14 +98,43 @@ class SemanticAidTests(unittest.TestCase):
             if item.rule_id == "trend_granularity_week"
         )
 
-        self.assertEqual(day.candidate_field, "day")
-        self.assertEqual(week.candidate_field, "week")
+        self.assertEqual(day.candidate_field, "collection_time_day")
+        self.assertEqual(week.candidate_field, "collection_time_week")
         self.assertTrue(day.requires_field)
         self.assertTrue(week.requires_field)
         self.assertNotIn(
             "trend_granularity_month",
             {item.rule_id for item in week_evidence},
         )
+
+    def test_daily_disease_trend_accepts_collection_time_day_field(self):
+        question = (
+            "2026年11月，长沙－芷江高速公路每天的病害总面积变化趋势如何？"
+        )
+        evidence = detect_evidence(question)
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="trend",
+            metrics=("total_area",),
+            dimensions=("collection_time_day",),
+            filters=(),
+            output_projection=("collection_time_day", "total_area"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question=question,
+        )
+
+        issue = _assist_field_issue(
+            [spec],
+            [item.to_dict() for item in evidence],
+            CapabilityRegistry.load(),
+            {spec.id: "query_data"},
+        )
+
+        self.assertFalse(issue)
 
     def test_time_field_aliases_are_canonicalized_by_rule_config(self):
         self.assertEqual(canonical_field("week_start_date"), "week")
@@ -116,6 +145,30 @@ class SemanticAidTests(unittest.TestCase):
         self.assertEqual(
             canonical_field("quarter_start_date"),
             "collection_time_quarter",
+        )
+
+    def test_enum_display_field_is_canonicalized_to_filter_field(self):
+        self.assertEqual(
+            canonical_field("up_or_down_name"),
+            "up_or_down",
+        )
+
+    def test_concrete_day_and_month_fields_are_not_rewritten(self):
+        self.assertEqual(
+            canonical_field("collection_time_day"),
+            "collection_time_day",
+        )
+        self.assertEqual(
+            canonical_field("create_time_day"),
+            "create_time_day",
+        )
+        self.assertEqual(
+            canonical_field("collection_time_month"),
+            "collection_time_month",
+        )
+        self.assertEqual(
+            canonical_field("create_time_month"),
+            "create_time_month",
         )
 
     def test_identifier_and_route_evidence_is_centralized(self):

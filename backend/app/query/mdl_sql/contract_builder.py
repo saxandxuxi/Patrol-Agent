@@ -15,6 +15,7 @@ from ..capability_registry import CapabilityRegistry
 from ..contracts import QuerySpec, scope_hash
 from ..shape_contracts import (
     canonical_view,
+    normalize_order_items,
     normalize_top_view,
     validate_shape_contract,
 )
@@ -634,6 +635,10 @@ def _normalize_and_validate_spec(
     registry: CapabilityRegistry,
 ) -> QuerySpec:
     normalized = normalize_top_view(spec)
+    normalized = replace(
+        normalized,
+        order_by=normalize_order_items(normalized.order_by),
+    )
     normalized = replace(
         normalized,
         view=canonical_view(

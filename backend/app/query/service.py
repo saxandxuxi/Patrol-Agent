@@ -1080,10 +1080,24 @@ def _execute_plan(
                 for dependency in empty_dependencies
             )
         )
+        calculation_accepts_observed_zero_counts = (
+            node.spec.calculation is not None
+            and all(
+                dependency in inside_scope_empty_nodes
+                or dependency in partial_scope_empty_nodes
+                for dependency in empty_dependencies
+            )
+            and all(
+                accepted_specs.get(dependency) is not None
+                and accepted_specs[dependency].view == "count"
+                for dependency in empty_dependencies
+            )
+        )
         if (
             node.node_type == "post_calc"
             and empty_dependencies
             and not comparison_accepts_empty_sets
+            and not calculation_accepts_observed_zero_counts
         ):
             reason = (
                 "前置查询在现有覆盖范围内没有匹配记录，未覆盖部分又无法判断；"

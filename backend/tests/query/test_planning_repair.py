@@ -113,6 +113,39 @@ class PlanningRepairTests(unittest.TestCase):
                 [{"op": "remove", "path": "/views/0/filters/1"}],
             )
 
+    def test_unresolved_filter_value_repairs_only_its_raw_value(self):
+        draft = _draft()
+        draft["views"][0]["filters"].insert(
+            0,
+            {
+                "field": "collection_time_month",
+                "op": "=",
+                "raw_value": "month",
+            },
+        )
+        issue = repair_issue_from_error(
+            QuerySpecError(
+                "过滤值 collection_time_month 来源为 model_inference，"
+                "但没有经过字典、业务规则或受控解析"
+            ),
+            draft,
+            CapabilityRegistry.load(),
+        )
+
+        self.assertEqual(issue.code, "unresolved_provenance")
+        self.assertEqual(
+            issue.path,
+            "/views/0/filters/0/raw_value",
+        )
+        self.assertEqual(
+            issue.allowed_paths,
+            ("/views/0/filters/0/raw_value",),
+        )
+        self.assertEqual(
+            issue.mutable_filter_fields,
+            ("collection_time_month",),
+        )
+
     def test_permitted_subject_patch_changes_only_the_subject(self):
         ticket = _ticket(
             issue=RepairIssue(
@@ -415,6 +448,34 @@ class PlanningRepairTests(unittest.TestCase):
             scope_signature(draft),
         )
         self.assertIn("original_question", issue.preserve)
+
+    def test_contract_failure_exposes_the_exact_field_and_repair_path(self):
+        draft = _draft()
+        failure = CapabilityIssue(
+            code="contract_build_failed",
+            original_value="q1",
+            reason="查询契约构建失败",
+            node_id="q1",
+            evidence={
+                "reason": "unknown_field",
+                "path": "dimensions[0]",
+                "field": "day",
+            },
+        )
+
+        issue = repair_issue_from_capability(failure, draft)
+
+        self.assertIn("unknown_field", issue.reason)
+        self.assertEqual(issue.actual, "day")
+        self.assertEqual(issue.path, "/views/0/dimensions/0")
+        self.assertEqual(
+            issue.allowed_paths,
+            ("/views/0/dimensions",),
+        )
+        self.assertEqual(
+            issue.evidence["failure_evidence"]["evidence"]["field"],
+            "day",
+        )
 
     def test_entity_comparison_repair_can_only_change_evidence_dependency_shape(
         self,

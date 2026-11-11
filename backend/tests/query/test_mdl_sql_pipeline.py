@@ -4,9 +4,10 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from app.query.capability_registry import CapabilityRegistry
-from app.query.contracts import QuerySpec
+from app.query.contracts import QuerySpec, ValueBinding
 from app.query.mdl_sql import load_mdl_snapshot
 from app.query.mdl_sql.compiler.pipeline import (
+    preflight_mdl_sql,
     run_mdl_sql_pipeline,
 )
 from app.query.mdl_sql.contract_builder import build_mdl_query_contract
@@ -43,6 +44,33 @@ def count_spec() -> QuerySpec:
         limit=None,
         required_assertions=("preserve_user_scope",),
         question="病害有多少处？",
+    )
+
+
+def monthly_top_groups_spec() -> QuerySpec:
+    return QuerySpec(
+        id="q1",
+        kind="mysql",
+        subject="disease",
+        view="top_groups",
+        metrics=("total_area",),
+        dimensions=("route_name",),
+        filters=(
+            ValueBinding(
+                field="collection_time_month",
+                op="between",
+                storage_value=("2026-11", "2026-12"),
+                display_value="2026年11月",
+                source="user_explicit",
+                resolver="time_range",
+                raw_text="2026年11月",
+            ),
+        ),
+        output_projection=("route_name", "total_area"),
+        order_by=({"field": "total_area", "direction": "desc"},),
+        limit=5,
+        required_assertions=("preserve_user_scope",),
+        question="2026年11月病害总面积最大的前5条路线",
     )
 
 
@@ -170,6 +198,27 @@ class MdlSqlPipelineTests(unittest.TestCase):
             "SELECT COUNT(*) AS count FROM ai_problem",
         )
         self.assertIsNone(result.deterministic_failure)
+
+    def test_preflight_accepts_calculated_time_filter_expression(self):
+        spec = monthly_top_groups_spec()
+        with patch(
+            "app.query.mdl_sql.compiler.pipeline.dry_plan_candidate",
+            side_effect=lambda _kind, candidate, _snapshot: (
+                accepted_dry_plan(candidate)
+            ),
+        ):
+            result = preflight_mdl_sql(
+                spec,
+                registry=self.registry,
+                mdl_snapshot=self.snapshot,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertIn(
+            "DATE_FORMAT(disease.collection_time, '%Y-%m')",
+            result.candidate.mdl_sql,
+        )
+        self.assertTrue(result.audit.accepted)
 
     def test_only_compiler_not_covered_calls_llm_fallback(self):
         fallback_candidate = self.candidate("llm_fallback")

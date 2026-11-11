@@ -353,6 +353,51 @@ class SubjectCapabilityViewTests(unittest.TestCase):
         chat_json.assert_called_once()
 
     @patch("app.query.capability_registry.subject_resolver.chat_json")
+    def test_subject_router_receives_metric_owner_for_dimension_ranking(
+        self,
+        chat_json,
+    ):
+        chat_json.return_value = {
+            "subject": "disease",
+            "confidence": 0.9,
+            "evidence": ["总面积是病害指标，路线只是分组维度"],
+        }
+        reach = FieldReachSet(
+            hits=(
+                FieldReachHit(
+                    "ai_problem",
+                    "area",
+                    "面积",
+                    "test",
+                    4.0,
+                ),
+            )
+        )
+
+        resolution = resolve_subject(
+            "总面积最大的前5条路线分别是哪些",
+            "data",
+            reach,
+            self.registry,
+            grounded={
+                "subject": "route",
+                "table": "basic_facilities_routes",
+                "tables": [
+                    {"name": "basic_facilities_routes", "score": 9.4},
+                    {"name": "ai_problem", "score": 5.0},
+                ],
+            },
+        )
+
+        self.assertEqual(resolution.subject, "disease")
+        prompt = "\n".join(
+            str(message.get("content") or "")
+            for message in chat_json.call_args.args[0]
+        )
+        self.assertIn("'metric_id': 'total_area'", prompt)
+        self.assertIn("metric_owner", prompt)
+
+    @patch("app.query.capability_registry.subject_resolver.chat_json")
     def test_subject_reroute_passes_planner_result_as_evidence(self, chat_json):
         chat_json.return_value = {
             "subject": "disease",

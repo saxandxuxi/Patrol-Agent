@@ -153,6 +153,25 @@ def resolve_subject(
                 "allowed_views": list(
                     registry.snapshot.subjects[subject_id].allowed_views
                 ),
+                "metrics": [
+                    {
+                        "metric_id": metric_id,
+                        "label": (
+                            registry.snapshot.metrics[subject_id][metric_id].label
+                        ),
+                        "unit": (
+                            registry.snapshot.metrics[subject_id][metric_id].unit
+                        ),
+                        "aggregation": (
+                            registry.snapshot.metrics[subject_id][metric_id]
+                            .aggregation
+                        ),
+                        "grain": (
+                            registry.snapshot.metrics[subject_id][metric_id].grain
+                        ),
+                    }
+                    for metric_id in registry.snapshot.metric_ids(subject_id)
+                ],
                 "field_examples": [
                     field.label
                     for field in list(

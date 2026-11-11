@@ -554,10 +554,6 @@ def _filter_expressions(
     if op == "exists":
         return (_parse_expression(binding.expression),)
     column = _parse_expression(binding.expression)
-    if not isinstance(column, exp.Column):
-        raise _NotCovered(
-            f"filter_expression_is_not_column:{binding.field_id}"
-        )
     value = binding.value
 
     if op == "between":

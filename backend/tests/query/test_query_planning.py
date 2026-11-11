@@ -686,17 +686,19 @@ class QueryPlanningTests(unittest.TestCase):
                 {
                     "op": "set",
                     "path": "/views/0/dimensions",
-                    "value": ["day"],
+                    "value": ["collection_time_day"],
                 },
                 {
                     "op": "set",
                     "path": "/views/0/output_projection",
-                    "value": ["day", "count"],
+                    "value": ["collection_time_day", "count"],
                 },
                 {
                     "op": "set",
                     "path": "/views/0/order_by",
-                    "value": [{"field": "day", "direction": "asc"}],
+                    "value": [
+                        {"field": "collection_time_day", "direction": "asc"}
+                    ],
                 },
             ]
         }
@@ -712,7 +714,10 @@ class QueryPlanningTests(unittest.TestCase):
 
         self.assertEqual(chat_json.call_count, 1)
         self.assertEqual(repair_chat_json.call_count, 1)
-        self.assertEqual(plan.nodes[0].spec.dimensions, ("day",))
+        self.assertEqual(
+            plan.nodes[0].spec.dimensions,
+            ("collection_time_day",),
+        )
 
     @patch("app.query.analysis.chat_json")
     def test_trend_granularity_field_is_not_required_on_post_calc(self, chat_json):
@@ -727,10 +732,12 @@ class QueryPlanningTests(unittest.TestCase):
                     "subject": "disease",
                     "view": "trend",
                     "metrics": ["count"],
-                    "dimensions": ["week"],
+                    "dimensions": ["collection_time_week"],
                     "filters": [],
-                    "output_projection": ["week", "count"],
-                    "order_by": [{"field": "week", "direction": "asc"}],
+                    "output_projection": ["collection_time_week", "count"],
+                    "order_by": [
+                        {"field": "collection_time_week", "direction": "asc"}
+                    ],
                     "limit": None,
                     "required_assertions": ["preserve_user_scope"],
                     "depends_on": [],
@@ -765,7 +772,10 @@ class QueryPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(len(plan.nodes), 2)
-        self.assertEqual(plan.nodes[0].spec.dimensions, ("week",))
+        self.assertEqual(
+            plan.nodes[0].spec.dimensions,
+            ("collection_time_week",),
+        )
 
     @patch("app.query.analysis.chat_json")
     def test_two_period_comparison_expands_all_declared_metrics(self, chat_json):

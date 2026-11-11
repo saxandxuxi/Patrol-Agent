@@ -70,6 +70,7 @@ from .semantic_operations import (
 )
 from .shape_contracts import (
     canonical_view,
+    normalize_order_items,
     normalize_post_calc_shape,
     normalize_segment_projection,
     normalize_top_view,
@@ -245,16 +246,12 @@ def _canonical_view(
 
 def _order_items(value: Any) -> tuple[Any, ...]:
     result: list[dict[str, Any]] = []
-    for item in value if isinstance(value, list) else []:
+    for item in normalize_order_items(value):
         if not isinstance(item, dict):
             continue
         normalized = dict(item)
         if normalized.get("field"):
             normalized["field"] = canonical_field(str(normalized["field"]))
-        if "direction" not in normalized:
-            order = normalized.get("order")
-            if order:
-                normalized["direction"] = str(order)
         result.append(normalized)
     return tuple(result)
 
@@ -3332,14 +3329,32 @@ def analyze_single_turn(
             for item in effective_issues
             if isinstance(item.get("set"), dict) and item["set"]
         ]
+        repair_problem = next(
+            iter(
+                patch_suggestions
+                or [
+                    item
+                    for item in effective_issues
+                    if item.get("node_id")
+                    and item.get("code")
+                    in {
+                        "missing_metric",
+                        "missing_dimension",
+                        "wrong_grouping",
+                        "invalid_view_shape",
+                    }
+                ]
+            ),
+            None,
+        )
         draft = draft_capture.get("draft")
         if (
-            patch_suggestions
+            repair_problem is not None
             and isinstance(draft, dict)
             and repair_rounds < 2
         ):
             issue = repair_issue_from_audit(
-                patch_suggestions[0],
+                repair_problem,
                 draft,
                 registry,
             )

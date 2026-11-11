@@ -1215,6 +1215,26 @@ class SeriesCalculationTests(unittest.TestCase):
         self.assertIn("b2 的上一批次为 0", reply)
         self.assertIn("相邻变化为：无，-80", reply)
 
+    def test_series_render_does_not_infer_direction_from_one_point(self):
+        result = calculate_series(
+            "subtract",
+            ["2026-11-04"],
+            [81362.27],
+        )
+        request = CalculationRequest.from_dict(
+            {
+                "tool": "calculate_series",
+                "operation": "subtract",
+            }
+        )
+
+        reply = render_series_calculation(result, request)
+
+        self.assertIn("只有一个时间桶", reply)
+        self.assertIn("无法判断趋势", reply)
+        self.assertNotIn("有升有降", reply)
+        self.assertNotIn("相邻变化", reply)
+
     def test_compact_evidence_extracts_metric_boundaries(self):
         evidence = compact_table_evidence(
             [

@@ -316,6 +316,22 @@ class ValueAnalysisTests(unittest.TestCase):
             ("2026-11-01 00:00:00", "2026-12-01 00:00:00"),
         )
 
+    def test_explicit_month_survives_model_placeholder_value(self):
+        value = resolve_value(
+            "collection_time_month",
+            "=",
+            "month",
+            "统计2026年11月病害总面积最大的前5条路线",
+            "mysql",
+            subject="disease",
+        )
+
+        self.assertEqual(value.source, "user_explicit")
+        self.assertEqual(
+            value.storage_value,
+            ("2026-11-01 00:00:00", "2026-12-01 00:00:00"),
+        )
+
     def test_numeric_threshold_source_uses_normalized_value(self):
         value = resolve_value(
             "area",

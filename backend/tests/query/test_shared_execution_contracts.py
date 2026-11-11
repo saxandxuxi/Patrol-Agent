@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from app.calculations.domain.analysis import analyze_evidence
 from app.calculations.post_calc import execute_post_calc
+from app.query.analysis_contracts import complete_analysis_answer
 from app.query.capability_registry import CapabilityRegistry
 from app.query.capability_registry.entity_resolver import resolve_entity
 from app.query.contracts import PlanNode, QueryPlan, QuerySpec, ValueBinding
@@ -43,6 +44,37 @@ def dependency(rows):
 
 
 class AnalysisOnlyNumberGroundingTests(unittest.TestCase):
+    def test_ranked_top_groups_plan_is_a_complete_analysis_answer(self):
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="top_groups",
+            metrics=("total_area",),
+            dimensions=("route_name",),
+            filters=(),
+            output_projection=("route_name", "total_area"),
+            order_by=({"field": "total_area", "direction": "desc"},),
+            limit=5,
+            required_assertions=("preserve_user_scope",),
+            question="按总面积降序返回前5条路线",
+        )
+        plan = QueryPlan(
+            question="总面积最大的前5条路线分别是哪些",
+            nodes=(PlanNode(id="q1", spec=spec),),
+        )
+
+        completed = complete_analysis_answer(plan, "analysis")
+
+        self.assertEqual(completed.nodes, plan.nodes)
+        self.assertFalse(
+            any(
+                node.node_type == "post_calc"
+                and "analysis_only" in node.spec.required_assertions
+                for node in completed.nodes
+            )
+        )
+
     @patch("app.calculations.domain.analysis.chat")
     def test_trend_analysis_uses_structured_series_instead_of_model_narrative(
         self,
@@ -86,6 +118,35 @@ class AnalysisOnlyNumberGroundingTests(unittest.TestCase):
         self.assertIn("下降", result["reply"])
         self.assertNotIn("均呈下降", result["reply"])
         self.assertNotIn("此处需修正", result["reply"])
+
+    @patch("app.calculations.domain.analysis.chat")
+    def test_single_trend_bucket_cannot_be_reported_as_rising_or_falling(
+        self,
+        chat,
+    ):
+        chat.return_value = "有升有降。"
+
+        result = analyze_evidence(
+            "统计病害面积的每日变化趋势",
+            [
+                {
+                    "question": "按天统计病害总面积",
+                    "view": "trend",
+                    "rows": [
+                        {"日期": "2026-11-04", "总面积": "81362.27"},
+                    ],
+                    "columns": ["日期", "总面积"],
+                    "row_count": 1,
+                }
+            ],
+            requirements={"required_assertions": ["analysis_only"]},
+        )
+
+        self.assertTrue(result["accepted"], result)
+        chat.assert_not_called()
+        self.assertIn("只有一个时间桶", result["reply"])
+        self.assertIn("无法判断趋势", result["reply"])
+        self.assertNotIn("有升有降", result["reply"])
 
     @patch("app.calculations.domain.analysis.chat")
     def test_analysis_only_cannot_invent_a_difference_number(self, chat):

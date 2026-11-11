@@ -104,6 +104,18 @@ fields:
       roles: [numeric, output]
       physical_table: ai_problem
       physical_column: area
+    strip_converted_unit_area:
+      expression: >-
+        CASE WHEN disease.problem_type_name = '条状修补'
+        THEN disease.effective_disease_length * 0.2 ELSE 0 END
+      filter_expression: >-
+        CASE WHEN disease.problem_type_name = '条状修补'
+        THEN disease.effective_disease_length * 0.2 ELSE 0 END
+      label: 单条条状修补折算面积
+      unit: ㎡
+      roles: [filter]
+      physical_table: ai_problem
+      physical_column: effective_disease_length
     road_surface_type:
       expression: disease.road_surface_type_name
       filter_expression: disease.road_surface_type
@@ -222,31 +234,31 @@ fields:
     collection_time_day:
       expression: DATE(disease.collection_time)
       label: 日期
-      roles: [dimension, output]
+      roles: [time, dimension, output]
       physical_table: ai_problem
       physical_column: collection_time
     collection_time_month:
       expression: DATE_FORMAT(disease.collection_time, '%Y-%m')
       label: 月份
-      roles: [dimension, output]
+      roles: [time, dimension, output]
       physical_table: ai_problem
       physical_column: collection_time
     collection_month:
       expression: DATE_FORMAT(disease.collection_time, '%Y-%m')
       label: 月份
-      roles: [dimension, output]
+      roles: [time, dimension, output]
       physical_table: ai_problem
       physical_column: collection_time
     month:
       expression: DATE_FORMAT(disease.collection_time, '%Y-%m')
       label: 月份
-      roles: [dimension, output]
+      roles: [time, dimension, output]
       physical_table: ai_problem
       physical_column: collection_time
     collection_time_year:
       expression: DATE_FORMAT(disease.collection_time, '%Y')
       label: 年份
-      roles: [dimension, output]
+      roles: [time, dimension, output]
       physical_table: ai_problem
       physical_column: collection_time
     collection_time_quarter:
@@ -254,7 +266,7 @@ fields:
         CONCAT(YEAR(disease.collection_time), '年第',
         QUARTER(disease.collection_time), '季度')
       label: 季度
-      roles: [dimension, output]
+      roles: [time, dimension, output]
       physical_table: ai_problem
       physical_column: collection_time
     collection_time_week:
@@ -262,7 +274,7 @@ fields:
         CONCAT(DATE_FORMAT(disease.collection_time, '%x'), '年第',
         DATE_FORMAT(disease.collection_time, '%v'), '周')
       label: 周
-      roles: [dimension, output]
+      roles: [time, dimension, output]
       physical_table: ai_problem
       physical_column: collection_time
     week:
@@ -270,7 +282,7 @@ fields:
         CONCAT(DATE_FORMAT(disease.collection_time, '%x'), '年第',
         DATE_FORMAT(disease.collection_time, '%v'), '周')
       label: 周
-      roles: [dimension, output]
+      roles: [time, dimension, output]
       physical_table: ai_problem
       physical_column: collection_time
     pile_segment_500m:
@@ -407,13 +419,21 @@ fields:
     month:
       expression: DATE_FORMAT(patrol.create_time, '%Y-%m')
       label: 月份
-      roles: [dimension, output]
+      roles: [time, dimension, output]
+      physical_table: ai_maintain_patrol
+      physical_column: create_time
+    collection_time_week:
+      expression: >-
+        CONCAT(DATE_FORMAT(patrol.create_time, '%x'), '年第',
+        DATE_FORMAT(patrol.create_time, '%v'), '周')
+      label: 周
+      roles: [time, dimension, output]
       physical_table: ai_maintain_patrol
       physical_column: create_time
     day:
       expression: DATE(patrol.create_time)
       label: 日期
-      roles: [dimension, output]
+      roles: [time, dimension, output]
       physical_table: ai_maintain_patrol
       physical_column: create_time
     end_date:
