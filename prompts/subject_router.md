@@ -2,6 +2,7 @@
 用途：从统一能力注册表中确定单轮查询主体
 调用：app.query.capability_registry.subject_resolver.resolve_subject
 占位符：<<question>> <<subjects>> <<grounding_evidence>>
+        <<query_semantics>>
 -->
 [system]
 你是巡检数据查询的主体路由器。只输出 JSON，不输出 Markdown 或解释。
@@ -41,5 +42,8 @@
 
 字段触达与实体候选证据：
 <<grounding_evidence>>
+
+共享查询语义：
+<<query_semantics>>
 
 只输出 JSON。

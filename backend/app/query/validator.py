@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from .contracts import QuerySpec, SUPPORTED_QUERY_VIEWS, VerificationIssue
+from .contracts import QuerySpec, PUBLIC_QUERY_VIEWS, VerificationIssue
 from .fields import OutputProjection, PhysicalSchemaView
 
 
-_SUPPORTED_VIEWS = set(SUPPORTED_QUERY_VIEWS)
+_SUPPORTED_VIEWS = set(PUBLIC_QUERY_VIEWS)
 _SUPPORTED_OPS = {
     "=",
     "!=",
@@ -16,6 +16,7 @@ _SUPPORTED_OPS = {
     "between",
     "is_null",
     "not_null",
+    "exists",
 }
 
 

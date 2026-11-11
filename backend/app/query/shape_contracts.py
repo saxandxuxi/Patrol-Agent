@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from .capability_registry import CapabilityRegistry
-from .contracts import QuerySpec, SUPPORTED_QUERY_VIEWS
+from .contracts import QuerySpec, PUBLIC_QUERY_VIEWS
 from .pile_segments import is_pile_segment_field
 
 
@@ -156,7 +156,7 @@ def validate_shape_contract(
                 "top 必须先归一化为 top_records 或 top_groups",
             ),
         )
-    if spec.view not in SUPPORTED_QUERY_VIEWS:
+    if spec.view not in PUBLIC_QUERY_VIEWS:
         return (
             _issue(
                 spec,

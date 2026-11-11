@@ -2,7 +2,8 @@
 用途：QuerySpec 规划后的独立完整性审计
 调用：app.query.audit.audit_query_plan
 模型：role_model("verify")
-占位符：<<question>> <<current_date>> <<plan_json>> <<answer_operations>>
+占位符：<<question>> <<current_date>> <<plan_json>> <<query_semantics>>
+        <<answer_operations>> <<supported_views>> <<capabilities>>
         <<assist_evidence>>
 说明：这里只检查“计划有没有完整表达用户问题”，不重复抄写 query_spec.md 的业务规则。
 -->
@@ -18,6 +19,9 @@
   `entity_set_comparison`；
 - 只比较已经算好的标量指标、只要“谁更多/更少”时，使用 `scalar_comparison`；
 - 用户还要求“多多少、相差多少”等新的差值时，使用 `scalar_difference`；
+- 用户同时要求分组明细和同一范围的总体值时，使用 `group_total`；
+- 用户只要求一个总体值和同一范围的对象明细列表、没有分组结果时，使用
+  `scalar_with_details`，不能归为 `group_total`；
 - 其他问题选择最符合最终答案形态的单项操作。
 
 ## 审计清单
@@ -59,6 +63,10 @@
   metrics、dimensions、filters 为空就判定依赖未使用。
 - 差值、比例、占比、百分比变化和其他新数字必须由真实 calculation 工具产生；工具、操作符、
   命名角色和 source.node/source.field 必须属于 depends_on 的真实产出。
+- 比较两个批次的分组变化、并寻找增加或减少最多的分组时，前次和后次必须是相同 subject、
+  kind、view、唯一分组维度和指标的两个节点，再由 `calculate_group_change` 的
+  `labels`、`before`、`after` 对齐计算。不能把两个分组结果压成一列、改用序列计算，
+  也不能只做两个总数相减。
 - 只解释已有值、不产生新数字时，必须声明 analysis_only；analysis_only 不得输出上游证据
   中没有的新数字。
 - 时间趋势必须保留用户要求的粒度和范围。相对时间可以依据 current_date 换算为明确的
@@ -77,6 +85,11 @@
 
 - 表、字段、指标、枚举、业务值和计算能力必须来自提供的真实能力定义。不得接受 PCI、预算、
   风险评分等未登记指标，也不得要求代码使用不存在的派生指标。
+- `capabilities` 是 Planner、审计器、编译器共用的能力事实。用户要求的筛选、分组或指标
+  命中 `capability_gaps` 中 `status=unavailable` 的缺口时，必须返回：
+  `answer_operation=unsupported`，并增加
+  `{"code":"capability_gap","capability_gap":"<登记 id>","reason":"..."}`。
+  不得删除该业务条件后改用全路网、全库或其他代理查询。
 - 使用登记派生指标时，把它写入 post_calc.metrics，并确认其全部操作数确实由 depends_on
   的上游产出。派生指标自带的 lower_is_better 不代表用户要求选最低值。
 - 用户没有给业务阈值时，只能引用 business_values 中的规则名。来源为 business_rule 且
@@ -116,9 +129,10 @@
   "answer_operation": "entity_set_comparison",
   "issues": [
     {
-      "code": "missing_dimension | missing_metric | invalid_view_shape | unused_dependency | missing_input_binding | lost_filter | ambiguous_scope | wrong_grouping | calculation_required | missing_derived_operand | calculation_tool_shape_mismatch | invalid_dataset_comparison",
+      "code": "missing_dimension | missing_metric | invalid_view_shape | unused_dependency | missing_input_binding | lost_filter | ambiguous_scope | wrong_grouping | calculation_required | missing_derived_operand | calculation_tool_shape_mismatch | calculation_group_shape_mismatch | invalid_dataset_comparison | capability_gap",
       "node_id": "问题节点或空字符串",
       "reason": "具体缺失、冲突或错误，必须引用用户原话或计划字段",
+      "capability_gap": "仅 code=capability_gap 时必填，必须是统一能力事实中登记的 id",
       "repair_hint": "下一轮应如何修正 QuerySpec",
       "set": {
         "limit": 5
@@ -134,8 +148,7 @@
 禁止通过 `set` 修改 `filters`、`subject`、`question`、`kind` 或用户范围。
 
 `set.view` 只能使用：
-count / sum / avg / distribution / list / detail / top / top_groups /
-top_records / trend / bucket_compare / photo / data。
+<<supported_views>>
 
 分组汇总结论写 distribution；不要输出 group、aggregate、summary、table 等别名。
 
@@ -149,8 +162,14 @@ top_records / trend / bucket_compare / photo / data。
 待审计 QueryPlan：
 <<plan_json>>
 
+共享查询语义：
+<<query_semantics>>
+
 回答操作定义：
 <<answer_operations>>
+
+统一能力事实：
+<<capabilities>>
 
 代码规则候选证据（`trusted=false`，只作为审计线索）：
 <<assist_evidence>>

@@ -115,6 +115,31 @@ class PromptContractTests(unittest.TestCase):
             body,
         )
 
+    def test_query_prompts_use_runtime_supported_views(self):
+        for name in ("query_spec.md", "query_spec_audit.md"):
+            with self.subTest(prompt=name):
+                _, body = body_and_header(name)
+                self.assertIn("<<supported_views>>", body)
+                self.assertNotIn(
+                    "count / sum / avg / distribution / list / detail",
+                    body,
+                )
+
+    def test_group_change_prompt_uses_two_same_shape_nodes(self):
+        _, query_spec = body_and_header("query_spec.md")
+        _, audit = body_and_header("query_spec_audit.md")
+
+        for body in (query_spec, audit):
+            self.assertIn("calculate_group_change", body)
+            self.assertIn("相同 subject", body)
+            self.assertIn("唯一分组维度", body)
+            self.assertIn("指标", body)
+        self.assertIn("哪种病害增加最多", query_spec)
+        self.assertIn(
+            "不得给 post_calc 添加 `dataset_comparison`",
+            query_spec,
+        )
+
     def test_subject_router_distinguishes_task_identity_from_disease_evidence(self):
         _, router = body_and_header("subject_router.md")
         self.assertIn("task_disease_evidence", router)
@@ -153,6 +178,14 @@ class PromptContractTests(unittest.TestCase):
         self.assertIn('"mdl_sql"', body)
         self.assertIn('"used_models"', body)
         self.assertIn('"used_relationship_ids"', body)
+
+    def test_mdl_sql_generator_keeps_assist_evidence_untrusted(self):
+        _, body = body_and_header("mdl_sql_generator.md")
+
+        self.assertIn("assist_evidence", body)
+        self.assertIn("trusted=false", body)
+        self.assertIn("并行", body)
+        self.assertIn("不能直接决定 SQL", body)
 
     def test_planning_prompt_avoids_copyable_specific_week_example(self):
         _, body = body_and_header("planning.md")

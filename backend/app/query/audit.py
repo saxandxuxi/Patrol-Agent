@@ -8,6 +8,8 @@ from typing import Any
 
 from ..services import prompts
 from ..services.llm import chat_json, role_model
+from .capability_registry import CapabilityRegistry
+from .prompt_facts import build_prompt_facts
 
 
 def audit_query_plan(
@@ -16,7 +18,18 @@ def audit_query_plan(
     *,
     assist_evidence: tuple[Any, ...] = (),
     answer_operations: Mapping[str, Any] | None = None,
+    capabilities: Mapping[str, Any] | None = None,
+    registry: CapabilityRegistry | None = None,
 ) -> dict[str, Any]:
+    prompt_facts = build_prompt_facts(
+        registry,
+        capabilities or {},
+        query_semantics=(
+            {"answer_operations": answer_operations or {}}
+            if registry is None
+            else None
+        ),
+    ).as_prompt_values()
     response = chat_json(
         prompts.messages(
             "query_spec_audit",
@@ -41,6 +54,9 @@ def audit_query_plan(
                 ensure_ascii=False,
                 default=str,
             ),
+            query_semantics=prompt_facts["query_semantics"],
+            supported_views=prompt_facts["supported_views"],
+            capabilities=prompt_facts["capabilities"],
             current_date=datetime.now().strftime("%Y-%m-%d"),
         ),
         model=role_model("verify"),

@@ -6,6 +6,7 @@ from typing import Any
 from ...services import prompts
 from ...services.llm import chat_json, role_model
 from ..fields import FieldReachSet
+from ..prompt_facts import build_prompt_facts
 from .entity_resolver import list_entities
 from .registry import CapabilityRegistry
 
@@ -161,6 +162,10 @@ def resolve_subject(
             }
             for subject_id in candidates
         }
+        prompt_facts = build_prompt_facts(
+            registry,
+            summaries,
+        ).as_prompt_values()
         try:
             routed = chat_json(
                 prompts.messages(
@@ -168,6 +173,7 @@ def resolve_subject(
                     question=question,
                     subjects=summaries,
                     grounding_evidence=evidence,
+                    query_semantics=prompt_facts["query_semantics"],
                 ),
                 model=role_model("semantic"),
             )

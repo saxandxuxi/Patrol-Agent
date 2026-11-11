@@ -8,14 +8,13 @@ from typing import Any
 from ..calculations.models import CalculationRequest
 
 
-SUPPORTED_QUERY_VIEWS = (
+PUBLIC_QUERY_VIEWS = (
     "count",
     "sum",
     "avg",
     "distribution",
     "list",
     "detail",
-    "top",
     "top_records",
     "top_groups",
     "trend",
@@ -23,6 +22,9 @@ SUPPORTED_QUERY_VIEWS = (
     "photo",
     "data",
 )
+
+INTERNAL_QUERY_VIEW_ALIASES = ("top",)
+SUPPORTED_QUERY_VIEWS = PUBLIC_QUERY_VIEWS + INTERNAL_QUERY_VIEW_ALIASES
 
 # post_calc 节点不声明 calculation 时，执行器只认这几类"解释已有值"的断言。
 # 规划期审计必须和这里保持一致，否则计划能过审计、却在执行期才报 calculation_required。

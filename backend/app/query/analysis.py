@@ -10,7 +10,6 @@ from typing import Any
 
 from ..services import prompts
 from ..services.llm import LLMError, chat_json, role_model
-from ..services.logging_service import console_json
 from ..calculations.models import (
     CalculationOperand,
     CalculationOutput,
@@ -18,6 +17,7 @@ from ..calculations.models import (
 )
 from ..calculations.operations import roles_for_tool
 from ..semantic_aids import canonical_field, detect_evidence
+from .analysis_contracts import complete_analysis_answer
 from .audit import audit_query_plan
 from .capability_registry import CapabilityIssue, CapabilityRegistry
 from .comparison_contract import (
@@ -48,13 +48,20 @@ from .patrol_windows import (
     missing_recent_window_dependency,
 )
 from .planner import build_query_plan
-from .planning_repair import RepairIssue, RepairTicket, request_repair
+from .prompt_facts import build_prompt_facts
+from .planning_repair import (
+    RepairPatchError,
+    RepairTicket,
+    patch_signatures,
+    repair_issue_from_capability,
+    repair_issue_from_error,
+    request_repair_once,
+)
 from .scalar_sources import complete_scalar_source_selections
 from .semantic_operations import (
     GROUP_SHARE,
     answer_operation_catalog,
     semantic_operation_audit_issue,
-    semantic_operation_contract_issue,
 )
 from .shape_contracts import (
     canonical_view,
@@ -88,6 +95,26 @@ class QuerySubjectConflict(QuerySpecError):
 
 def _text_context(value: Any, limit: int = 8000) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)[:limit]
+
+
+def _audit_capabilities(
+    plan: QueryPlan,
+    registry: CapabilityRegistry | None,
+    reach: FieldReachSet,
+) -> dict[str, Any]:
+    if registry is None:
+        return {}
+    subjects = sorted(
+        {
+            node.spec.subject
+            for node in plan.nodes
+            if node.spec.subject in registry.snapshot.subjects
+        }
+    )
+    return {
+        subject: registry.planner_view(subject, reach).to_prompt_dict()
+        for subject in subjects
+    }
 
 
 def _string_tuple(value: Any) -> tuple[str, ...]:
@@ -408,9 +435,11 @@ def _plan_subject_conflict(
         for node in plan.nodes
         for dependency in dependency_ids(node)
     }
-    for node in plan.nodes:
-        if node.id in consumed:
-            continue
+    terminal_nodes = [
+        node for node in plan.nodes if node.id not in consumed
+    ]
+
+    def terminal_subject(node: PlanNode) -> str:
         effective_subject = node.spec.subject
         if node.node_type == "post_calc" and node.spec.subject != subject:
             dependency_subjects = {
@@ -420,10 +449,56 @@ def _plan_subject_conflict(
             }
             if len(dependency_subjects) == 1:
                 effective_subject = next(iter(dependency_subjects))
+        return effective_subject
+
+    terminal_subjects = {
+        terminal_subject(node)
+        for node in terminal_nodes
+    }
+    mixed_conclusion_exists = any(
+        node.node_type == "post_calc"
+        and depends_on_subject(node.id)
+        and any(
+            dependency in nodes_by_id
+            and nodes_by_id[dependency].spec.subject != subject
+            for dependency in dependency_ids(node)
+        )
+        for node in terminal_nodes
+    )
+
+    def scope_filter_signatures(node: PlanNode) -> set[str]:
+        return {
+            json.dumps(
+                {
+                    "field": str(item.field).rsplit(".", 1)[-1],
+                    "op": str(item.op),
+                    "value": item.storage_value,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+            for item in node.spec.filters
+        }
+
+    mixed_scope_exists = any(
+        scope_filter_signatures(left) & scope_filter_signatures(right)
+        for index, left in enumerate(terminal_nodes)
+        for right in terminal_nodes[index + 1 :]
+        if left.spec.subject != right.spec.subject
+    )
+    independent_mixed_results = (
+        len(terminal_nodes) > 1
+        and subject in terminal_subjects
+        and len(terminal_subjects) > 1
+        and (mixed_conclusion_exists or mixed_scope_exists)
+    )
+    for node in terminal_nodes:
+        effective_subject = terminal_subject(node)
         if effective_subject != subject:
             # 混合明细题的最终节点可以先取巡检查询结果、再下钻病害。
             # 只要它确实依赖已确定主体链上的节点，就不是模型换了用户问题。
-            if depends_on_subject(node.id):
+            if depends_on_subject(node.id) or independent_mixed_results:
                 continue
             return (
                 (
@@ -552,8 +627,15 @@ def _declared_capability_gap_reason(
         allowed_statuses.add("partial")
     for term in terms:
         text = str(term or "").strip()
-        prefix = "capability_gap:"
-        if not text.startswith(prefix):
+        prefix = next(
+            (
+                candidate
+                for candidate in ("capability_gap:", "capability_gaps:")
+                if text.startswith(candidate)
+            ),
+            "",
+        )
+        if not prefix:
             continue
         gap_id = text[len(prefix):].strip()
         raw = registry.snapshot.capability_gaps.get(gap_id)
@@ -602,6 +684,38 @@ def _declared_capability_gap_reason(
     return "；".join(reasons)
 
 
+def _audit_capability_gap_reason(
+    verdict: Mapping[str, Any],
+    registry: CapabilityRegistry | None,
+) -> str:
+    gap_ids: list[str] = []
+    top_level = str(verdict.get("capability_gap") or "").strip()
+    if top_level:
+        gap_ids.append(top_level)
+    for issue in verdict.get("issues") or []:
+        if not isinstance(issue, Mapping):
+            continue
+        if str(issue.get("code") or "").strip() != "capability_gap":
+            continue
+        gap_id = str(
+            issue.get("capability_gap")
+            or issue.get("gap_id")
+            or ""
+        ).strip()
+        if gap_id:
+            gap_ids.append(gap_id)
+    if not gap_ids:
+        return ""
+    return _declared_capability_gap_reason(
+        tuple(
+            f"capability_gap:{gap_id}"
+            for gap_id in dict.fromkeys(gap_ids)
+        ),
+        registry,
+        include_partial=True,
+    )
+
+
 def _has_independent_field_support(
     field: str,
     source_evidence: dict[str, Any],
@@ -627,14 +741,23 @@ def _assist_field_issue(
         for spec in specs
         if node_types.get(spec.id) != "post_calc"
     ]
-    used_by_spec = {
+    semantic_used_by_spec = {
         spec.id: {
             *[canonical_field(str(item)) for item in spec.dimensions],
             *[
                 canonical_field(str(item))
                 for item in spec.output_projection
             ],
-            *[canonical_field(str(item.field)) for item in spec.filters],
+        }
+        for spec in query_specs
+    }
+    referenced_by_spec = {
+        spec.id: {
+            *semantic_used_by_spec[spec.id],
+            *[
+                canonical_field(str(item.field))
+                for item in spec.filters
+            ],
         }
         for spec in query_specs
     }
@@ -671,7 +794,7 @@ def _assist_field_issue(
             "不能压成一个连续区间；请保留原日期和用户范围。"
         )
     for spec in query_specs:
-        used_fields = used_by_spec[spec.id]
+        used_fields = semantic_used_by_spec[spec.id]
         for item in evidence:
             discouraged = {
                 str(field) for field in item.get("discouraged_fields") or ()
@@ -696,7 +819,7 @@ def _assist_field_issue(
             )
     all_used = {
         field
-        for fields in used_by_spec.values()
+        for fields in referenced_by_spec.values()
         for field in fields
     }
     for item in evidence:
@@ -1346,6 +1469,7 @@ def _analyze_once(
     subject: str = "",
     raw_draft: dict[str, Any] | None = None,
     draft_capture: dict[str, Any] | None = None,
+    intent: str = "",
 ) -> QueryPlan:
     original = str(question or "").strip()
     if not original:
@@ -1360,13 +1484,20 @@ def _analyze_once(
         for item in detect_evidence(original, kind)
     ]
     if raw_draft is None:
+        prompt_facts = build_prompt_facts(
+            registry,
+            planner_view,
+        ).as_prompt_values()
         data = chat_json(
             prompts.messages(
                 "query_spec",
                 question=original,
                 kind=kind,
                 current_date=datetime.now().strftime("%Y-%m-%d"),
-                capabilities=_text_context(planner_view, limit=32000),
+                query_semantics=prompt_facts["query_semantics"],
+                answer_operations=prompt_facts["answer_operations"],
+                supported_views=prompt_facts["supported_views"],
+                capabilities=prompt_facts["capabilities"],
                 schema=_text_context(
                     sorted(
                         (table, column)
@@ -1699,41 +1830,7 @@ def _analyze_once(
     shaping_issue = _plan_shaping_issue(plan, contract.intent_family)
     if shaping_issue:
         raise QuerySpecError(shaping_issue)
-    operation_issue = semantic_operation_contract_issue(
-        plan,
-        contract.answer_operation,
-        registry,
-    )
-    if operation_issue:
-        console_json(
-            "[query][operation_rejected] ",
-            {
-                "question": original,
-                "answer_operation": contract.answer_operation,
-                "failure_code": operation_issue.code,
-                "reason": operation_issue.reason,
-                "nodes": [
-                    {
-                        "id": node.id,
-                        "type": node.node_type,
-                        "subject": node.spec.subject,
-                        "view": node.spec.view,
-                        "metrics": list(node.spec.metrics),
-                        "dimensions": list(node.spec.dimensions),
-                        "depends_on": list(node.depends_on),
-                        "comparison_depends_on": list(
-                            node.spec.comparison_depends_on
-                        ),
-                        "question": node.spec.question,
-                    }
-                    for node in plan.nodes
-                ],
-            },
-        )
-        raise QuerySpecError(
-            "查询操作契约不成立：" + operation_issue.reason
-        )
-    return plan
+    return complete_analysis_answer(plan, intent)
 
 
 def _apply_audit_patches(plan: QueryPlan, verdict: dict[str, Any]) -> QueryPlan:
@@ -1815,141 +1912,6 @@ def _apply_audit_patches(plan: QueryPlan, verdict: dict[str, Any]) -> QueryPlan:
     )
 
 
-def _repair_issue_from_error(
-    error: QuerySpecError,
-    draft: dict[str, Any],
-    registry: CapabilityRegistry | None = None,
-) -> RepairIssue:
-    reason = str(error or "").strip()
-    time_filter_fields = _time_filter_fields(draft, registry)
-    if "missing_recent_window_dependency" in reason:
-        return RepairIssue(
-            code="missing_recent_window_dependency",
-            path="/views",
-            reason=reason,
-            allowed_paths=(
-                "/views",
-                "/views/*",
-                "/views/*/action",
-                "/views/*/subject",
-                "/views/*/view",
-                "/views/*/metrics",
-                "/views/*/dimensions",
-                "/views/*/filters",
-                "/views/*/output_projection",
-                "/views/*/order_by",
-                "/views/*/limit",
-                "/views/*/required_assertions",
-                "/views/*/depends_on",
-                "/views/*/inputs",
-            ),
-        )
-    if "两个明确日期" in reason or "比较或变化" in reason:
-        return RepairIssue(
-            code="missing_date_comparison_nodes",
-            path="/views",
-            reason=reason,
-            allowed_paths=(
-                "/views",
-                "/views/*",
-                "/views/*/filters",
-            ),
-            mutable_filter_fields=time_filter_fields,
-        )
-    if "用户明确要求涉及字段" in reason:
-        return RepairIssue(
-            code="missing_required_field",
-            path="/views",
-            reason=reason,
-            allowed_paths=(
-                "/views",
-                "/views/*",
-                "/views/*/dimensions",
-                "/views/*/output_projection",
-                "/views/*/filters",
-            ),
-            mutable_filter_fields=time_filter_fields,
-        )
-    if "排序字段" in reason or "order_by" in reason:
-        return RepairIssue(
-            code="invalid_order_field",
-            path="/views/0/order_by",
-            reason=reason,
-            allowed_paths=("/views/*/order_by",),
-        )
-    if "主体" in reason:
-        return RepairIssue(
-            code="subject_conflict",
-            path="/views/0/subject",
-            reason=reason,
-            allowed_paths=("/views/*/subject",),
-        )
-    if "依赖" in reason or "inputs" in reason or "输入绑定" in reason:
-        return RepairIssue(
-            code="missing_dependency",
-            path="/views",
-            reason=reason,
-            allowed_paths=(
-                "/views",
-                "/views/*/inputs",
-                "/views/*/depends_on",
-                "/views/*/required_assertions",
-            ),
-        )
-    if "limit" in reason:
-        return RepairIssue(
-            code="invalid_limit",
-            path="/views/0/limit",
-            reason=reason,
-            allowed_paths=("/views/*/limit",),
-        )
-    structural_paths = (
-        "/views",
-        "/views/*",
-        "/views/*/action",
-        "/views/*/subject",
-        "/views/*/view",
-        "/views/*/metrics",
-        "/views/*/dimensions",
-        "/views/*/output_projection",
-        "/views/*/order_by",
-        "/views/*/limit",
-        "/views/*/required_assertions",
-        "/views/*/depends_on",
-        "/views/*/inputs",
-        "/views/*/calculation",
-        "/views/*/comparison_depends_on",
-    )
-    return RepairIssue(
-        code="query_spec_contract_violation",
-        path="/views",
-        reason=reason,
-        allowed_paths=structural_paths,
-    )
-
-
-def _time_filter_fields(
-    draft: dict[str, Any],
-    registry: CapabilityRegistry | None,
-) -> tuple[str, ...]:
-    if registry is None:
-        return ()
-    fields: set[str] = set()
-    for view in draft.get("views") or []:
-        if not isinstance(view, dict):
-            continue
-        subject = str(view.get("subject") or "").strip()
-        subject_fields = registry.snapshot.fields.get(subject, {})
-        for item in view.get("filters") or []:
-            if not isinstance(item, dict):
-                continue
-            field = str(item.get("field") or "").strip()
-            capability = subject_fields.get(field)
-            if capability is not None and "time" in capability.roles:
-                fields.add(field)
-    return tuple(sorted(fields))
-
-
 def _draft_signature(draft: dict[str, Any]) -> str:
     payload = json.dumps(
         draft,
@@ -1995,8 +1957,6 @@ def _query_plan_compile_error(plan: QueryPlan) -> CapabilityIssue | None:
     for node in plan.nodes:
         if node.node_type != "query_data":
             continue
-        if node.spec.subject not in {"disease", "patrol"}:
-            continue
         try:
             sql = compile_spec_mdl(node.spec)
         except UnsupportedQuerySpec as exc:
@@ -2004,14 +1964,14 @@ def _query_plan_compile_error(plan: QueryPlan) -> CapabilityIssue | None:
             return _capability_issue_from_compile_error(
                 node.id,
                 message,
+                getattr(exc, "failure", None),
             )
         if not sql:
-            return CapabilityIssue(
-                code="empty_compilation",
-                original_value=node.id,
-                reason=f"节点 {node.id} 编译结果为空",
-                node_id=node.id,
-            )
+            # 确定性编译器没有覆盖并不等于 QuerySpec 非法：
+            # 执行入口仍可走受控 LLM MDL-SQL 兜底，并在同一套合同审计后执行。
+            # 真正不存在的字段/关系已经由 compile_spec_mdl 抛出
+            # UnsupportedQuerySpec 并在上面被拦住。
+            continue
     return None
 
 
@@ -2533,12 +2493,158 @@ def _query_plan_calculation_issue(
                 reason="calculate_columns 必须声明 output.name",
                 node_id=node.id,
             )
+        if calculation.tool == "calculate_group_change":
+            group_change_issue = _group_change_shape_issue(
+                node,
+                nodes_by_id,
+                calculation,
+                registry,
+            )
+            if group_change_issue is not None:
+                return group_change_issue
+    return None
+
+
+def _group_change_shape_issue(
+    node: PlanNode,
+    nodes_by_id: Mapping[str, PlanNode],
+    calculation: CalculationRequest,
+    registry: CapabilityRegistry,
+) -> CapabilityIssue | None:
+    if calculation.output is None or not calculation.output.name:
+        return CapabilityIssue(
+            code="calculation_output_invalid",
+            original_value=node.id,
+            reason="calculate_group_change 必须声明 output.name",
+            node_id=node.id,
+        )
+    operands = {item.name: item for item in calculation.operands}
+    labels = operands.get("labels")
+    before = operands.get("before")
+    after = operands.get("after")
+    if labels is None or before is None or after is None:
+        return None
+    labels_node_id = str(labels.source.get("node") or "")
+    before_node_id = str(before.source.get("node") or "")
+    after_node_id = str(after.source.get("node") or "")
+    before_node = nodes_by_id.get(before_node_id)
+    after_node = nodes_by_id.get(after_node_id)
+    labels_node = nodes_by_id.get(labels_node_id)
+    if (
+        before_node is None
+        or after_node is None
+        or labels_node is None
+        or before_node_id == after_node_id
+        or labels_node_id not in {before_node_id, after_node_id}
+    ):
+        return CapabilityIssue(
+            code="calculation_group_shape_mismatch",
+            original_value=node.id,
+            reason=(
+                "分组变化计算必须引用两个不同的前次、后次数据节点，"
+                "labels 必须来自其中一个节点。"
+            ),
+            node_id=node.id,
+            evidence={
+                "labels_node": labels_node_id,
+                "before_node": before_node_id,
+                "after_node": after_node_id,
+            },
+        )
+    semantics = registry.snapshot.query_shapes.get(
+        "planner_semantics"
+    ) or {}
+    answer_operations = (
+        semantics.get("answer_operations")
+        if isinstance(semantics, Mapping)
+        else {}
+    )
+    contract = (
+        answer_operations.get("group_change")
+        if isinstance(answer_operations, Mapping)
+        else {}
+    )
+    required_views = {
+        str(item)
+        for item in (
+            contract.get("required_dependency_views")
+            if isinstance(contract, Mapping)
+            else ()
+        )
+    } or {"distribution", "top_groups"}
+    before_spec = before_node.spec
+    after_spec = after_node.spec
+    labels_field = str(labels.source.get("field") or "").rsplit(".", 1)[-1]
+    before_field = str(before.source.get("field") or "").rsplit(".", 1)[-1]
+    after_field = str(after.source.get("field") or "").rsplit(".", 1)[-1]
+    dimensions_match = (
+        len(before_spec.dimensions) == 1
+        and before_spec.dimensions == after_spec.dimensions
+        and labels_field == before_spec.dimensions[0].rsplit(".", 1)[-1]
+    )
+    metrics_match = (
+        before_field == after_field
+        and before_field in {
+            item.rsplit(".", 1)[-1] for item in before_spec.metrics
+        }
+        and after_field in {
+            item.rsplit(".", 1)[-1] for item in after_spec.metrics
+        }
+    )
+    views_match = (
+        before_spec.view == after_spec.view
+        and before_spec.view in required_views
+    )
+    if (
+        before_spec.subject != after_spec.subject
+        or before_spec.kind != after_spec.kind
+        or not dimensions_match
+        or not metrics_match
+        or not views_match
+    ):
+        return CapabilityIssue(
+            code="calculation_group_shape_mismatch",
+            original_value=node.id,
+            reason=(
+                "前后两个分组节点必须使用相同主体、类型、分组视图、"
+                "同一分组维度和同一指标。"
+            ),
+            allowed_values=tuple(sorted(required_views)),
+            suggested_repair=(
+                "保留两个真实批次节点，只改变时间或批次过滤；"
+                "让两节点使用相同 dimensions、metrics 和分组 view，"
+                "labels/before/after 分别引用共同分组、前次指标、后次指标。"
+            ),
+            node_id=node.id,
+            evidence={
+                "before_node": {
+                    "id": before_node_id,
+                    "subject": before_spec.subject,
+                    "kind": before_spec.kind,
+                    "view": before_spec.view,
+                    "dimensions": list(before_spec.dimensions),
+                    "metrics": list(before_spec.metrics),
+                },
+                "after_node": {
+                    "id": after_node_id,
+                    "subject": after_spec.subject,
+                    "kind": after_spec.kind,
+                    "view": after_spec.view,
+                    "dimensions": list(after_spec.dimensions),
+                    "metrics": list(after_spec.metrics),
+                },
+                "labels_field": labels_field,
+                "before_field": before_field,
+                "after_field": after_field,
+            },
+        )
     return None
 
 
 def _capability_issue_from_compile_error(
     node_id: str,
     message: str,
+    failure: Any = None,
 ) -> CapabilityIssue:
     if "不支持指标：" in message:
         original = message.split("不支持指标：", 1)[1].split("；", 1)[0]
@@ -2553,6 +2659,25 @@ def _capability_issue_from_compile_error(
             original_value=original,
             reason=message,
             allowed_values=allowed,
+            suggested_repair=(
+                "只使用 allowed_values 中的原子指标；派生指标改用 post_calc。"
+            ),
+            node_id=node_id,
+        )
+    evidence = getattr(failure, "evidence", {}) or {}
+    if (
+        isinstance(evidence, Mapping)
+        and str(evidence.get("reason") or "") == "unknown_metric"
+    ):
+        metric_id = str(evidence.get("metric") or "")
+        return CapabilityIssue(
+            code="unknown_metric",
+            original_value=metric_id,
+            reason=f"节点 {node_id} 使用了未注册的指标 {metric_id}",
+            allowed_values=tuple(
+                str(item)
+                for item in evidence.get("available_metrics") or ()
+            ),
             suggested_repair=(
                 "只使用 allowed_values 中的原子指标；派生指标改用 post_calc。"
             ),
@@ -2680,6 +2805,19 @@ def _normalize_plan_shapes(plan: QueryPlan) -> QueryPlan:
             if node.node_type == "query_data"
             else normalize_post_calc_shape(spec)
         )
+        if (
+            node.node_type == "post_calc"
+            and spec.calculation is not None
+            and spec.calculation.tool == "calculate_group_change"
+        ):
+            spec = replace(
+                spec,
+                required_assertions=tuple(
+                    assertion
+                    for assertion in spec.required_assertions
+                    if assertion != "dataset_comparison"
+                ),
+            )
         nodes.append(
             node if spec == node.spec else replace(node, spec=spec)
         )
@@ -2696,12 +2834,106 @@ def analyze_single_turn(
     registry: CapabilityRegistry | None = None,
     subject: str = "",
     planning_feedback: str = "",
+    intent: str = "",
 ) -> QueryPlan:
     feedback = str(planning_feedback or "")
     audit_evidence = detect_evidence(str(question or "").strip(), kind)
     issues: list[dict[str, Any]] = []
     raw_draft: dict[str, Any] | None = None
     repaired_signatures: set[str] = set()
+    repair_rounds = 0
+    repair_evidence_signatures: set[str] = set()
+
+    def repair_draft(
+        issue: Any,
+        draft: dict[str, Any],
+        capture: dict[str, Any],
+    ) -> dict[str, Any]:
+        nonlocal repair_rounds
+        previous_patch_signatures: set[str] = set()
+        while repair_rounds < 2:
+            evidence_signature = _draft_signature(
+                {
+                    "code": issue.code,
+                    "path": issue.path,
+                    "expected": issue.expected,
+                    "actual": issue.actual,
+                    "allowed_values": list(issue.allowed_values),
+                    "evidence": issue.evidence,
+                }
+            )
+            if evidence_signature in repair_evidence_signatures:
+                raise QuerySpecError(
+                    f"{issue.code}: QuerySpec 自动修复收到相同失败证据，"
+                    "已停止重复执行"
+                )
+            repair_evidence_signatures.add(evidence_signature)
+            repair_rounds += 1
+            ticket = RepairTicket(
+                question=str(question or "").strip(),
+                draft=draft,
+                issue=issue,
+                attempt=repair_rounds,
+                previous_signatures=frozenset(previous_patch_signatures),
+            )
+            try:
+                repaired = request_repair_once(
+                    ticket,
+                    capabilities=capture.get("planner_context") or {},
+                    assist_evidence=capture.get("assist_evidence") or (),
+                )
+            except LLMError:
+                raise
+            except RepairPatchError as repair_exc:
+                signatures = set(
+                    patch_signatures(list(repair_exc.patches))
+                )
+                if signatures.intersection(previous_patch_signatures):
+                    raise QuerySpecError(
+                        f"{issue.code}: {repair_exc}；"
+                        "自动修复重复提交相同补丁，已停止重复执行"
+                    ) from repair_exc
+                previous_patch_signatures.update(signatures)
+                if repair_rounds >= 2:
+                    raise QuerySpecError(
+                        f"{issue.code}: 上一轮 QuerySpec 不符合契约，"
+                        f"自动修复失败：{issue.reason}；"
+                        f"修复阶段：{repair_exc}"
+                    ) from repair_exc
+                issue = replace(
+                    issue,
+                    evidence={
+                        **issue.evidence,
+                        "previous_repair_failure": {
+                            "attempt": repair_rounds,
+                            "reason": str(repair_exc),
+                            "previous_patches": list(repair_exc.patches),
+                        },
+                    },
+                )
+                continue
+            except Exception as repair_exc:  # noqa: BLE001
+                raise QuerySpecError(
+                    f"{issue.code}: 上一轮 QuerySpec 不符合契约，"
+                    f"自动修复失败：{issue.reason}；"
+                    f"修复阶段：{repair_exc}"
+                ) from repair_exc
+            signature = _draft_signature(repaired)
+            if (
+                signature == _draft_signature(draft)
+                or signature in repaired_signatures
+            ):
+                raise QuerySpecError(
+                    f"{issue.code}: 上一轮 QuerySpec 自动修复"
+                    "没有产生新计划，已停止重复执行"
+                )
+            repaired_signatures.add(signature)
+            return repaired
+        raise QuerySpecError(
+            f"{issue.code}: QuerySpec 已完成两轮受控修复，"
+            "仍未通过契约校验"
+        )
+
     for attempt in range(3):
         draft_capture: dict[str, Any] = {}
         next_draft = raw_draft
@@ -2715,6 +2947,7 @@ def analyze_single_turn(
                 feedback,
                 registry=registry,
                 subject=subject,
+                intent=intent,
                 raw_draft=next_draft,
                 draft_capture=draft_capture,
             )
@@ -2743,45 +2976,22 @@ def analyze_single_turn(
             raise
         except QuerySpecError as exc:
             draft = draft_capture.get("draft")
-            if isinstance(draft, dict) and attempt < 2:
-                issue = _repair_issue_from_error(
+            if isinstance(draft, dict) and repair_rounds < 2:
+                issue = repair_issue_from_error(
                     exc,
                     draft,
                     registry,
                 )
-                ticket = RepairTicket(
-                    question=str(question or "").strip(),
-                    draft=draft,
-                    issue=issue,
-                    attempt=attempt + 1,
+                raw_draft = repair_draft(
+                    issue,
+                    draft,
+                    draft_capture,
                 )
-                try:
-                    repaired = request_repair(
-                        ticket,
-                        capabilities=draft_capture.get("planner_context") or {},
-                        assist_evidence=draft_capture.get("assist_evidence") or (),
-                    )
-                except LLMError:
-                    raise
-                except Exception as repair_exc:  # noqa: BLE001
-                    raise QuerySpecError(
-                        "上一轮 QuerySpec 不符合契约，自动修复失败："
-                        f"{exc}；修复阶段：{repair_exc}"
-                    ) from repair_exc
-                signature = _draft_signature(repaired)
-                if (
-                    signature == _draft_signature(draft)
-                    or signature in repaired_signatures
-                ):
-                    raise QuerySpecError(
-                        "上一轮 QuerySpec 自动修复没有产生新计划，已停止重复执行"
-                    )
-                repaired_signatures.add(signature)
-                raw_draft = repaired
                 feedback = json.dumps(
                     {
                         "failure_code": issue.code,
                         "reason": issue.reason,
+                        "allowed_values": list(issue.allowed_values),
                         "allowed_paths": list(issue.allowed_paths),
                     },
                     ensure_ascii=False,
@@ -2799,11 +3009,11 @@ def analyze_single_turn(
         if compile_issue is None and registry is not None:
             compile_issue = dataset_comparison_contract_issue(plan, registry)
         if compile_issue is None:
-            compile_issue = _query_plan_compile_error(plan)
-        if compile_issue is None:
             compile_issue = _query_plan_derived_metric_issue(plan, registry)
         if compile_issue is None:
             compile_issue = _query_plan_calculation_issue(plan, registry)
+        if compile_issue is None:
+            compile_issue = _query_plan_compile_error(plan)
         if compile_issue:
             reduced_plan = _drop_redundant_invalid_post_calc(
                 plan,
@@ -2822,6 +3032,28 @@ def analyze_single_turn(
                 raise QuerySpecError(
                     "当前数据能力不支持：" + compile_issue.reason
                 )
+            draft = draft_capture.get("draft")
+            if isinstance(draft, dict) and repair_rounds < 2:
+                issue = repair_issue_from_capability(
+                    compile_issue,
+                    draft,
+                )
+                raw_draft = repair_draft(
+                    issue,
+                    draft,
+                    draft_capture,
+                )
+                feedback = json.dumps(
+                    {
+                        "failure_code": issue.code,
+                        "reason": issue.reason,
+                        "actual": issue.actual,
+                        "allowed_values": list(issue.allowed_values),
+                        "allowed_paths": list(issue.allowed_paths),
+                    },
+                    ensure_ascii=False,
+                )
+                continue
             if attempt < 2:
                 continue
             if compile_issue.code.startswith("calculation_"):
@@ -2840,7 +3072,12 @@ def analyze_single_turn(
             plan,
             assist_evidence=audit_evidence,
             answer_operations=answer_operation_catalog(registry),
+            capabilities=_audit_capabilities(plan, registry, reach),
+            registry=registry,
         )
+        audit_gap = _audit_capability_gap_reason(verdict, registry)
+        if audit_gap:
+            raise QuerySpecUnsupported(audit_gap)
         operation_issue = semantic_operation_audit_issue(
             plan,
             verdict,
@@ -2857,6 +3094,28 @@ def analyze_single_turn(
                 ensure_ascii=False,
                 default=str,
             )
+            draft = draft_capture.get("draft")
+            if isinstance(draft, dict) and repair_rounds < 2:
+                issue = repair_issue_from_capability(
+                    operation_issue,
+                    draft,
+                )
+                raw_draft = repair_draft(
+                    issue,
+                    draft,
+                    draft_capture,
+                )
+                feedback = json.dumps(
+                    {
+                        "failure_code": issue.code,
+                        "reason": issue.reason,
+                        "actual": issue.actual,
+                        "allowed_values": list(issue.allowed_values),
+                        "allowed_paths": list(issue.allowed_paths),
+                    },
+                    ensure_ascii=False,
+                )
+                continue
             if attempt < 2:
                 continue
             raise QuerySpecError(
@@ -2932,7 +3191,19 @@ def analyze_single_turn(
                     patched,
                     assist_evidence=audit_evidence,
                     answer_operations=answer_operation_catalog(registry),
+                    capabilities=_audit_capabilities(
+                        patched,
+                        registry,
+                        reach,
+                    ),
+                    registry=registry,
                 )
+                audit_gap = _audit_capability_gap_reason(
+                    repaired,
+                    registry,
+                )
+                if audit_gap:
+                    raise QuerySpecUnsupported(audit_gap)
                 operation_issue = semantic_operation_audit_issue(
                     patched,
                     repaired,
