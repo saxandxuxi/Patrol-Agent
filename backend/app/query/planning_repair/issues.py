@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from typing import Any
 
 from .json_patch import scope_signature
@@ -242,6 +244,120 @@ def _view_index(draft: dict[str, Any], node_id: str) -> int | None:
         if str(view.get("id") or f"q{index + 1}").strip() == node_id:
             return index
     return None
+
+
+_AUDIT_STRUCTURE_PATHS = (
+    "/views",
+    "/views/*",
+    "/views/*/action",
+    "/views/*/view",
+    "/views/*/metrics",
+    "/views/*/dimensions",
+    "/views/*/output_projection",
+    "/views/*/order_by",
+    "/views/*/limit",
+    "/views/*/required_assertions",
+)
+
+_AUDIT_CODE_PATHS = {
+    "missing_dimension": (
+        "/views/*/dimensions",
+        "/views/*/output_projection",
+    ),
+    "missing_metric": (
+        "/views/*/metrics",
+        "/views/*/output_projection",
+    ),
+    "invalid_view_shape": _AUDIT_STRUCTURE_PATHS,
+    "unused_dependency": (
+        "/views/*/depends_on",
+        "/views/*/comparison_depends_on",
+        "/views/*/inputs",
+    ),
+    "missing_input_binding": (
+        "/views/*/depends_on",
+        "/views/*/inputs",
+        "/views/*/required_assertions",
+    ),
+    "lost_filter": ("/views/*/filters",),
+    "wrong_grouping": (
+        "/views/*/metrics",
+        "/views/*/dimensions",
+        "/views/*/output_projection",
+    ),
+    "calculation_required": (
+        "/views/*/calculation",
+        "/views/*/depends_on",
+        "/views/*/inputs",
+        "/views/*/metrics",
+    ),
+    "missing_derived_operand": (
+        "/views/*/calculation",
+        "/views/*/depends_on",
+        "/views/*/inputs",
+    ),
+    "calculation_tool_shape_mismatch": (
+        "/views/*/calculation",
+        "/views/*/depends_on",
+        "/views/*/inputs",
+    ),
+    "calculation_group_shape_mismatch": (
+        "/views/*/calculation",
+        "/views/*/depends_on",
+        "/views/*/inputs",
+    ),
+    "invalid_dataset_comparison": (
+        "/views/*/view",
+        "/views/*/metrics",
+        "/views/*/dimensions",
+        "/views/*/output_projection",
+        "/views/*/depends_on",
+        "/views/*/comparison_depends_on",
+        "/views/*/inputs",
+        "/views/*/required_assertions",
+    ),
+}
+
+
+def repair_issue_from_audit(
+    problem: Mapping[str, Any],
+    draft: dict[str, Any],
+    registry: Any = None,
+) -> RepairIssue:
+    code = str(problem.get("code") or "audit_plan_incomplete").strip()
+    node_id = str(problem.get("node_id") or "").strip()
+    index = _view_index(draft, node_id)
+    if code == "subject_conflict":
+        allowed_paths = (
+            f"/views/{index}/subject"
+            if index is not None
+            else "/views/*/subject",
+        )
+    else:
+        allowed_paths = _AUDIT_CODE_PATHS.get(
+            code,
+            _AUDIT_STRUCTURE_PATHS,
+        )
+    issue = RepairIssue(
+        code=code,
+        path=f"/views/{index}" if index is not None else "/views",
+        reason=str(problem.get("reason") or "").strip(),
+        expected=str(problem.get("repair_hint") or "").strip(),
+        actual=json.dumps(
+            problem.get("set") or {},
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        ),
+        allowed_values=(),
+        allowed_paths=allowed_paths,
+        evidence={
+            "source": "independent_audit",
+            "node_id": node_id,
+            "audit_issue": dict(problem),
+        },
+    )
+    return _with_scope_evidence(issue, draft)
 
 
 def _capability_paths(

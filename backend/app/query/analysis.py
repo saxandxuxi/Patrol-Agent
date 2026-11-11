@@ -53,6 +53,7 @@ from .planning_repair import (
     RepairPatchError,
     RepairTicket,
     patch_signatures,
+    repair_issue_from_audit,
     repair_issue_from_capability,
     repair_issue_from_error,
     request_repair_once,
@@ -1897,85 +1898,6 @@ def _analyze_once(
     return complete_analysis_answer(plan, intent)
 
 
-def _apply_audit_patches(plan: QueryPlan, verdict: dict[str, Any]) -> QueryPlan:
-    allowed = {
-        "limit",
-        "view",
-        "metrics",
-        "dimensions",
-        "order_by",
-        "output_projection",
-        "required_assertions",
-    }
-    patch_by_node: dict[str, dict[str, Any]] = {}
-    for issue in verdict.get("issues") or []:
-        if not isinstance(issue, dict):
-            continue
-        node_id = str(issue.get("node_id") or "")
-        changes = issue.get("set")
-        if node_id and isinstance(changes, dict):
-            patch_by_node.setdefault(node_id, {}).update(
-                {
-                    key: value
-                    for key, value in changes.items()
-                    if key in allowed
-                }
-            )
-    if not patch_by_node:
-        return plan
-    nodes = []
-    for node in plan.nodes:
-        changes = patch_by_node.get(node.id)
-        if not changes:
-            nodes.append(node)
-            continue
-        values = dict(node.spec.__dict__)
-        values.update(changes)
-        if "metrics" in changes:
-            values["metrics"] = _metric_tuple(changes["metrics"])
-        if "dimensions" in changes:
-            values["dimensions"] = _canonical_dimensions(
-                str(values.get("subject") or ""),
-                _string_tuple(changes["dimensions"]),
-            )
-        if "output_projection" in changes:
-            values["output_projection"] = _canonical_dimensions(
-                str(values.get("subject") or ""),
-                _string_tuple(changes["output_projection"]),
-            )
-        if "order_by" in changes:
-            values["order_by"] = _order_items(changes["order_by"])
-        if "required_assertions" in changes:
-            values["required_assertions"] = _string_tuple(
-                changes["required_assertions"]
-            )
-        if "view" in changes:
-            values["view"] = _canonical_view(
-                changes["view"],
-                tuple(values.get("metrics") or ()),
-                tuple(values.get("dimensions") or ()),
-                node.node_type,
-            )
-        normalized_spec = normalize_segment_projection(QuerySpec(**values))
-        nodes.append(
-            node.__class__(
-                id=node.id,
-                spec=(
-                    normalize_top_view(normalized_spec)
-                    if node.node_type == "query_data"
-                    else normalize_post_calc_shape(normalized_spec)
-                ),
-                depends_on=node.depends_on,
-                node_type=node.node_type,
-            )
-        )
-    return QueryPlan(
-        question=plan.question,
-        nodes=tuple(nodes),
-        response_mode=plan.response_mode,
-    )
-
-
 def _draft_signature(draft: dict[str, Any]) -> str:
     payload = json.dumps(
         draft,
@@ -2010,11 +1932,72 @@ def _plan_contract_issues(
     return issues
 
 
-def _audit_issue_changes_plan(plan: QueryPlan, issue: dict[str, Any]) -> bool:
+def _audit_issue_proposes_change(
+    plan: QueryPlan,
+    issue: dict[str, Any],
+) -> bool:
     changes = issue.get("set")
     if not isinstance(changes, dict) or not changes:
         return True
-    return _apply_audit_patches(plan, {"issues": [issue]}) != plan
+    node_id = str(issue.get("node_id") or "").strip()
+    node = next(
+        (item for item in plan.nodes if item.id == node_id),
+        None,
+    )
+    if node is None:
+        return True
+    values = dict(node.spec.__dict__)
+    recognized = {
+        "limit",
+        "view",
+        "metrics",
+        "dimensions",
+        "order_by",
+        "output_projection",
+        "required_assertions",
+    }
+    if any(key not in recognized for key in changes):
+        return True
+    try:
+        if "metrics" in changes:
+            values["metrics"] = _metric_tuple(changes["metrics"])
+        if "dimensions" in changes:
+            values["dimensions"] = _canonical_dimensions(
+                str(values.get("subject") or ""),
+                _string_tuple(changes["dimensions"]),
+            )
+        if "output_projection" in changes:
+            values["output_projection"] = _canonical_dimensions(
+                str(values.get("subject") or ""),
+                _string_tuple(changes["output_projection"]),
+            )
+        if "order_by" in changes:
+            values["order_by"] = _order_items(changes["order_by"])
+        if "required_assertions" in changes:
+            values["required_assertions"] = _string_tuple(
+                changes["required_assertions"]
+            )
+        if "view" in changes:
+            values["view"] = _canonical_view(
+                changes["view"],
+                tuple(values.get("metrics") or ()),
+                tuple(values.get("dimensions") or ()),
+                node.node_type,
+            )
+        if "limit" in changes:
+            raw_limit = changes["limit"]
+            values["limit"] = (
+                int(raw_limit) if raw_limit is not None else None
+            )
+        proposed = normalize_segment_projection(QuerySpec(**values))
+        proposed = (
+            normalize_top_view(proposed)
+            if node.node_type == "query_data"
+            else normalize_post_calc_shape(proposed)
+        )
+    except (TypeError, ValueError):
+        return True
+    return proposed != node.spec
 
 
 def _query_plan_compile_error(plan: QueryPlan) -> CapabilityIssue | None:
@@ -2888,6 +2871,32 @@ def _normalize_plan_shapes(plan: QueryPlan) -> QueryPlan:
     return replace(plan, nodes=tuple(nodes))
 
 
+def repair_audit_issues(
+    draft: dict[str, Any],
+    issues: list[Any],
+    *,
+    registry: CapabilityRegistry | None = None,
+) -> dict[str, Any]:
+    for problem in issues:
+        if not isinstance(problem, dict) or not problem.get("code"):
+            continue
+        issue = repair_issue_from_audit(problem, draft, registry)
+        return request_repair_once(
+            RepairTicket(
+                question=str(
+                    draft.get("question")
+                    or draft.get("final_goal")
+                    or ""
+                ),
+                draft=draft,
+                issue=issue,
+            ),
+            capabilities={},
+            assist_evidence=(),
+        )
+    return draft
+
+
 def analyze_single_turn(
     question: str,
     kind: str,
@@ -3231,53 +3240,43 @@ def analyze_single_turn(
         effective_issues = [
             issue
             for issue in effective_issues
-            if _audit_issue_changes_plan(plan, issue)
+            if _audit_issue_proposes_change(plan, issue)
         ]
         if not effective_issues:
             return plan
         verdict = {**verdict, "issues": effective_issues}
-        patched = _apply_audit_patches(plan, verdict)
-        if patched != plan:
-            contract_issues = _plan_contract_issues(patched, schema)
-            if contract_issues:
-                verdict = {
-                    "complete": False,
-                    "issues": contract_issues,
-                }
-            else:
-                if _query_plan_compiles(plan) and not _query_plan_compiles(patched):
-                    return plan
-                repaired = audit_query_plan(
-                    str(question or "").strip(),
-                    patched,
-                    capabilities=_audit_capabilities(
-                        patched,
-                        registry,
-                        reach,
-                    ),
-                    registry=registry,
-                )
-                audit_gap = _audit_capability_gap_reason(
-                    repaired,
-                    registry,
-                )
-                if audit_gap:
-                    raise QuerySpecUnsupported(audit_gap)
-                operation_issue = semantic_operation_audit_issue(
-                    patched,
-                    repaired,
-                    registry,
-                )
-                if operation_issue:
-                    verdict = {
-                        **repaired,
-                        "complete": False,
-                        "issues": [operation_issue.to_feedback()],
-                    }
-                    continue
-                if repaired.get("complete") is True:
-                    return patched
-                verdict = repaired
+        patch_suggestions = [
+            item
+            for item in effective_issues
+            if isinstance(item.get("set"), dict) and item["set"]
+        ]
+        draft = draft_capture.get("draft")
+        if (
+            patch_suggestions
+            and isinstance(draft, dict)
+            and repair_rounds < 2
+        ):
+            issue = repair_issue_from_audit(
+                patch_suggestions[0],
+                draft,
+                registry,
+            )
+            raw_draft = repair_draft(
+                issue,
+                draft,
+                draft_capture,
+            )
+            feedback = json.dumps(
+                {
+                    "failure_code": issue.code,
+                    "reason": issue.reason,
+                    "expected": issue.expected,
+                    "actual": issue.actual,
+                    "allowed_paths": list(issue.allowed_paths),
+                },
+                ensure_ascii=False,
+            )
+            continue
         issues = verdict.get("issues") or []
         feedback = (
             "上一轮 QuerySpec 未通过独立规划审计。只在用户原问题和现有字段、"

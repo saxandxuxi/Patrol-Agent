@@ -205,12 +205,14 @@ class QueryAuditTests(unittest.TestCase):
         self.assertEqual(raised.exception.category, "quota_exhausted")
         self.assertEqual(analyze_once.call_count, 1)
 
+    @patch("app.query.planning_repair.controller.chat_json")
     @patch("app.query.analysis.audit_query_plan")
     @patch("app.query.analysis.chat_json")
-    def test_audit_patch_that_breaks_compiler_is_rejected(
+    def test_audit_patch_that_breaks_compiler_is_not_applied(
         self,
         chat_json,
         audit,
+        repair_chat_json,
     ):
         chat_json.return_value = {
             "final_goal": "路线病害指标",
@@ -257,17 +259,17 @@ class QueryAuditTests(unittest.TestCase):
                 }
             ],
         }
+        repair_chat_json.return_value = {"patches": []}
 
-        plan = analyze_single_turn(
-            "按路线统计数量和总面积，并关联路线长度",
-            "mysql",
-            PhysicalSchemaView(columns=frozenset()),
-            FieldReachSet(),
-            audit=True,
-        )
+        with self.assertRaises(QuerySpecError):
+            analyze_single_turn(
+                "按路线统计数量和总面积，并关联路线长度",
+                "mysql",
+                PhysicalSchemaView(columns=frozenset()),
+                FieldReachSet(),
+                audit=True,
+            )
 
-        self.assertIn("route_length_km", plan.nodes[0].spec.metrics)
-        self.assertEqual(plan.nodes[0].spec.dimensions, ("route_name",))
         self.assertEqual(audit.call_count, 1)
 
     @patch("app.query.analysis.audit_query_plan")
@@ -332,12 +334,14 @@ class QueryAuditTests(unittest.TestCase):
         self.assertIn("route_length_km", plan.nodes[0].spec.metrics)
         self.assertEqual(audit.call_count, 1)
 
+    @patch("app.query.planning_repair.controller.chat_json")
     @patch("app.query.analysis.audit_query_plan")
     @patch("app.query.analysis.chat_json")
     def test_audit_aggregate_view_alias_is_normalized_to_distribution(
         self,
         chat_json,
         audit,
+        repair_chat_json,
     ):
         chat_json.return_value = {
             "final_goal": "设备路线任务次数",
@@ -377,6 +381,25 @@ class QueryAuditTests(unittest.TestCase):
             },
             {"complete": True, "issues": []},
         ]
+        repair_chat_json.return_value = {
+            "patches": [
+                {
+                    "op": "set",
+                    "path": "/views/0/view",
+                    "value": "distribution",
+                },
+                {
+                    "op": "set",
+                    "path": "/views/0/dimensions",
+                    "value": ["equipment_id", "route_name"],
+                },
+                {
+                    "op": "set",
+                    "path": "/views/0/metrics",
+                    "value": ["count"],
+                },
+            ]
+        }
 
         plan = analyze_single_turn(
             "2026年11月每台巡检设备分别完成了哪些路线、各多少次任务？",
@@ -735,12 +758,14 @@ class QueryAuditTests(unittest.TestCase):
         self.assertEqual(len(plan.nodes), 2)
         self.assertEqual(plan.nodes[1].node_type, "post_calc")
 
+    @patch("app.query.planning_repair.controller.chat_json")
     @patch("app.query.analysis.audit_query_plan")
     @patch("app.query.analysis.chat_json")
     def test_post_calc_upstream_missing_metric_patch_is_not_ignored(
         self,
         chat_json,
         audit,
+        repair_chat_json,
     ):
         chat_json.return_value = {
             "final_goal": "路线健康比较",
@@ -804,6 +829,29 @@ class QueryAuditTests(unittest.TestCase):
             },
             {"complete": True, "issues": []},
         ]
+        repair_chat_json.return_value = {
+            "patches": [
+                {
+                    "op": "set",
+                    "path": "/views/0/metrics",
+                    "value": [
+                        "count",
+                        "total_area",
+                        "route_length_km",
+                    ],
+                },
+                {
+                    "op": "set",
+                    "path": "/views/0/output_projection",
+                    "value": [
+                        "route_name",
+                        "count",
+                        "total_area",
+                        "route_length_km",
+                    ],
+                },
+            ]
+        }
 
         plan = analyze_single_turn(
             "比较路线病害密度",
@@ -816,12 +864,14 @@ class QueryAuditTests(unittest.TestCase):
         self.assertIn("route_length_km", plan.nodes[0].spec.metrics)
         self.assertEqual(audit.call_count, 2)
 
+    @patch("app.query.planning_repair.controller.chat_json")
     @patch("app.query.analysis.audit_query_plan")
     @patch("app.query.analysis.chat_json")
     def test_structured_audit_patch_is_applied_without_changing_scope(
         self,
         chat_json,
         audit,
+        repair_chat_json,
     ):
         chat_json.return_value = {
             "final_goal": "Top 5",
@@ -849,7 +899,7 @@ class QueryAuditTests(unittest.TestCase):
                 "complete": False,
                 "issues": [
                     {
-                        "code": "lost_filter",
+                        "code": "invalid_view_shape",
                         "node_id": "q1",
                         "reason": "缺少 Top 5 限制",
                         "set": {"limit": 5},
@@ -858,6 +908,11 @@ class QueryAuditTests(unittest.TestCase):
             },
             {"complete": True, "issues": []},
         ]
+        repair_chat_json.return_value = {
+            "patches": [
+                {"op": "set", "path": "/views/0/limit", "value": 5}
+            ]
+        }
 
         plan = analyze_single_turn(
             "最常见的5种病害是什么",
