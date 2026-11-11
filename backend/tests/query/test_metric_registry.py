@@ -3,6 +3,7 @@ import unittest
 from app.query.analysis import _metric_tuple
 from app.query.capability_registry import CapabilityRegistry
 from app.query.fields import FieldReachSet
+from app.query.metrics.semantics import validate_metric_semantics
 from app.query.metric_compiler import compile_registered_metric
 
 
@@ -64,11 +65,30 @@ class MetricRegistryTests(unittest.TestCase):
         density = view["derived_metrics"]["disease_density"]
 
         self.assertEqual(route_length["unit"], "km")
+        self.assertEqual(route_length["aggregation"], "row")
+        self.assertEqual(route_length["grain"], "route")
+        self.assertEqual(route_length["identity"], "route.id")
+        self.assertFalse(route_length["fanout_safe"])
+        self.assertEqual(route_length["source_kind"], "resources")
         self.assertEqual(
             density["operands"],
             ["count", "route_length_km"],
         )
         self.assertEqual(density["evaluator"], "post_calc")
+
+    def test_every_registered_metric_has_valid_semantics(self):
+        for subject, metrics in self.registry.snapshot.metrics.items():
+            for metric_id, metric in metrics.items():
+                if metric_id != metric.metric_id:
+                    continue
+                self.assertEqual(
+                    validate_metric_semantics(
+                        metric,
+                        subject=subject,
+                    ),
+                    (),
+                    f"{subject}.{metric_id}",
+                )
 
     def test_length_metrics_use_semantic_length_field(self):
         """原始列 disease_length 大面积为空（坑槽 44 条全为 NULL），
@@ -90,6 +110,16 @@ class MetricRegistryTests(unittest.TestCase):
             _metric_tuple(["avg_effective_disease_length"]),
             ("avg_disease_length",),
         )
+
+    def test_metric_views_follow_the_registered_aggregate_function(self):
+        disease = self.registry.snapshot.metrics["disease"]
+        patrol = self.registry.snapshot.metrics["patrol"]
+
+        self.assertIn("sum", disease["sum_effective_disease_length"].allowed_views)
+        self.assertIn("avg", disease["avg_disease_length"].allowed_views)
+        self.assertIn("sum", patrol["patrol_mileage"].allowed_views)
+        self.assertNotIn("sum", disease["count"].allowed_views)
+        self.assertNotIn("avg", disease["count"].allowed_views)
 
     def test_distinct_type_count_metric_is_registered(self):
         """“多少种病害类型”是去重计数，不能拿 count 顶替。"""

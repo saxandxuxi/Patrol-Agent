@@ -11,7 +11,7 @@ class SubjectCapability:
     subject_id: str
     base_table: str
     mdl_model: str
-    joins: dict[str, dict[str, str]] = field(default_factory=dict)
+    description: str = ""
     allowed_views: tuple[str, ...] = ()
     entities: tuple[str, ...] = ()
 
@@ -55,6 +55,13 @@ class MetricCapability:
     allowed_views: tuple[str, ...] = ()
     requires_join: tuple[str, ...] = ()
     propagate_across_groups: bool = False
+    aliases: tuple[str, ...] = ()
+    aggregation: str = ""
+    grain: str = ""
+    identity: str = ""
+    fanout_safe: bool = False
+    source_kind: str = ""
+    source_reference: str = ""
 
 
 @dataclass(frozen=True)
@@ -81,6 +88,7 @@ class EnumCapability:
     table: str
     column: str
     label: str
+    display_column: str
     values: dict[str, EnumValueCapability]
 
 
@@ -125,6 +133,24 @@ class CapabilitySnapshot:
     templates: dict[str, Any]
     calculators: dict[str, Any]
 
+    def metric_ids(self, subject: str) -> tuple[str, ...]:
+        canonical = []
+        for key, metric in self.metrics.get(subject, {}).items():
+            if key == metric.metric_id:
+                canonical.append(key)
+        return tuple(canonical)
+
+    def resolve_metric_id(self, subject: str, metric_id: str) -> str:
+        metric = self.metrics.get(subject, {}).get(str(metric_id))
+        return metric.metric_id if metric is not None else str(metric_id)
+
+    def metric(
+        self,
+        subject: str,
+        metric_id: str,
+    ) -> MetricCapability | None:
+        return self.metrics.get(subject, {}).get(str(metric_id))
+
 
 @dataclass(frozen=True)
 class PlannerFieldView:
@@ -143,6 +169,7 @@ class PlannerFieldView:
 class PlannerCapabilityView:
     subject: str
     base_table: str
+    description: str
     fields: dict[str, PlannerFieldView]
     metrics: tuple[str, ...]
     derived_metrics: tuple[str, ...]
@@ -160,6 +187,7 @@ class PlannerCapabilityView:
         return {
             "subject": self.subject,
             "base_table": self.base_table,
+            "description": self.description,
             "metrics": self.metric_details,
             "derived_metrics": self.derived_metric_details,
             "calculators": self.calculators,

@@ -34,6 +34,9 @@ from .models import (
 _GROUPED_VIEWS = frozenset({"distribution", "trend", "top_groups"})
 _METRIC_ONLY_VIEWS = frozenset({"count", "sum", "avg"})
 _DISTINCT_RECORD_VIEWS = frozenset({"data", "detail", "list"})
+_DIMENSION_ROLES = frozenset(
+    {"dimension", "code", "primary", "identity", "fk"}
+)
 
 
 def build_mdl_query_contract(
@@ -129,6 +132,29 @@ def build_mdl_query_contract(
                     else ""
                 ),
             )
+        if (
+            context == "dimensions"
+            and not _DIMENSION_ROLES.intersection(field_capability.roles)
+        ):
+            _raise_contract(
+                normalized,
+                "field_role_not_allowed",
+                path=path,
+                field=base_field,
+                context=context,
+                allowed_roles=list(field_capability.roles),
+            )
+        if (
+            context != "filters"
+            and "relation_exists" in field_capability.roles
+        ):
+            _raise_contract(
+                normalized,
+                "relation_exists_filter_only",
+                path=path,
+                field=base_field,
+                context=context,
+            )
 
         model = _capability_model(
             normalized,
@@ -205,6 +231,25 @@ def build_mdl_query_contract(
         field_capability = registry.snapshot.fields[subject][
             field_binding.field_id
         ]
+        relation_exists = (
+            "relation_exists" in field_capability.roles
+        )
+        filter_op = str(value.op or "").lower()
+        if relation_exists and filter_op != "exists":
+            _raise_contract(
+                normalized,
+                "relation_exists_requires_exists",
+                path=f"filters[{index}].op",
+                field=field_binding.field_id,
+                op=filter_op,
+            )
+        if not relation_exists and filter_op == "exists":
+            _raise_contract(
+                normalized,
+                "relation_predicate_not_registered",
+                path=f"filters[{index}].op",
+                field=field_binding.field_id,
+            )
         expression = _normalize_expression(
             normalized,
             snapshot,
@@ -306,6 +351,10 @@ def build_mdl_query_contract(
                 unit=metric.unit,
                 source="query_spec",
                 requires_join=metric.requires_join,
+                aggregation=metric.aggregation,
+                grain=metric.grain,
+                identity=metric.identity,
+                fanout_safe=metric.fanout_safe,
             )
         )
     metrics_by_id = {
@@ -567,6 +616,7 @@ def build_mdl_query_contract(
         ),
         mandatory_predicates=tuple(mandatory_predicates),
         output_aliases=MappingProxyType(output_aliases),
+        question=spec.question,
     )
     contract_hash = _contract_digest(contract)
     return replace(
@@ -600,6 +650,10 @@ def _normalize_and_validate_spec(
             "unknown_subject",
             subject=normalized.subject,
         )
+    normalized = _canonicalize_metric_references(
+        normalized,
+        registry,
+    )
     if normalized.view not in subject.allowed_views:
         _raise_contract(
             normalized,
@@ -629,6 +683,38 @@ def _normalize_and_validate_spec(
                 limit=normalized.limit,
             )
     return normalized
+
+
+def _canonicalize_metric_references(
+    spec: QuerySpec,
+    registry: CapabilityRegistry,
+) -> QuerySpec:
+    def metric_id(value: str) -> str:
+        base = _base_id(value)
+        metric = registry.metric(spec.subject, base)
+        return metric.metric_id if metric is not None else base
+
+    metrics = tuple(metric_id(item) for item in spec.metrics)
+    output_projection = tuple(
+        metric_id(item) for item in spec.output_projection
+    )
+    order_by = tuple(
+        (
+            {
+                **item,
+                "field": metric_id(str(item.get("field") or "")),
+            }
+            if isinstance(item, Mapping)
+            else metric_id(str(item))
+        )
+        for item in spec.order_by
+    )
+    return replace(
+        spec,
+        metrics=metrics,
+        output_projection=output_projection,
+        order_by=order_by,
+    )
 
 
 def _normalize_trend_dimensions(
@@ -936,13 +1022,16 @@ def _effective_output_ids(
     metrics: tuple[str, ...],
 ) -> tuple[str, ...]:
     if spec.output_projection:
-        values = tuple(
+        projected = tuple(
             _base_id(item) for item in spec.output_projection
         )
+        values = (*projected, *dimensions, *metrics)
     elif spec.view in _METRIC_ONLY_VIEWS:
         values = metrics
     elif spec.view in _GROUPED_VIEWS:
         values = (*dimensions, *metrics)
+    elif dimensions:
+        values = dimensions
     else:
         values = ()
     return tuple(dict.fromkeys(value for value in values if value))

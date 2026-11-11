@@ -4,6 +4,7 @@ from collections.abc import Mapping
 
 from sqlglot import exp
 
+from ...metrics.semantics import aggregation_from_expression
 from ..models import MdlMetricBinding, MdlQueryContract, SqlIssue
 from .ast_facts import (
     canonical_expression,
@@ -240,19 +241,109 @@ def _metric_shape_issues(
                 },
             )
         )
-    if not contains_aggregate(projection):
+    if metric.aggregation == "row":
+        if contains_aggregate(projection):
+            issues.append(
+                _metric_reason_issue(
+                    metric,
+                    "row_metric_was_aggregated",
+                )
+            )
+        elif not _row_metric_grain_is_safe(
+            contract,
+            metric,
+            aliases=aliases,
+            dialect=dialect,
+        ):
+            issues.append(
+                _metric_reason_issue(
+                    metric,
+                    "metric_grain_unsafe",
+                )
+            )
+    elif not contains_aggregate(projection):
         issues.append(
-            sql_issue(
-                "invalid_view_shape",
-                path="$.projections",
-                evidence={
-                    "metric": metric.metric_id,
-                    "expected_expression": metric.expression,
-                    "reason": "aggregate_metric_missing",
-                },
+            _metric_reason_issue(
+                metric,
+                "aggregate_metric_missing",
+            )
+        )
+    else:
+        actual_aggregation = aggregation_from_expression(
+            projection.sql(dialect=dialect)
+        )
+        if actual_aggregation != metric.aggregation:
+            issues.append(
+                _metric_reason_issue(
+                    metric,
+                    "aggregate_metric_kind_mismatch",
+                    actual_aggregation=actual_aggregation,
+                )
+            )
+    if (
+        metric.aggregation != "row"
+        and not metric.fanout_safe
+        and metric.grain
+        and metric.grain != contract.subject
+    ):
+        issues.append(
+            _metric_reason_issue(
+                metric,
+                "metric_requires_own_grain",
             )
         )
     return tuple(issues)
+
+
+def _row_metric_grain_is_safe(
+    contract: MdlQueryContract,
+    metric: MdlMetricBinding,
+    *,
+    aliases: Mapping[str, str],
+    dialect: str,
+) -> bool:
+    identity = str(metric.identity or "")
+    if "." not in identity:
+        return False
+    identity_model, identity_column = identity.split(".", 1)
+    if (
+        metric.grain == contract.subject
+        and identity_model == contract.root_model
+    ):
+        return True
+    expected = canonical_expression(
+        exp.column(identity_column, table=identity_model),
+        aliases=aliases,
+        contract=contract,
+        dialect=dialect,
+    )
+    return any(
+        canonical_expression(
+            parse_expression(value, dialect),
+            aliases=aliases,
+            contract=contract,
+            dialect=dialect,
+        )
+        == expected
+        for value in contract.group_by
+    )
+
+
+def _metric_reason_issue(
+    metric: MdlMetricBinding,
+    reason: str,
+    **extra: object,
+) -> SqlIssue:
+    return sql_issue(
+        "invalid_view_shape",
+        path="$.projections",
+        evidence={
+            "metric": metric.metric_id,
+            "expected_expression": metric.expression,
+            "reason": reason,
+            **extra,
+        },
+    )
 
 
 def _metric_output_alias(

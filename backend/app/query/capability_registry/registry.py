@@ -5,8 +5,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from ...services import schema_catalog
+from ...services import (
+    capability_mdl_projection,
+    schema_catalog,
+    wren_engine,
+)
+from ..metrics.semantics import validate_metric_semantics
 from .loader import CapabilityConfigError, load_capability_config
+from .mdl_facts import inherited_cube_metrics, merge_metric_facts
 from .models import (
     CapabilitySnapshot,
     DerivedMetricCapability,
@@ -23,6 +29,42 @@ from .models import (
     freeze_snapshot,
     thaw_snapshot,
 )
+
+
+def _upsert_metric(
+    metrics: dict[str, MetricCapability],
+    incoming: MetricCapability,
+    *,
+    subject: str,
+    existing_source: str,
+    incoming_source: str,
+) -> dict[str, MetricCapability]:
+    existing = metrics.get(incoming.metric_id)
+    if existing is None:
+        for metric in tuple(metrics.values()):
+            if (
+                incoming.metric_id in metric.aliases
+                or metric.metric_id in incoming.aliases
+            ):
+                existing = metric
+                break
+    if existing is None:
+        updated = dict(metrics)
+        updated[incoming.metric_id] = incoming
+        return updated
+    merged = merge_metric_facts(
+        existing,
+        incoming,
+        subject=subject,
+        metric_id=incoming.metric_id,
+        existing_source=existing_source,
+        incoming_source=incoming_source,
+    )
+    updated = dict(metrics)
+    if existing.metric_id != merged.metric_id:
+        updated.pop(existing.metric_id, None)
+    updated[merged.metric_id] = merged
+    return updated
 
 
 class CapabilityRegistry:
@@ -50,7 +92,6 @@ class CapabilityRegistry:
                 subject_id=str(subject_id),
                 base_table=str(raw.get("base_table") or ""),
                 mdl_model=str(raw.get("mdl_model") or ""),
-                joins=dict(raw.get("joins") or {}),
                 allowed_views=tuple(str(item) for item in raw.get("allowed_views") or ()),
                 entities=tuple(str(item) for item in raw.get("entities") or ()),
             )
@@ -77,6 +118,10 @@ class CapabilityRegistry:
                     physical_column=str(raw.get("physical_column") or ""),
                     requires_join=tuple(str(item) for item in raw.get("requires_join") or ()),
                     enum_key=str(raw.get("enum_key") or ""),
+                    status=str(raw.get("status") or "available"),
+                    unavailable_reason=str(
+                        raw.get("unavailable_reason") or ""
+                    ),
                 )
                 for field_id, raw in raw_fields.items()
                 if isinstance(raw, dict)
@@ -95,6 +140,23 @@ class CapabilityRegistry:
                     requires_join=tuple(str(item) for item in raw.get("requires_join") or ()),
                     propagate_across_groups=bool(
                         raw.get("propagate_across_groups", False)
+                    ),
+                    aliases=tuple(
+                        str(item)
+                        for item in raw.get("aliases") or ()
+                        if str(item).strip()
+                    ),
+                    aggregation=str(raw.get("aggregation") or ""),
+                    grain=str(raw.get("grain") or ""),
+                    identity=str(raw.get("identity") or ""),
+                    fanout_safe=raw.get("fanout_safe", False),
+                    source_kind=str(
+                        (raw.get("source") or {}).get("kind")
+                        or "resources"
+                    ),
+                    source_reference=str(
+                        (raw.get("source") or {}).get("reference")
+                        or f"metrics.yaml:{subject}.{metric_id}"
                     ),
                 )
                 for metric_id, raw in raw_metrics.items()
@@ -146,8 +208,33 @@ class CapabilityRegistry:
                 table=table,
                 column=column,
                 label=str(raw.get("label") or column),
+                display_column=str(raw.get("display_column") or ""),
                 values=values,
             )
+        for subject, subject_fields in fields.items():
+            for field_id, field in tuple(subject_fields.items()):
+                if not field.enum_key or "." not in field.enum_key:
+                    continue
+                table, column = field.enum_key.split(".", 1)
+                enum = enums.get((table, column))
+                if enum is None:
+                    raise CapabilityConfigError(
+                        f"unknown_enum_key: {field.enum_key}",
+                    )
+                qualifier = (
+                    field.expression.split(".", 1)[0]
+                    if "." in field.expression
+                    else subjects[subject].mdl_model
+                )
+                subject_fields[field_id] = replace(
+                    field,
+                    label=enum.label,
+                    expression=capability_mdl_projection.enum_case_expression(
+                        table,
+                        column,
+                        qualifier=qualifier,
+                    ),
+                )
         entities = {
             str(entity_id): EntityCapability(
                 entity_id=str(entity_id),
@@ -196,7 +283,9 @@ class CapabilityRegistry:
             calculators=dict(docs["calculators"]),
         )
         registry = cls(snapshot, kind)
+        registry._augment_mdl_subjects(kind)
         registry._augment_physical_fields(kind)
+        registry._augment_baseline_metrics()
         field_metadata = (
             docs["templates"].get("fields")
             if isinstance(docs["templates"], dict)
@@ -213,8 +302,11 @@ class CapabilityRegistry:
                     unavailable_reason=str(metadata.get("reason") or ""),
                 )
         registry._augment_numeric_metrics(metric_generation)
+        registry._augment_mdl_cube_metrics(kind)
         registry._augment_enums(kind)
+        registry._expand_metric_aliases()
         registry._validate_physical_fields(kind)
+        registry._validate_metric_semantics()
         registry._snapshot = freeze_snapshot(registry.snapshot)
         return registry
 
@@ -250,11 +342,19 @@ class CapabilityRegistry:
             metric_id: {
                 "label": metric.label,
                 "unit": metric.unit,
+                "aliases": list(metric.aliases),
                 "allowed_views": list(metric.allowed_views),
                 "requires_join": list(metric.requires_join),
                 "propagate_across_groups": metric.propagate_across_groups,
+                "aggregation": metric.aggregation,
+                "grain": metric.grain,
+                "identity": metric.identity,
+                "fanout_safe": metric.fanout_safe,
+                "source_kind": metric.source_kind,
+                "source_reference": metric.source_reference,
             }
-            for metric_id, metric in self.snapshot.metrics.get(subject, {}).items()
+            for metric_id in self.snapshot.metric_ids(subject)
+            for metric in (self.snapshot.metrics[subject][metric_id],)
         }
         derived_metric_details = {
             metric_id: {
@@ -339,8 +439,9 @@ class CapabilityRegistry:
         return PlannerCapabilityView(
             subject=subject,
             base_table=subject_cap.base_table,
+            description=subject_cap.description,
             fields=fields,
-            metrics=tuple(self.snapshot.metrics.get(subject, {})),
+            metrics=self.snapshot.metric_ids(subject),
             derived_metrics=tuple(self.snapshot.derived_metrics.get(subject, {})),
             allowed_views=subject_cap.allowed_views,
             reach_evidence=evidence,
@@ -360,7 +461,10 @@ class CapabilityRegistry:
         subject: str,
         metric_id: str,
     ) -> MetricCapability | None:
-        return self.snapshot.metrics.get(subject, {}).get(metric_id)
+        return self.snapshot.metric(subject, metric_id)
+
+    def resolve_metric_id(self, subject: str, metric_id: str) -> str:
+        return self.snapshot.resolve_metric_id(subject, metric_id)
 
     def derived_metric(
         self,
@@ -399,7 +503,7 @@ class CapabilityRegistry:
                     continue
                 subject_fields[field_id] = FieldCapability(
                     field_id=field_id,
-                    expression=f"{subject_id}.{field_id}",
+                    expression=f"{subject.mdl_model}.{field_id}",
                     label=str(column.get("label") or field_id),
                     data_type=str(column.get("type") or ""),
                     comment=str(column.get("comment") or ""),
@@ -408,6 +512,106 @@ class CapabilityRegistry:
                     physical_column=field_id,
                 )
             self.snapshot.fields[subject_id] = subject_fields
+
+    def _augment_mdl_subjects(self, kind: str) -> None:
+        mdl = wren_engine._load_mdl(
+            str(wren_engine._project_dir(kind))
+        )
+        raw_models = {
+            str(model.get("name") or ""): model
+            for model in mdl.get("models") or ()
+            if isinstance(model, Mapping)
+            and str(model.get("name") or "")
+        }
+        for subject_id, subject in tuple(
+            self.snapshot.subjects.items()
+        ):
+            if subject.mdl_model in raw_models:
+                continue
+            self.snapshot.subjects.pop(subject_id, None)
+            self.snapshot.fields.pop(subject_id, None)
+            self.snapshot.metrics.pop(subject_id, None)
+            self.snapshot.derived_metrics.pop(subject_id, None)
+        subjects_by_model: dict[str, list[str]] = {}
+        for subject_id, subject in self.snapshot.subjects.items():
+            subjects_by_model.setdefault(subject.mdl_model, []).append(
+                subject_id
+            )
+        mapped_models = set(subjects_by_model)
+        tables_by_model = mdl.get("tables_by_model") or {}
+        for model_name, model in raw_models.items():
+            description = str(
+                (model.get("properties") or {}).get("description")
+                or ""
+            ).strip()
+            if model_name in mapped_models:
+                subject_ids = subjects_by_model[model_name]
+                for subject_id in subject_ids:
+                    self.snapshot.subjects[subject_id] = replace(
+                        self.snapshot.subjects[subject_id],
+                        description=description,
+                    )
+            else:
+                table_reference = model.get("table_reference")
+                base_table = str(
+                    (
+                        table_reference.get("table")
+                        if isinstance(table_reference, Mapping)
+                        else ""
+                    )
+                    or tables_by_model.get(model_name)
+                    or model_name
+                )
+                self.snapshot.subjects[model_name] = SubjectCapability(
+                    subject_id=model_name,
+                    base_table=base_table,
+                    mdl_model=model_name,
+                    description=description,
+                    allowed_views=(
+                        "count",
+                        "sum",
+                        "avg",
+                        "distribution",
+                        "list",
+                        "detail",
+                        "top_records",
+                        "top_groups",
+                    ),
+                )
+                subject_ids = [model_name]
+            base_table = self.snapshot.subjects[subject_ids[0]].base_table
+            for subject_id in subject_ids:
+                subject_fields = dict(
+                    self.snapshot.fields.get(subject_id) or {}
+                )
+                for column in model.get("columns") or ():
+                    if not isinstance(column, Mapping):
+                        continue
+                    field_id = str(column.get("name") or "")
+                    if not field_id or field_id in subject_fields:
+                        continue
+                    description_text = str(
+                        (column.get("properties") or {}).get(
+                            "description"
+                        )
+                        or ""
+                    ).strip()
+                    data_type = str(column.get("type") or "")
+                    subject_fields[field_id] = FieldCapability(
+                        field_id=field_id,
+                        expression=f"{model_name}.{field_id}",
+                        filter_expression=f"{model_name}.{field_id}",
+                        label=field_id,
+                        data_type=data_type,
+                        comment=description_text,
+                        roles=_mdl_field_roles(
+                            field_id,
+                            data_type,
+                        ),
+                        physical_table=base_table,
+                        physical_column=field_id,
+                    )
+                self.snapshot.fields[subject_id] = subject_fields
 
     def _augment_enums(self, kind: str) -> None:
         catalog = schema_catalog.field_catalog(kind)
@@ -424,6 +628,7 @@ class CapabilityRegistry:
                     table=table_name,
                     column=column_name,
                     label=str(column.get("label") or column_name),
+                    display_column="",
                     values={
                         str(code): EnumValueCapability(
                             code=str(code),
@@ -433,6 +638,60 @@ class CapabilityRegistry:
                         for code, label in code_map.items()
                     },
                 )
+
+    def _augment_baseline_metrics(self) -> None:
+        for subject_id in self.snapshot.subjects:
+            metrics = dict(self.snapshot.metrics.get(subject_id) or {})
+            if "count" in metrics:
+                continue
+            baseline = MetricCapability(
+                metric_id="count",
+                expression="COUNT(*)",
+                label="数量",
+                allowed_views=(
+                    "count",
+                    "distribution",
+                    "top_groups",
+                    "trend",
+                ),
+                aggregation="count",
+                grain=subject_id,
+                identity=(
+                    f"{self.snapshot.subjects[subject_id].mdl_model}.id"
+                ),
+                fanout_safe=False,
+                source_kind="resources",
+                source_reference=f"baseline:count:{subject_id}",
+            )
+            metrics = _upsert_metric(
+                metrics,
+                baseline,
+                subject=subject_id,
+                existing_source="resources",
+                incoming_source="baseline",
+            )
+            self.snapshot.metrics[subject_id] = metrics
+
+    def _augment_mdl_cube_metrics(self, kind: str) -> None:
+        mdl = wren_engine._load_mdl(
+            str(wren_engine._project_dir(kind))
+        )
+        subject_by_model = {
+            subject.mdl_model: subject_id
+            for subject_id, subject in self.snapshot.subjects.items()
+        }
+        inherited = inherited_cube_metrics(mdl, subject_by_model)
+        for subject_id, cube_metrics in inherited.items():
+            metrics = dict(self.snapshot.metrics.get(subject_id) or {})
+            for metric_id, metric in cube_metrics.items():
+                metrics = _upsert_metric(
+                    metrics,
+                    metric,
+                    subject=subject_id,
+                    existing_source="resources",
+                    incoming_source="mdl",
+                )
+            self.snapshot.metrics[subject_id] = metrics
 
     def _augment_numeric_metrics(
         self,
@@ -479,26 +738,131 @@ class CapabilityRegistry:
                     ("max_", "MAX"),
                 ):
                     metric_id = f"{prefix}{field_id}"
-                    if metric_id in metrics:
-                        continue
                     expression = (
                         f"{aggregate}({{alias}}.{field.physical_column})"
                     )
                     if divisor:
                         expression = f"{expression} / {divisor}"
-                    metrics[metric_id] = MetricCapability(
+                    aggregate_views = {
+                        "SUM": "sum",
+                        "AVG": "avg",
+                    }
+                    allowed_views = tuple(
+                        item
+                        for item in (
+                            "count",
+                            aggregate_views.get(aggregate),
+                            "distribution",
+                            "top_groups",
+                            "trend",
+                        )
+                        if item
+                    )
+                    generated = MetricCapability(
                         metric_id=metric_id,
                         expression=expression,
                         label=f"{field.label}{'合计' if prefix == 'sum_' else '平均' if prefix == 'avg_' else '最小' if prefix == 'min_' else '最大'}",
                         unit=output_unit,
-                        allowed_views=(
-                            "count",
-                            "distribution",
-                            "top_groups",
-                            "trend",
+                        allowed_views=allowed_views,
+                        aggregation={
+                            "SUM": "sum",
+                            "AVG": "avg",
+                            "MIN": "min",
+                            "MAX": "max",
+                        }[aggregate],
+                        grain=subject_id,
+                        identity=(
+                            f"{self.snapshot.subjects[subject_id].mdl_model}.id"
+                        ),
+                        fanout_safe=False,
+                        source_kind="resources",
+                        source_reference=(
+                            "_field_metric_generation:"
+                            f"{subject_id}.{field_id}"
                         ),
                     )
+                    metrics = _upsert_metric(
+                        metrics,
+                        generated,
+                        subject=subject_id,
+                        existing_source="resources",
+                        incoming_source="generated_field",
+                    )
             self.snapshot.metrics[subject_id] = metrics
+
+    def _expand_metric_aliases(self) -> None:
+        for subject_id, raw_metrics in tuple(
+            self.snapshot.metrics.items()
+        ):
+            canonical_metrics: dict[str, MetricCapability] = {}
+            for metric_id, metric in raw_metrics.items():
+                if metric_id != metric.metric_id:
+                    raise CapabilityConfigError(
+                        "canonical_metric_key_mismatch: "
+                        f"{subject_id}.{metric_id} -> {metric.metric_id}",
+                    )
+                canonical_metrics = _upsert_metric(
+                    canonical_metrics,
+                    metric,
+                    subject=subject_id,
+                    existing_source="resources",
+                    incoming_source="resources",
+                )
+            aliases: dict[str, str] = {}
+            for metric_id, metric in canonical_metrics.items():
+                for alias in metric.aliases:
+                    if not alias or alias == metric_id:
+                        continue
+                    existing = aliases.get(alias)
+                    if existing and existing != metric_id:
+                        raise CapabilityConfigError(
+                            "duplicate_metric_alias: "
+                            f"{subject_id}.{alias}",
+                            evidence={
+                                "code": "duplicate_metric_alias",
+                                "subject": subject_id,
+                                "alias": alias,
+                                "owners": [existing, metric_id],
+                            },
+                        )
+                    aliases[alias] = metric_id
+            collisions = sorted(set(aliases) & set(canonical_metrics))
+            if collisions:
+                raise CapabilityConfigError(
+                    "metric_alias_collision: "
+                    + ", ".join(collisions),
+                )
+            expanded = dict(canonical_metrics)
+            for alias, canonical_id in aliases.items():
+                expanded[alias] = canonical_metrics[canonical_id]
+            self.snapshot.metrics[subject_id] = expanded
+
+    def _validate_metric_semantics(self) -> None:
+        for subject_id, metrics in self.snapshot.metrics.items():
+            for metric_id, metric in metrics.items():
+                if metric_id != metric.metric_id:
+                    continue
+                issues = validate_metric_semantics(
+                    metric,
+                    subject=subject_id,
+                )
+                if not issues:
+                    continue
+                raise CapabilityConfigError(
+                    f"invalid_metric_semantics: {subject_id}.{metric_id}",
+                    evidence={
+                        "subject": subject_id,
+                        "metric_id": metric_id,
+                        "issues": [
+                            {
+                                "code": issue.code,
+                                "message": issue.message,
+                                "evidence": dict(issue.evidence),
+                            }
+                            for issue in issues
+                        ],
+                    },
+                )
 
     def _validate_physical_fields(self, kind: str) -> None:
         catalog = schema_catalog.field_catalog(kind)
@@ -507,6 +871,30 @@ class CapabilityRegistry:
             for table in catalog.get("tables") or []
             for column in table.get("columns") or []
         }
+        mdl = wren_engine._load_mdl(
+            str(wren_engine._project_dir(kind))
+        )
+        tables_by_model = mdl.get("tables_by_model") or {}
+        for model in mdl.get("models") or ():
+            if not isinstance(model, Mapping):
+                continue
+            model_name = str(model.get("name") or "")
+            table_reference = model.get("table_reference")
+            table = str(
+                (
+                    table_reference.get("table")
+                    if isinstance(table_reference, Mapping)
+                    else ""
+                )
+                or tables_by_model.get(model_name)
+                or model_name
+            )
+            physical.update(
+                (table, str(column.get("name") or ""))
+                for column in model.get("columns") or ()
+                if isinstance(column, Mapping)
+                and str(column.get("name") or "")
+            )
         for subject_fields in self.snapshot.fields.values():
             for field in subject_fields.values():
                 if not field.physical_table or not field.physical_column:
@@ -516,6 +904,43 @@ class CapabilityRegistry:
                     raise CapabilityConfigError(
                         f"unknown_physical_field: {field.physical_table}.{field.physical_column}"
                     )
+
+
+def _mdl_field_roles(field_name: str, data_type: str) -> tuple[str, ...]:
+    roles: list[str] = ["output"]
+    lowered_name = field_name.lower()
+    lowered_type = data_type.lower()
+    if field_name == "id":
+        roles.extend(("primary", "identity", "dimension"))
+    elif lowered_name.endswith("_id"):
+        roles.extend(("fk", "dimension"))
+    if field_name == "del_flag":
+        roles.append("soft_delete")
+    if "time" in lowered_name or "date" in lowered_type:
+        roles.extend(("time", "dimension"))
+    is_text = any(
+        token in lowered_type
+        for token in (
+            "char",
+            "text",
+            "string",
+            "enum",
+            "bool",
+            "date",
+            "time",
+            "json",
+        )
+    )
+    if is_text:
+        roles.append("dimension")
+    if lowered_name.endswith("code") or lowered_name.endswith("number"):
+        roles.extend(("code", "dimension"))
+    if any(
+        token in lowered_type
+        for token in ("int", "decimal", "double", "float", "numeric", "number")
+    ):
+        roles.append("numeric")
+    return tuple(dict.fromkeys(roles))
 
 
 _MDL_COMPILATION_KEYS = frozenset(

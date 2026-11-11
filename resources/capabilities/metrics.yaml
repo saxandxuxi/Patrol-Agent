@@ -4,6 +4,11 @@ metrics:
       expression: COUNT(*)
       label: 数量
       unit: 处
+      aggregation: count
+      grain: disease
+      identity: disease.id
+      fanout_safe: false
+      aliases: [disease_count]
       allowed_views:
       - count
       - distribution
@@ -13,22 +18,32 @@ metrics:
       expression: SUM({alias}.area)
       label: 总面积
       unit: ㎡
-      allowed_views: [count, distribution, top_groups, trend]
+      aggregation: sum
+      grain: disease
+      identity: disease.id
+      fanout_safe: false
+      aliases: [sum_area]
+      allowed_views: [count, sum, distribution, top_groups, trend]
     average_area:
       expression: AVG({alias}.area)
       label: 平均面积
       unit: ㎡
-      allowed_views: [count, distribution, top_groups, trend]
-    sum_disease_length:
-      expression: SUM({alias}.effective_disease_length)
-      label: 病害总长度
-      unit: 米
-      allowed_views: [count, distribution, top_groups, trend]
+      aggregation: avg
+      grain: disease
+      identity: disease.id
+      fanout_safe: false
+      aliases: [avg_area]
+      allowed_views: [count, avg, distribution, top_groups, trend]
     sum_effective_disease_length:
       expression: SUM({alias}.effective_disease_length)
       label: 有效病害总长度
       unit: 米
-      allowed_views: [count, distribution, top_groups, trend]
+      aggregation: sum
+      grain: disease
+      identity: disease.id
+      fanout_safe: false
+      aliases: [sum_disease_length]
+      allowed_views: [count, sum, distribution, top_groups, trend]
     # 条状病害按 0.2 米宽把长度换算成面积：热点桩号段的“换算面积”口径。
     # 口径自带病害范围（条状修补是巡检库注册的条状病害类型），缺类型过滤时
     # 也不会把坑槽、垃圾这类非条状病害的长度算进来。
@@ -36,23 +51,42 @@ metrics:
       expression: SUM(CASE WHEN {alias}.problem_type_name = '条状修补' THEN {alias}.effective_disease_length * 0.2 ELSE 0 END)
       label: 条状病害换算面积
       unit: ㎡
-      allowed_views: [count, distribution, top_groups, trend]
+      aggregation: sum
+      grain: disease
+      identity: disease.id
+      fanout_safe: false
+      allowed_views: [count, sum, distribution, top_groups, trend]
     # 长度指标只认语义字段 effective_disease_length：原始列 disease_length
     # 大面积为空（坑槽 44 条全为空），自动生成的 avg_/max_/min_ 会算出 NULL。
     avg_disease_length:
       expression: AVG({alias}.effective_disease_length)
       label: 平均病害长度
       unit: 米
-      allowed_views: [count, distribution, top_groups, trend]
+      aggregation: avg
+      grain: disease
+      identity: disease.id
+      fanout_safe: false
+      aliases: [avg_effective_disease_length]
+      allowed_views: [count, avg, distribution, top_groups, trend]
     max_disease_length:
       expression: MAX({alias}.effective_disease_length)
       label: 最长病害长度
       unit: 米
+      aggregation: max
+      grain: disease
+      identity: disease.id
+      fanout_safe: false
+      aliases: [max_effective_disease_length]
       allowed_views: [count, distribution, top_groups, trend]
     min_disease_length:
       expression: MIN({alias}.effective_disease_length)
       label: 最短病害长度
       unit: 米
+      aggregation: min
+      grain: disease
+      identity: disease.id
+      fanout_safe: false
+      aliases: [min_effective_disease_length]
       allowed_views: [count, distribution, top_groups, trend]
     # “多少种病害类型”是去重计数，不是记录条数：没有这条指标时模型只能拿
     # count 顶上，把 21413 处病害说成 21413 种类型。
@@ -60,21 +94,74 @@ metrics:
       expression: COUNT(DISTINCT {alias}.problem_type_name)
       label: 病害类型种数
       unit: 种
+      aggregation: count_distinct
+      grain: disease
+      identity: disease.id
+      fanout_safe: false
       allowed_views: [count, distribution, top_groups, trend]
     route_length_km:
       expression: "{route}.route_length_km"
       label: 路线长度
       unit: km
+      aggregation: row
+      grain: route
+      identity: route.id
+      fanout_safe: false
       allowed_views: [count, distribution, top_groups]
       requires_join: [route]
       # 路线长度只由路线决定；当同一结果内只有一条且数值一致时，
       # 可传播到缺失的枚举分组（如某方向 0 处），不能凭空补 0。
       propagate_across_groups: true
+    sum_pile_distance:
+      expression: SUM({alias}.pile_distance)
+      label: 桩号米数合计
+      unit: m
+      aggregation: sum
+      grain: disease
+      identity: disease.id
+      fanout_safe: false
+      aliases: [sum_pile_segment_500m, sum_pile_number_segment_500m, sum_pile_number_segment, sum_pile_segment]
+      allowed_views: [count, sum, distribution, top_groups, trend]
+    avg_pile_distance:
+      expression: AVG({alias}.pile_distance)
+      label: 桩号米数平均
+      unit: m
+      aggregation: avg
+      grain: disease
+      identity: disease.id
+      fanout_safe: false
+      aliases: [avg_pile_segment_500m, avg_pile_number_segment_500m, avg_pile_number_segment, avg_pile_segment]
+      allowed_views: [count, avg, distribution, top_groups, trend]
+    min_pile_distance:
+      expression: MIN({alias}.pile_distance)
+      label: 桩号米数最小
+      unit: m
+      aggregation: min
+      grain: disease
+      identity: disease.id
+      fanout_safe: false
+      aliases: [min_pile_segment_500m, min_pile_number_segment_500m, min_pile_number_segment, min_pile_segment]
+      allowed_views: [count, distribution, top_groups, trend]
+    max_pile_distance:
+      expression: MAX({alias}.pile_distance)
+      label: 桩号米数最大
+      unit: m
+      aggregation: max
+      grain: disease
+      identity: disease.id
+      fanout_safe: false
+      aliases: [max_pile_segment_500m, max_pile_number_segment_500m, max_pile_number_segment, max_pile_segment]
+      allowed_views: [count, distribution, top_groups, trend]
   patrol:
     count:
       expression: COUNT(*)
       label: 数量
       unit: 次
+      aggregation: count
+      grain: patrol
+      identity: patrol.id
+      fanout_safe: false
+      aliases: [count_task]
       allowed_views: [count, distribution, top_groups, trend]
     # 结果行仍是一次巡检任务，病害数量只是该任务关联病害的聚合；
     # 不能把 patrol.count（任务次数）冒充病害检出数。
@@ -82,6 +169,10 @@ metrics:
       expression: COUNT(DISTINCT {disease}.id)
       label: 任务关联病害数
       unit: 处
+      aggregation: count_distinct
+      grain: patrol
+      identity: patrol.id
+      fanout_safe: false
       allowed_views: [count, distribution, top_groups, trend]
       requires_join: [disease]
     patrol_mileage:
@@ -89,60 +180,101 @@ metrics:
       expression: SUM({alias}.patrol_mileage) / 1000.0
       label: 巡检里程
       unit: km
-      allowed_views: [count, distribution, top_groups, trend]
+      aggregation: sum
+      grain: patrol
+      identity: patrol.id
+      fanout_safe: false
+      aliases: [sum_patrol_mileage]
+      allowed_views: [count, sum, distribution, top_groups, trend]
   route:
     count:
       expression: COUNT(*)
       label: 数量
       unit: 条
+      aggregation: count
+      grain: route
+      identity: route.id
+      fanout_safe: false
       allowed_views: [count, distribution, top_groups]
   section:
     count:
       expression: COUNT(*)
       label: 数量
       unit: 条
+      aggregation: count
+      grain: section
+      identity: section.id
+      fanout_safe: false
       allowed_views: [count, distribution, top_groups]
   pile_point:
     count:
       expression: COUNT(*)
       label: 数量
       unit: 个
+      aggregation: count
+      grain: pile_point
+      identity: pile_point.id
+      fanout_safe: false
       allowed_views: [count, distribution, top_groups]
   asset:
     count:
       expression: COUNT(*)
       label: 数量
       unit: 条
+      aggregation: count
+      grain: asset
+      identity: asset.id
+      fanout_safe: false
       allowed_views: [count, distribution, top_groups]
   work_order:
     count:
       expression: COUNT(*)
       label: 数量
       unit: 个
+      aggregation: count
+      grain: work_order
+      identity: work_order.id
+      fanout_safe: false
       allowed_views: [count, distribution, top_groups, trend]
   bridge:
     count:
       expression: COUNT(*)
       label: 数量
       unit: 座
+      aggregation: count
+      grain: bridge
+      identity: bridge.id
+      fanout_safe: false
       allowed_views: [count, distribution, top_groups]
   tunnel:
     count:
       expression: COUNT(*)
       label: 数量
       unit: 座
+      aggregation: count
+      grain: tunnel
+      identity: tunnel.id
+      fanout_safe: false
       allowed_views: [count, distribution, top_groups]
   slope:
     count:
       expression: COUNT(*)
       label: 数量
       unit: 处
+      aggregation: count
+      grain: slope
+      identity: slope.id
+      fanout_safe: false
       allowed_views: [count, distribution, top_groups]
   project:
     count:
       expression: COUNT(*)
       label: 数量
       unit: 个
+      aggregation: count
+      grain: project
+      identity: project.id
+      fanout_safe: false
       allowed_views: [count, distribution, top_groups]
   _field_metric_generation:
     # 自动生成的 SUM/AVG/MIN/MAX 必须沿用字段的物理单位换算，不能因为换了一个

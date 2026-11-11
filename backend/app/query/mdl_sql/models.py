@@ -111,6 +111,10 @@ class MdlMetricBinding:
     unit: str
     source: str
     requires_join: tuple[str, ...]
+    aggregation: str = ""
+    grain: str = ""
+    identity: str = ""
+    fanout_safe: bool = False
 
 
 @dataclass(frozen=True)
@@ -158,6 +162,7 @@ class MdlQueryContract:
     intermediate_models: tuple[str, ...]
     mandatory_predicates: tuple[MdlFilterBinding, ...]
     output_aliases: Mapping[str, str]
+    question: str = ""
 
 
 @dataclass(frozen=True)
@@ -202,6 +207,7 @@ class PromptContextBundle:
     contract: MdlQueryContract
     business_capability: CapabilityContext
     mdl_subset: MdlContext
+    assist_evidence: tuple[Mapping[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -209,6 +215,7 @@ class PromptContextBundle:
             "contract": self.contract,
             "business_capability": self.business_capability.to_dict(),
             "mdl_subset": self.mdl_subset.to_dict(),
+            "assist_evidence": _plain(self.assist_evidence),
             "relationship_subgraph": list(
                 self.mdl_subset.relationships
             ),
