@@ -3,6 +3,17 @@ query_shapes:
     answer_operations:
       single_result:
         meaning: 一个查询视图即可回答问题。
+      scalar_with_details:
+        meaning: 同一用户范围内既要一个总体标量，又要一份对象明细列表。
+        scalar_views:
+        - count
+        - sum
+        - avg
+        detail_views:
+        - list
+        - detail
+        same_subject: true
+        same_filters: true
       scalar_comparison:
         meaning: 只比较两个或多个已有数值的大小或谁多谁少，不产生新的算术数字。
       scalar_difference:
@@ -19,6 +30,31 @@ query_shapes:
         - distribution
         - top_groups
         - trend
+      group_total:
+        meaning: 同时返回分组结果和同一用户范围内的总体值。
+        required_dependency_views:
+        - distribution
+        - top_groups
+        - trend
+        required_aggregate:
+          same_subject: true
+          same_filters: true
+          no_dimensions: true
+          same_metrics: true
+      group_change:
+        meaning: 对齐前次与后次两个同形分组结果，逐组计算数量差值或百分比变化，并识别最大增加。
+        required_tool: calculate_group_change
+        required_operation:
+        - subtract
+        - percentage_change
+        required_dependency_views:
+        - distribution
+        - top_groups
+        required_same:
+        - subject
+        - kind
+        - dimensions
+        - metric
       entity_set_comparison:
         meaning: 比较两个真实批次之间新增或消失的病害、巡检等实体记录。
         required_assertion: dataset_comparison
@@ -48,6 +84,8 @@ query_shapes:
         detail_view: top_records
         require_positive_limit: true
         require_order_by: true
+      ranking_requires_order_by: true
+      ordered_complete_has_no_limit: true
     time_scope:
       new_records_without_baseline:
         meaning: 用户只给出一个时间范围并询问新增情况，未给出上一周期或上一次巡查作为比较基线。
@@ -63,6 +101,22 @@ query_shapes:
         meaning: 用户明确要求与上一周期、上一季度或上一次巡查比较。
         required_shape: 为每个周期生成同形数据节点，再由 post_calc 计算或解释差值。
         entity_scope_note: 如果比较对象是“新增或消失的病害/任务实体”，按 entity_set_comparison 的明细与身份字段契约执行，不能只见“比较”就做 COUNT 相减。
+      recent_patrol_batches:
+        meaning: 用户要求最近 N 次巡查或最近 N 个巡检批次时，先建立真实巡检批次序列，再由后续病害事实消费该序列。
+        trusted: false
+        source: 用户原话与已登记的时间、批次字段
+        batch_entity: patrol
+        batch_dimension: patrol_number
+        required_sequence:
+          - patrol_batch
+          - disease
+        required_assertions:
+          - recent_window
+          - preserve_user_scope
+        rules:
+          - 不得把最近巡检直接解释成 create_time 排序后代替批次序列。
+          - 后续病害节点必须通过结构化 inputs 消费批次维度，并继续使用原路线、时间、病害等范围。
+          - 最终病害分布按真实指标排序，不得用时间排序冒充数量或面积排名。
     segment_patrol_evidence:
       meaning: 巡检任务没有完整桩号覆盖字段时，用户仍可按“该路段实际产生过病害记录”的巡检批次提问；该口径只证明任务在该路段留下了病害记录，不证明任务完整巡检了整段。
       allowed_subject: disease
@@ -120,6 +174,16 @@ query_shapes:
       - outer_group_dimension
       - within_group_ranking_dimension
       limit_meaning: 每个外层分区内保留的行数
+    relation_existence:
+      meaning: 用户要求当前主体至少存在一条已登记关联记录时，使用关系存在谓词，不把关联数量塞进明细或分组指标。
+      filter:
+        op: exists
+        raw_value: true
+      rules:
+      - 只能使用当前主体 fields 中 roles 包含 relation_exists 的字段。
+      - 关系拓扑和 JOIN 条件由 MDL 关系目录提供，能力配置只登记业务谓词和关系 ID。
+      - 关系存在字段只能进入 filters，不能进入 output_projection、dimensions 或 metrics。
+      - 不得用版本号、计数排序或全量关联代替存在性判断。
   count:
     allowed_views:
     - count
@@ -245,3 +309,4 @@ query_shapes:
     - not_null
     - empty
     - not_empty
+    - exists

@@ -11,9 +11,20 @@ if TYPE_CHECKING:
     from .capability_registry import CapabilityRegistry
 
 
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _jsonable(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_jsonable(item) for item in value]
+    return value
+
+
 def _json(value: Any) -> str:
     return json.dumps(
-        value,
+        _jsonable(value),
         ensure_ascii=False,
         sort_keys=True,
         default=str,

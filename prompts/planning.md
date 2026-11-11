@@ -4,6 +4,8 @@
 调用：orchestrator._llm_tasks() → chat_json()
 模型：role_model("planner")
 占位符：<<question>> 用户问题（已做上下文补全） | <<known_damage_types>> 已知病害类型
+协议边界：本文件只定义旧 OrchestratorPlan。`{{key}}`、`needs`、`produces`
+          仅属于旧协议；QuerySpec 只接受 `depends_on` 和结构化 `inputs`。
 说明：只在"看起来需要多步"的问题上用；简单问题允许只给一步（代码会按单任务走）。
       action 由代码校验并映射到 query_data / query_images / query_knowledge /
       analyze / post_calc 等执行步骤。

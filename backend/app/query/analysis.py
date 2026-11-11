@@ -2837,7 +2837,6 @@ def analyze_single_turn(
     intent: str = "",
 ) -> QueryPlan:
     feedback = str(planning_feedback or "")
-    audit_evidence = detect_evidence(str(question or "").strip(), kind)
     issues: list[dict[str, Any]] = []
     raw_draft: dict[str, Any] | None = None
     repaired_signatures: set[str] = set()
@@ -3070,8 +3069,6 @@ def analyze_single_turn(
         verdict = audit_query_plan(
             str(question or "").strip(),
             plan,
-            assist_evidence=audit_evidence,
-            answer_operations=answer_operation_catalog(registry),
             capabilities=_audit_capabilities(plan, registry, reach),
             registry=registry,
         )
@@ -3189,8 +3186,6 @@ def analyze_single_turn(
                 repaired = audit_query_plan(
                     str(question or "").strip(),
                     patched,
-                    assist_evidence=audit_evidence,
-                    answer_operations=answer_operation_catalog(registry),
                     capabilities=_audit_capabilities(
                         patched,
                         registry,

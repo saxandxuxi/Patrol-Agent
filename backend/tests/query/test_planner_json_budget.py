@@ -52,7 +52,7 @@ class PlannerJsonBudgetTests(unittest.TestCase):
         prompt = "\n".join(
             item["content"] for item in chat_json.call_args.args[0]
         )
-        self.assertIn("当前日期：", prompt)
+        self.assertIn("共享查询语义：", prompt)
 
 
 if __name__ == "__main__":

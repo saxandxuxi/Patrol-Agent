@@ -52,14 +52,14 @@ cd backend
 | `planning.md` | 规划完整回答所需的执行步骤 | `orchestrator._llm_tasks()` | planner | `question`, `known_damage_types` |
 | `promotion_exam_generate.md` | 生成晋级考试题 | `evals.promotion.case_factory` | planner | `business_document`, `exclude_ids`, `exclude_questions`, `case_count`, `capability_gaps`, `unavailable_fields`, `batch_focus`, `retry_evidence` |
 | `query_holdout_judge.md` | held-out 语义验收裁判 | `evals.run_holdout_eval` | verify | `business_document`, `case_json`, `execution_json` |
-| `query_spec.md` | 把单轮问题转换为 QuerySpec | `query.analysis.analyze_single_turn()` | semantic | `question`, `kind`, `current_date`, `capabilities`, `schema`, `reach`, `assist_evidence`, `planning_feedback` |
-| `query_spec_audit.md` | 独立审计 QuerySpec 是否完整可执行 | `query.audit.audit_query_plan()` | verify | `question`, `current_date`, `plan_json`, `answer_operations`, `assist_evidence` |
+| `query_spec.md` | 把单轮问题转换为 QuerySpec | `query.analysis.analyze_single_turn()` | semantic | `question`, `kind`, `current_date`, `query_semantics`, `answer_operations`, `supported_views`, `capabilities`, `schema`, `reach`, `assist_evidence`, `planning_feedback` |
+| `query_spec_audit.md` | 独立审计 QuerySpec 是否完整可执行 | `query.audit.audit_query_plan()` | verify | `question`, `plan_json`, `query_semantics`, `answer_operations`, `supported_views`, `capabilities` |
 | `query_spec_repair.md` | 按结构化票据局部修复 QuerySpec | `query.planning_repair.request_repair()` | semantic | `question`, `draft`, `issue`, `capabilities`, `assist_evidence` |
 | `react_controller.md` | 异常发生时选择重试、补证据或止损 | `react_agent._deviation_decision()` | controller | `goal`, `current_step`, `frozen_query`, `observation_error`, `failure`, `allowed_tools`, `previous_attempts`, `helper_observations`, `coverage_and_values` |
 | `repair_plan.md` | 规划契约失败后的有界重规划 | `orchestrator._repair_plan()` | planner | `question`, `planning_question`, `plan`, `issues`, `known_damage_types` |
 | `repair_presentation.md` | 修正最终表达和单位，不改查询 | `agent._repair_result_presentation()` | semantic → verify | `question`, `reply`, `sql`, `columns`, `rows`, `reason` |
 | `result_summary.md` | 模板摘要失败时生成中文结果摘要 | `agent._llm_result_summary()` | semantic | `message`, `columns`, `preview`, `examples` |
-| `subject_router.md` | 从能力注册表中选择查询主体 | `capability_registry.resolve_subject()` | semantic | `question`, `subjects`, `grounding_evidence` |
+| `subject_router.md` | 从能力注册表中选择查询主体 | `capability_registry.resolve_subject()` | semantic | `question`, `subjects`, `grounding_evidence`, `query_semantics` |
 | `table_analysis.md` | 仅基于紧凑证据分析已有数值 | `calculations.domain.analysis.analyze_evidence()` | semantic | `question`, `evidence`, `requirements` |
 | `template_review.md` | 审核自动沉淀模板能否安全复用 | `templatizer.review_template()` | sql | `question`, `sql`, `conditions` |
 | `templatize_classify.md` | 判断剩余字面值能否参数化 | `templatizer.mine_sql()` | semantic | `question`, `sql`, `suspicious`, `table_fields`, `plan`, `hints` |

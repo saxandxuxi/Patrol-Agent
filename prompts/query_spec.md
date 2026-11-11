@@ -36,11 +36,10 @@
 - 路线台账属性 → route
 - 路段台账属性 → section
 不能因为句子里出现“病害”就把主体定为 disease；如果问的是工单本身，主体是 work_order。
-如果每一行答案是一次巡检任务，而病害数量/面积只是该任务的关联聚合，
-先按 `query_semantics.task_disease_evidence` 区分口径：
-- 只问任务自身属性，或不带病害属性条件的关联病害总数时，主体是 patrol，并使用登记的关联聚合指标。
-- 要求任务满足病害类型、面积、长度、时间等病害属性条件时，病害记录才是事实主体；
-  使用 disease，关联到巡检任务后按 `task_number` 分组，禁止把病害属性字段用于过滤 patrol。
+如果每一行答案是一次巡检任务，而病害数量、面积或病害属性只是关联证据，
+必须按 `query_semantics.task_disease_evidence` 的 `allowed_subject`、
+`required_identity_join` 和 `batch_dimensions` 选择主体、关联和批次维度。
+不得把病害属性字段直接用于另一个主体，也不得用别名维度冒充登记的身份字段。
 
 第三步：识别比较结构。显式列出多个日期或多个对象进行“对比/比较/差异”时：
 - 每个日期或对象各生成一个相同 subject、view、metrics、dimensions、output_projection 的 query_data。
@@ -110,11 +109,10 @@
     再由 `post_calc` 解释各状态占比和完成情况。不能自行增加
     `patrol_status='已完成'`、`'进行中'` 等过滤条件；只有用户明确说“只看已完成/未完成”时
     才生成状态过滤。
-18. 用户要求“最近 N 次巡查/最近 N 个巡检批次”等时间范围时，先生成一个巡检批次节点：
-    按真实时间字段倒序、`limit=N`，输出可稳定关联的 `patrol_number`；后续病害节点的
-    `inputs` 使用该节点的 `patrol_number`，`depends_on` 同时声明依赖。后续节点不能再自行
-    `limit=N`，也不要用 `patrol_id` 作为病害分组字段。批次节点必须声明
-    `required_assertions: ["recent_window", "preserve_user_scope"]`。
+18. “最近 N 次巡查/最近 N 个巡检批次”必须执行
+    `query_semantics.time_scope.recent_patrol_batches` 的 `required_sequence`、
+    `required_assertions` 和 `rules`；用户范围直接进入共享语义，不在本提示词另写一套
+    批次识别规则。
 19. `dimensions` 与 `output_projection` 只能使用当前 subject 模型中真实支持、且需要展示一次的
     物理字段。多个别名落到同一物理列时只输出一次，不能把同义字段并列输出成重复列。
 20. 用户要求“所有设备、有哪些对象、去重列出、唯一值”等集合时，把集合字段写入
@@ -214,12 +212,8 @@
     `pile_segment_<N>m` 分组，也不能用
     `luge_name` 或原始桩号字段当分组维度。
     过滤字段只能是能力视图里 `status=available` 的字段，并按字段目录给出的用法使用。
-33. 极值和排名问法（最大、最小、最多、最少、最高、最低、最严重、排名、前几名）必须
-    声明 `order_by`（排序字段 + `direction`）：返回明细用 `top_records`，返回分组用
-    `top_groups`。带 `limit` 却没有排序的明细查询返回的是任意几条记录，会被执行前
-    契约直接拒绝。排序口径必须用用户同句里给出的可量化指标（数量、总面积、平均面积、
-    换算面积、长度等）；“最严重/最突出”在这里只是排名语气词，不得据此把
-    `damage_type` 或 `history_damage_interval` 等未要求的维度或指标塞进计划。
+33. 极值、排名和 TopN 的视图、排序、limit 与完整结果口径只读取
+    `query_semantics.view_selection`，不得在本提示词中另行推导。
 34. `metrics` 必须落在聚合视图上：只能配 `count`、`sum`、`avg`、`distribution`、
     `trend`、`top_groups`。`list`、`detail`、`data` 只返回逐条记录，声明指标会被
     执行前契约拒绝。
@@ -246,12 +240,9 @@
 
 ## E. 批次、集合比较与最终主体
 
-40. `<<capabilities>>` 中的 `query_semantics` 是统一业务语义规则，必须和字段、指标一样严格遵守。
-    特别是：只要求排序并查看全部对象时，不得改成 TopN；分组结果使用 `distribution`，
-    明细使用 `list`，保留 `order_by` 且 `limit` 为 null。只有用户明确给出前 N 个、
-    前几名或前 N 条时，才使用 `top_groups` / `top_records` 并声明正整数 `limit`。
-    对只给出一个时间范围的“新增情况”，按规则中的默认采集范围口径处理；只有用户明确
-    要求与上一周期或上一次巡查比较时，才拆成两个同形数据节点并计算差值。
+40. `<<query_semantics>>` 是统一业务语义事实，必须和字段、指标一样严格遵守。
+    `<<capabilities>>.query_semantics` 是同一事实的收窄投影；两处不一致时停止生成，
+    不得按任一局部措辞猜测。
 41. 用户用两个明确日期或两次巡查询问“新增/消失/新增了多少实体”时，两个日期必须先落实为
     对应路线的真实巡检批次；为每个批次生成同形 `list` 或 `detail` 数据节点，并输出共同
     的实体身份字段（病害用 `problem_number`，巡检用 `task_number` 或 `patrol_number`），
@@ -272,14 +263,9 @@
 44. `analysis_only` 的回复只能复述上游已有数值，不能出现上游证据中没有的新数字。
     用户要求差值、比例、占比、百分比变化或任何新算术结果时，必须声明对应
     `calculation` 工具；不得让分析模型心算后在 `analysis_only` 回答中冒充工具结果。
-45. 用户询问某路线某桩号路段最近 N 次巡检时，若问题本质是“这些巡检在该路段检出了
-    哪些病害/多少病害”，按 `query_semantics.segment_patrol_evidence` 使用病害记录定位
-    巡检批次：保留路线与桩号过滤，按 `patrol_number` 形成批次轴，并声明
-    `recent_window`。这不是把巡检任务偷换成病害主体；最终答案必须说明该批次是按病害
-    记录定位的，不能声称已经证明整段巡检覆盖。
-    用户只说“K50路段”而未给起止边界时，按
-    `query_semantics.unanchored_pile_segment` 的 1 公里口径写为
-    `pile_number` 范围 K50 至 K51；用户给了起止边界时严格使用用户边界。
+45. 路段巡检批次口径只读取 `query_semantics.segment_patrol_evidence`，无边界桩号口径
+    只读取 `query_semantics.unanchored_pile_segment`；不得在 QuerySpec 提示词中另写
+    主体、批次轴或默认里程规则。
 46. 用户要求比较两次巡检之间“是否有新发现的病害/新增了哪些病害”时，即使
     `inspection_coverage_scope` 为 `partial`，仍可按两次任务关联的病害实体集合计算
     新增；这是“有病害记录”的口径，不能解释为整段完整覆盖、不能把空集合解释成
@@ -304,17 +290,10 @@
     终态 `query_data` 节点，例如一个巡检任务属性结果和一个病害集合结果。不得为了满足
     “单一最终主体”而删除其中一个结果，也不得把两个结果错误地强制改写成同一主体；
     每个节点仍必须使用自己的真实主体、字段和过滤条件。
-49. 用户要求找出满足病害属性条件的巡检任务时，按
-    `query_semantics.task_disease_evidence`：病害类型、面积、长度及病害采集时间是
-    disease 节点的过滤条件；任务编号通过 `disease.patrol_id -> disease_patrol.id`
-    关联后以 `task_number` 输出和分组。`patrol_number` 是巡查编号，不能冒充
-    `task_number`。最终回答必须说明这是“实际检出了匹配病害的任务”口径。
-50. 用户要求当前主体“有某类关联记录”（例如路段是否存在病害）时，必须在当前主体
-    `fields` 中查找 `roles` 包含 `relation_exists` 的已登记字段，并写成
-    `filters` 条件：`op="exists"`、`raw_value=true`。关系拓扑和 JOIN 条件由 MDL
-    提供，QuerySpec 不得复制表连接、ON 条件或关系路径。关系存在字段不能放入
-    `metrics`、`output_projection` 或 `dimensions`；也不得用版本号、关联数量排序、
-    全量明细后人工判断等方式冒充存在性条件。
+49. 任务身份与病害证据的主体、关联和批次维度只读取
+    `query_semantics.task_disease_evidence`；QuerySpec 不复制该规则。
+50. 关系存在性字段、过滤形状和禁止位置只读取
+    `query_semantics.relation_existence`；JOIN 拓扑只来自 MDL。
 
 允许的 view：
 <<supported_views>>

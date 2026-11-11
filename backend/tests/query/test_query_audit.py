@@ -2,7 +2,12 @@ import unittest
 from unittest.mock import patch
 
 from app.query.analysis import analyze_single_turn
-from app.query.contracts import QuerySpecAmbiguity, QuerySpecError
+from app.query.capability_registry import CapabilityRegistry
+from app.query.contracts import (
+    QuerySpecAmbiguity,
+    QuerySpecError,
+    QuerySpecUnsupported,
+)
 from app.query.fields import FieldReachSet, PhysicalSchemaView
 from app.services.llm import LLMError
 
@@ -10,7 +15,112 @@ from app.services.llm import LLMError
 class QueryAuditTests(unittest.TestCase):
     @patch("app.query.analysis.audit_query_plan")
     @patch("app.query.analysis.chat_json")
-    def test_audit_receives_untrusted_top_n_evidence(
+    def test_audit_receives_shared_capability_facts(
+        self,
+        chat_json,
+        audit,
+    ):
+        chat_json.return_value = {
+            "final_goal": "统计巡査任务数",
+            "intent_family": "count",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "patrol",
+                    "view": "count",
+                    "metrics": ["count"],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        audit.return_value = {"complete": True, "issues": []}
+        registry = CapabilityRegistry.load()
+
+        analyze_single_turn(
+            "一共多少次巡査任务",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            audit=True,
+            registry=registry,
+            subject="patrol",
+        )
+
+        capabilities = audit.call_args.kwargs["capabilities"]
+        self.assertIn("patrol", capabilities)
+        self.assertIn(
+            "management_zone",
+            capabilities["patrol"]["capability_gaps"],
+        )
+
+    @patch("app.query.planning_repair.controller.chat_json")
+    @patch("app.query.analysis.audit_query_plan")
+    @patch("app.query.analysis.chat_json")
+    def test_structured_audit_capability_gap_is_not_replaced_with_proxy_query(
+        self,
+        chat_json,
+        audit,
+        repair_chat_json,
+    ):
+        chat_json.return_value = {
+            "final_goal": "统计巡査任务数",
+            "intent_family": "count",
+            "views": [
+                {
+                    "id": "q1",
+                    "action": "query_data",
+                    "subject": "patrol",
+                    "view": "count",
+                    "metrics": ["count"],
+                    "dimensions": [],
+                    "filters": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "inputs": [],
+                }
+            ],
+        }
+        audit.return_value = {
+            "complete": False,
+            "answer_operation": "unsupported",
+            "issues": [
+                {
+                    "code": "capability_gap",
+                    "capability_gap": "management_zone",
+                    "node_id": "q1",
+                    "reason": "用户要求按管养片区统计",
+                }
+            ],
+        }
+
+        with self.assertRaises(QuerySpecUnsupported) as raised:
+            analyze_single_turn(
+                "第三管养片区本季度巡査任务情况",
+                "mysql",
+                PhysicalSchemaView(columns=frozenset()),
+                FieldReachSet(),
+                audit=True,
+                registry=CapabilityRegistry.load(),
+                subject="patrol",
+            )
+
+        self.assertIn("管养片区", str(raised.exception))
+        repair_chat_json.assert_not_called()
+
+    @patch("app.query.analysis.audit_query_plan")
+    @patch("app.query.analysis.chat_json")
+    def test_audit_does_not_receive_duplicate_rule_evidence(
         self,
         chat_json,
         audit,
@@ -46,12 +156,11 @@ class QueryAuditTests(unittest.TestCase):
             audit=True,
         )
 
-        evidence = audit.call_args.kwargs["assist_evidence"]
-        top_n = next(
-            item for item in evidence if item.rule_id == "top_n"
+        self.assertNotIn("assist_evidence", audit.call_args.kwargs)
+        planning_prompt = "\n".join(
+            item["content"] for item in chat_json.call_args.args[0]
         )
-        self.assertEqual(top_n.candidate_value, "4")
-        self.assertFalse(top_n.trusted)
+        self.assertIn("top_n", planning_prompt)
 
     @patch("app.query.analysis._analyze_once")
     def test_invalid_llm_json_gets_one_feedback_retry(self, analyze_once):
@@ -437,7 +546,7 @@ class QueryAuditTests(unittest.TestCase):
                     "subject": "patrol",
                     "view": "top",
                     "metrics": ["patrol_mileage"],
-                    "dimensions": ["id", "patrol_mileage"],
+                    "dimensions": ["id"],
                     "filters": [],
                     "output_projection": ["id", "patrol_mileage"],
                     "order_by": [{"field": "patrol_mileage", "direction": "desc"}],

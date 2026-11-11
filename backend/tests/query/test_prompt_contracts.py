@@ -125,20 +125,39 @@ class PromptContractTests(unittest.TestCase):
                     body,
                 )
 
+    def test_query_spec_and_audit_share_topn_semantics(self):
+        for name in ("query_spec.md", "query_spec_audit.md"):
+            with self.subTest(prompt=name):
+                _, body = body_and_header(name)
+                self.assertIn("<<query_semantics>>", body)
+                self.assertIn("<<answer_operations>>", body)
+                self.assertNotIn("用户明确给出 N", body)
+                self.assertNotIn("没有 N", body)
+
+    def test_subject_router_consumes_shared_task_evidence(self):
+        _, body = body_and_header("subject_router.md")
+        self.assertIn("<<query_semantics>>", body)
+        self.assertNotIn(
+            "问任务自身状态、设备、里程、次数",
+            body,
+        )
+
     def test_group_change_prompt_uses_two_same_shape_nodes(self):
         _, query_spec = body_and_header("query_spec.md")
         _, audit = body_and_header("query_spec_audit.md")
 
-        for body in (query_spec, audit):
-            self.assertIn("calculate_group_change", body)
-            self.assertIn("相同 subject", body)
-            self.assertIn("唯一分组维度", body)
-            self.assertIn("指标", body)
+        self.assertIn("calculate_group_change", query_spec)
+        self.assertIn("相同 subject", query_spec)
+        self.assertIn("唯一分组维度", query_spec)
+        self.assertIn("指标", query_spec)
         self.assertIn("哪种病害增加最多", query_spec)
         self.assertIn(
             "不得给 post_calc 添加 `dataset_comparison`",
             query_spec,
         )
+        self.assertIn("<<query_semantics>>", audit)
+        self.assertIn("<<answer_operations>>", audit)
+        self.assertNotIn("计算组内 TopN", audit)
 
     def test_subject_router_distinguishes_task_identity_from_disease_evidence(self):
         _, router = body_and_header("subject_router.md")

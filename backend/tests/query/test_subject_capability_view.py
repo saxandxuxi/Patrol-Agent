@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest.mock import patch
 
@@ -6,6 +7,7 @@ from app.query.capability_registry.subject_resolver import SubjectResolution
 from app.query.analysis import QuerySubjectConflict, _analyze_once
 from app.query.contracts import QueryPlan, QuerySpecError, QuerySpecUnsupported
 from app.query.fields import FieldReachHit, FieldReachSet, PhysicalSchemaView
+from app.query.prompt_facts import build_prompt_facts
 from app.query.service import _field_reach_from_ground, start_single_turn
 
 
@@ -44,6 +46,22 @@ class SubjectCapabilityViewTests(unittest.TestCase):
         self.assertEqual(view.fields["routes_id"].label, "路线ID")
         self.assertIn("dimension", view.fields["route_name"].roles)
         self.assertIn("dimension", view.fields["routes_id"].roles)
+
+    def test_section_planner_view_exposes_relation_exists_predicate(self):
+        view = self.registry.planner_view("section", FieldReachSet())
+
+        has_disease = view.fields["has_disease"]
+        self.assertEqual(has_disease.label, "存在关联病害")
+        self.assertIn("relation_exists", has_disease.roles)
+        semantics = view.to_prompt_dict()["query_semantics"]
+        self.assertEqual(
+            semantics["relation_existence"]["filter"]["op"],
+            "exists",
+        )
+        self.assertIn(
+            "MDL",
+            " ".join(semantics["relation_existence"]["rules"]),
+        )
 
     def test_planner_view_exposes_linked_disease_count_for_patrol(self):
         view = self.registry.planner_view("patrol", FieldReachSet())
@@ -143,6 +161,21 @@ class SubjectCapabilityViewTests(unittest.TestCase):
         self.assertEqual(explicit_top["grouped_view"], "top_groups")
         self.assertTrue(explicit_top["require_positive_limit"])
 
+    def test_planner_and_router_receive_the_same_task_disease_evidence(self):
+        registry = CapabilityRegistry.load()
+        planner = registry.planner_view(
+            "disease",
+            FieldReachSet(),
+        ).to_prompt_dict()
+        router = build_prompt_facts(registry, {}).as_prompt_values()
+
+        self.assertEqual(
+            planner["query_semantics"]["task_disease_evidence"],
+            json.loads(router["query_semantics"])[
+                "task_disease_evidence"
+            ],
+        )
+
     @patch("app.query.analysis.chat_json")
     def test_declared_capability_gap_stops_before_query_generation(self, chat_json):
         chat_json.return_value = {
@@ -170,6 +203,29 @@ class SubjectCapabilityViewTests(unittest.TestCase):
                 registry=self.registry,
                 subject="disease",
             )
+
+    @patch("app.query.analysis.chat_json")
+    def test_plural_capability_gap_token_uses_registered_reason(self, chat_json):
+        chat_json.return_value = {
+            "final_goal": "按管养片区统计病害",
+            "intent_family": "analysis",
+            "unknown_terms": ["capability_gaps:management_zone"],
+            "views": [],
+        }
+
+        with self.assertRaises(QuerySpecUnsupported) as raised:
+            _analyze_once(
+                "按管养片区统计病害",
+                "mysql",
+                PhysicalSchemaView(columns=frozenset()),
+                FieldReachSet(),
+                registry=self.registry,
+                subject="disease",
+            )
+
+        message = str(raised.exception)
+        self.assertIn("没有可靠的管养片区名称", message)
+        self.assertNotIn("capability_gaps:", message)
 
     @patch("app.query.analysis.chat_json")
     def test_registered_unavailable_field_id_is_a_valid_gap_evidence_token(
