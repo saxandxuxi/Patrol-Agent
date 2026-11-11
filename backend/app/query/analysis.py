@@ -97,6 +97,19 @@ def _text_context(value: Any, limit: int = 8000) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)[:limit]
 
 
+def normalize_action(action: object) -> tuple[str, tuple[str, ...]]:
+    normalized = str(action or "").strip()
+    if normalized == "query_data":
+        return "query_data", ()
+    if normalized == "post_calc":
+        return "post_calc", ()
+    if normalized in {"analysis", "analyze"}:
+        return "post_calc", ("analysis_only",)
+    raise QuerySpecError(
+        f"invalid_action: {normalized or 'missing'}"
+    )
+
+
 def _audit_capabilities(
     plan: QueryPlan,
     registry: CapabilityRegistry | None,
@@ -1630,13 +1643,8 @@ def _analyze_once(
             limit = int(raw["limit"]) if raw.get("limit") is not None else None
         except (TypeError, ValueError) as exc:
             raise QuerySpecError("limit 必须是整数") from exc
-        action = str(raw.get("action") or "query_data").strip()
-        if action == "analysis":
-            action = "post_calc"
-        node_type = (
-            action
-            if action in {"query_data", "post_calc", "analysis"}
-            else "query_data"
+        node_type, action_assertions = normalize_action(
+            raw.get("action")
         )
         metrics = _metric_tuple(raw.get("metrics"))
         dimensions = _canonical_dimensions(
@@ -1724,7 +1732,14 @@ def _analyze_once(
             output_projection=output_projection,
             order_by=_order_items(raw.get("order_by")),
             limit=limit,
-            required_assertions=_string_tuple(raw.get("required_assertions")),
+            required_assertions=tuple(
+                dict.fromkeys(
+                    (
+                        *_string_tuple(raw.get("required_assertions")),
+                        *action_assertions,
+                    )
+                )
+            ),
             question=str(raw.get("question") or original).strip(),
             input_bindings=tuple(input_bindings),
             calculation=calculation,
