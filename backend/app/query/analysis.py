@@ -329,42 +329,94 @@ def _canonicalize_input_bindings(specs: list[QuerySpec]) -> None:
         )
 
 
-def _dependency_placeholder_binding(
+def structured_dependency_binding(
     raw_value: Any,
     target_field: str,
     op: str,
-    node_ids: set[str],
+    outputs_by_node: Mapping[str, set[str] | frozenset[str] | tuple[str, ...]],
 ) -> InputBinding | None:
-    """把模型误写进过滤值的内部依赖标记恢复成类型化输入绑定。
-
-    这不是从自然语言猜业务语义，而是修复 QuerySpec 的内部数据连接：
-    `DEPENDS_ON_q1_route_name` 明确指向 q1 的 route_name。代码只接受已
-    声明节点 id 的完整保留标记；任何其他同前缀字符串仍明确拒绝。
-    """
-
+    """识别 `节点.已声明输出字段`，隐藏字符串协议一律失败关闭。"""
     if not isinstance(raw_value, str):
         return None
     text = raw_value.strip()
-    prefix = "DEPENDS_ON_"
-    if not text.startswith(prefix):
+    if text.startswith("DEPENDS_ON_"):
+        raise QuerySpecError(f"invalid_dependency_value: {text}")
+    if "." not in text:
         return None
-    for node_id in sorted(node_ids, key=len, reverse=True):
-        marker = f"{prefix}{node_id}_"
-        if not text.startswith(marker):
-            continue
-        from_field = canonical_field(text[len(marker):])
-        if not from_field:
-            break
-        return InputBinding(
-            from_node=node_id,
-            from_field=from_field,
-            to_field=canonical_field(target_field),
-            op=op,
-        )
-    raise QuerySpecError(
-        "内部依赖占位符格式无效；下游节点必须在 inputs 中声明 "
-        "from_node、from_field、to_field 和 op，不能把依赖写进过滤值。"
+    node_id, _, source_field = text.rpartition(".")
+    node_outputs = outputs_by_node.get(node_id)
+    if node_outputs is None:
+        return None
+    source_field = canonical_field(source_field)
+    allowed_fields = {
+        canonical_field(field)
+        for field in node_outputs
+    }
+    if not source_field or source_field not in allowed_fields:
+        return None
+    return InputBinding(
+        from_node=node_id,
+        from_field=source_field,
+        to_field=canonical_field(target_field),
+        op=op,
     )
+
+
+def _declared_outputs_by_node(
+    raw_views: list[Any],
+) -> dict[str, set[str]]:
+    outputs: dict[str, set[str]] = {}
+    for index, raw in enumerate(raw_views, 1):
+        if not isinstance(raw, dict):
+            continue
+        node_id = str(raw.get("id") or f"q{index}").strip()
+        fields = {
+            str(field).rsplit(".", 1)[-1]
+            for key in ("metrics", "dimensions", "output_projection")
+            for field in (raw.get(key) or ())
+            if str(field).strip()
+        }
+        calculation = raw.get("calculation")
+        if isinstance(calculation, dict):
+            output = calculation.get("output")
+            if isinstance(output, dict) and output.get("name"):
+                fields.add(str(output["name"]).rsplit(".", 1)[-1])
+        outputs[node_id] = {
+            canonical_field(field)
+            for field in fields
+            if canonical_field(field)
+        }
+    return outputs
+
+
+def _invalid_dependency_value(
+    raw_value: Any,
+    binding: InputBinding | None,
+    *,
+    node_id: str,
+    filter_path: str,
+    filter_field: str,
+) -> QuerySpecError:
+    error = QuerySpecError(
+        f"invalid_dependency_value: {str(raw_value or '').strip()}"
+    )
+    error.dependency_evidence = {
+        "node_id": node_id,
+        "filter_path": filter_path,
+        "filter_field": canonical_field(filter_field),
+        "raw_value": str(raw_value or "").strip(),
+        **(
+            {
+                "from_node": binding.from_node,
+                "from_field": binding.from_field,
+                "to_field": binding.to_field,
+                "op": binding.op,
+            }
+            if binding is not None
+            else {}
+        ),
+    }
+    return error
 
 
 def _normalize_terminal_answer_subject(
@@ -1602,37 +1654,51 @@ def _analyze_once(
                 )
             raise QuerySpecUnsupported(detail)
         raise QuerySpecError("QuerySpec 缺少 views")
-    declared_node_ids = {
-        str(raw.get("id") or f"q{index}").strip()
-        for index, raw in enumerate(raw_views, 1)
-        if isinstance(raw, dict)
-    }
+    outputs_by_node = _declared_outputs_by_node(raw_views)
     for index, raw in enumerate(raw_views, 1):
         if not isinstance(raw, dict):
             continue
         spec_id = str(raw.get("id") or f"q{index}").strip()
         selected_subject = str(raw.get("subject") or subject or "disease").strip()
         filters = []
-        placeholder_bindings: list[InputBinding] = []
-        for item in raw.get("filters") or []:
+        for filter_index, item in enumerate(raw.get("filters") or []):
             if not isinstance(item, dict):
                 raise QuerySpecError("过滤条件必须是对象")
             filter_field = str(item.get("field") or "")
             filter_op = str(item.get("op") or "=")
-            placeholder = _dependency_placeholder_binding(
-                item.get("raw_value", item.get("value")),
-                filter_field,
-                filter_op,
-                declared_node_ids,
-            )
-            if placeholder is not None:
-                placeholder_bindings.append(placeholder)
-                continue
+            raw_value = item.get("raw_value", item.get("value"))
+            try:
+                dependency_binding = structured_dependency_binding(
+                    raw_value,
+                    filter_field,
+                    filter_op,
+                    outputs_by_node,
+                )
+            except QuerySpecError as exc:
+                exc.dependency_evidence = {
+                    "node_id": spec_id,
+                    "filter_path": (
+                        f"/views/{index - 1}/filters/{filter_index}"
+                    ),
+                    "filter_field": canonical_field(filter_field),
+                    "raw_value": str(raw_value or "").strip(),
+                }
+                raise
+            if dependency_binding is not None:
+                raise _invalid_dependency_value(
+                    raw_value,
+                    dependency_binding,
+                    node_id=spec_id,
+                    filter_path=(
+                        f"/views/{index - 1}/filters/{filter_index}"
+                    ),
+                    filter_field=filter_field,
+                )
             filters.append(
                 resolve_value(
                     filter_field,
                     filter_op,
-                    item.get("raw_value", item.get("value")),
+                    raw_value,
                     original,
                     kind,
                     subject=selected_subject,
@@ -1691,18 +1757,6 @@ def _analyze_once(
             )
             for item in input_bindings
         }
-        for item in placeholder_bindings:
-            key = (
-                item.from_node,
-                item.from_field,
-                item.to_field,
-                item.op,
-                item.row_index,
-            )
-            if key in seen_bindings:
-                continue
-            input_bindings.append(item)
-            seen_bindings.add(key)
         raw_calculation = raw.get("calculation")
         if raw_calculation is not None and not isinstance(
             raw_calculation,
@@ -1754,12 +1808,7 @@ def _analyze_once(
             else normalize_post_calc_shape(normalized_spec)
         )
         dependencies[spec_id] = tuple(
-            dict.fromkeys(
-                (
-                    *_string_tuple(raw.get("depends_on")),
-                    *(item.from_node for item in placeholder_bindings),
-                )
-            )
+            dict.fromkeys(_string_tuple(raw.get("depends_on")))
         )
         node_types[spec_id] = node_type
     _canonicalize_input_bindings(specs)

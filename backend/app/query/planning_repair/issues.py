@@ -120,6 +120,29 @@ def repair_issue_from_error(
                 "/views/*/required_assertions",
             ),
         )
+    elif reason.startswith("invalid_dependency_value:"):
+        evidence = dict(
+            getattr(error, "dependency_evidence", {}) or {}
+        )
+        issue = RepairIssue(
+            code="invalid_dependency_value",
+            path=str(
+                evidence.get("filter_path")
+                or "/views/*/filters"
+            ),
+            reason=reason,
+            expected="使用 depends_on 和结构化 inputs 表达上游依赖",
+            actual=str(
+                evidence.get("raw_value")
+                or reason.split(":", 1)[-1].strip()
+            ),
+            allowed_paths=(
+                "/views/*/filters",
+                "/views/*/depends_on",
+                "/views/*/inputs",
+            ),
+            evidence=evidence,
+        )
     elif "missing_recent_window_dependency" in reason:
         issue = RepairIssue(
             code="missing_recent_window_dependency",

@@ -4,8 +4,13 @@ from app.query.planning_repair import (
     RepairIssue,
     RepairTicket,
     apply_repair_patches,
+    repair_issue_from_capability,
+    repair_issue_from_error,
     scope_signature,
 )
+from app.query.capability_registry import CapabilityRegistry
+from app.query.capability_registry.failures import CapabilityIssue
+from app.query.contracts import QuerySpecError
 
 
 def _draft() -> dict:
@@ -19,6 +24,7 @@ def _draft() -> dict:
                 "view": "count",
                 "metrics": ["count"],
                 "dimensions": [],
+                "depends_on": [],
                 "filters": [
                     {
                         "field": "problem_type_name",
@@ -44,6 +50,69 @@ def _ticket(
 
 
 class PlanningRepairTests(unittest.TestCase):
+    def test_invalid_dependency_issue_only_allows_structural_binding_repair(self):
+        issue = repair_issue_from_error(
+            QuerySpecError(
+                "invalid_dependency_value: q1_top_route.route_name"
+            ),
+            _draft(),
+        )
+
+        self.assertEqual(issue.code, "invalid_dependency_value")
+        self.assertIn("/views/*/filters", issue.allowed_paths)
+        self.assertIn("/views/*/depends_on", issue.allowed_paths)
+        self.assertIn("/views/*/inputs", issue.allowed_paths)
+
+    def test_soft_delete_filter_is_repairable_without_unlocking_user_scope(self):
+        draft = _draft()
+        draft["views"][0].update(
+            {
+                "subject": "work_order",
+                "filters": [
+                    {
+                        "field": "del_flag",
+                        "op": "=",
+                        "raw_value": "0",
+                    },
+                    {
+                        "field": "route_name",
+                        "op": "=",
+                        "raw_value": "长沙－芷江高速公路",
+                    },
+                ],
+            }
+        )
+        issue = repair_issue_from_error(
+            RuntimeError(
+                "过滤值 del_flag 来源为 model_inference，"
+                "但没有经过字典、业务规则或受控解析"
+            ),
+            draft,
+            CapabilityRegistry.load(),
+        )
+
+        self.assertEqual(issue.mutable_filter_fields, ("del_flag",))
+        repaired = apply_repair_patches(
+            _ticket(issue=issue, draft=draft),
+            [{"op": "remove", "path": "/views/0/filters/0"}],
+        )
+
+        self.assertEqual(
+            repaired["views"][0]["filters"],
+            [
+                {
+                    "field": "route_name",
+                    "op": "=",
+                    "raw_value": "长沙－芷江高速公路",
+                }
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, "changed the user scope"):
+            apply_repair_patches(
+                _ticket(issue=issue, draft=draft),
+                [{"op": "remove", "path": "/views/0/filters/1"}],
+            )
+
     def test_permitted_subject_patch_changes_only_the_subject(self):
         ticket = _ticket(
             issue=RepairIssue(
@@ -93,6 +162,37 @@ class PlanningRepairTests(unittest.TestCase):
                     }
                 ],
             )
+
+    def test_nested_patch_is_allowed_under_an_allowed_repair_path(self):
+        draft = _draft()
+        draft["views"][0]["order_by"] = [
+            {"field": "invented_dimension", "direction": "desc"}
+        ]
+        ticket = _ticket(
+            draft=draft,
+            issue=RepairIssue(
+                code="invalid_order_field",
+                path="/views/0/order_by",
+                reason="排序字段不存在",
+                allowed_paths=("/views/*/order_by",),
+            ),
+        )
+
+        repaired = apply_repair_patches(
+            ticket,
+            [
+                {
+                    "op": "set",
+                    "path": "/views/0/order_by/0/field",
+                    "value": "count",
+                }
+            ],
+        )
+
+        self.assertEqual(
+            repaired["views"][0]["order_by"][0]["field"],
+            "count",
+        )
 
     def test_date_filter_repair_cannot_change_route_scope(self):
         draft = _draft()
@@ -292,6 +392,254 @@ class PlanningRepairTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "duplicate repair patch"):
             apply_repair_patches(ticket, [patch, dict(patch)])
+
+    def test_capability_failure_builds_a_traceable_repair_issue(self):
+        draft = _draft()
+        failure = CapabilityIssue(
+            code="unknown_metric",
+            original_value="fake_metric",
+            reason="未注册指标 fake_metric",
+            allowed_values=("count", "sum_area"),
+            suggested_repair="只使用允许值",
+            node_id="q1",
+        )
+
+        issue = repair_issue_from_capability(failure, draft)
+
+        self.assertEqual(issue.code, "unknown_metric")
+        self.assertEqual(issue.path, "/views/0/metrics")
+        self.assertEqual(issue.actual, "fake_metric")
+        self.assertEqual(issue.allowed_values, ("count", "sum_area"))
+        self.assertEqual(
+            issue.evidence["scope_signature"],
+            scope_signature(draft),
+        )
+        self.assertIn("original_question", issue.preserve)
+
+    def test_entity_comparison_repair_can_only_change_evidence_dependency_shape(
+        self,
+    ):
+        draft = _draft()
+        draft["views"].extend(
+            [
+                {
+                    "id": "q2",
+                    "question": "统计当前批次病害",
+                    "subject": "disease",
+                    "view": "count",
+                    "metrics": ["count"],
+                    "dimensions": [],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "filters": [
+                        {
+                            "field": "collection_time",
+                            "op": ">=",
+                            "raw_value": "2026-11-02",
+                        }
+                    ],
+                },
+                {
+                    "id": "q3",
+                    "question": "比较两批病害集合",
+                    "subject": "disease",
+                    "view": "data",
+                    "metrics": [],
+                    "dimensions": [],
+                    "filters": [],
+                    "depends_on": ["q1", "q2"],
+                    "comparison_depends_on": ["q1", "q2"],
+                    "required_assertions": ["dataset_comparison"],
+                },
+            ]
+        )
+        failure = CapabilityIssue(
+            code="dataset_comparison_requires_entity_details",
+            original_value="count",
+            reason="实体集合比较不能用 COUNT 聚合结果",
+            allowed_values=("list", "detail"),
+            node_id="q3",
+            evidence={
+                "dependency": "q2",
+                "view": "count",
+            },
+        )
+
+        issue = repair_issue_from_capability(failure, draft)
+
+        self.assertIn("/views/1/view", issue.allowed_paths)
+        self.assertIn("/views/1/metrics", issue.allowed_paths)
+        self.assertIn("/views/1/dimensions", issue.allowed_paths)
+        self.assertIn("/views/1/output_projection", issue.allowed_paths)
+        self.assertNotIn("/views/1/filters", issue.allowed_paths)
+
+        repaired = apply_repair_patches(
+            _ticket(issue=issue, draft=draft),
+            [
+                {
+                    "op": "set",
+                    "path": "/views/1/view",
+                    "value": "list",
+                },
+                {
+                    "op": "set",
+                    "path": "/views/1/metrics",
+                    "value": [],
+                },
+                {
+                    "op": "set",
+                    "path": "/views/1/output_projection",
+                    "value": ["problem_number", "pile_number"],
+                },
+            ],
+        )
+
+        self.assertEqual(repaired["views"][1]["view"], "list")
+        self.assertEqual(
+            repaired["views"][1]["filters"],
+            draft["views"][1]["filters"],
+        )
+
+    def test_dataset_identity_repair_can_add_upstream_output_only(self):
+        draft = _draft()
+        draft["views"][0].update(
+            {
+                "subject": "disease",
+                "view": "list",
+                "metrics": [],
+                "output_projection": ["pile_number", "area"],
+            }
+        )
+        draft["views"].append(
+            {
+                "id": "compare",
+                "question": "比较两次巡查的病害集合",
+                "subject": "disease",
+                "view": "data",
+                "metrics": [],
+                "dimensions": [],
+                "filters": [],
+                "depends_on": ["q1"],
+                "comparison_depends_on": ["q1"],
+                "required_assertions": ["dataset_comparison"],
+            }
+        )
+        failure = CapabilityIssue(
+            code="dataset_comparison_missing_identity",
+            original_value="q1",
+            reason="节点 q1 没有输出实体身份字段",
+            allowed_values=("problem_number",),
+            node_id="compare",
+            evidence={
+                "dependency": "q1",
+                "produced_fields": ["area", "pile_number"],
+            },
+        )
+
+        issue = repair_issue_from_capability(failure, draft)
+
+        self.assertIn("/views/0/output_projection", issue.allowed_paths)
+        self.assertNotIn("/views/0/filters", issue.allowed_paths)
+        repaired = apply_repair_patches(
+            _ticket(issue=issue, draft=draft),
+            [
+                {
+                    "op": "set",
+                    "path": "/views/0/output_projection",
+                    "value": ["problem_number", "pile_number", "area"],
+                }
+            ],
+        )
+        self.assertEqual(
+            repaired["views"][0]["filters"],
+            draft["views"][0]["filters"],
+        )
+        self.assertIn(
+            "problem_number",
+            repaired["views"][0]["output_projection"],
+        )
+
+    def test_self_dependency_patch_is_rejected(self):
+        ticket = _ticket(
+            issue=RepairIssue(
+                code="missing_dependency",
+                path="/views/0/depends_on",
+                reason="补齐依赖",
+                allowed_paths=("/views/*/depends_on",),
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "self dependency"):
+            apply_repair_patches(
+                ticket,
+                [
+                    {
+                        "op": "set",
+                        "path": "/views/0/depends_on",
+                        "value": ["q1"],
+                    }
+                ],
+            )
+
+    def test_patch_that_does_not_change_the_draft_is_rejected(self):
+        ticket = _ticket(
+            issue=RepairIssue(
+                code="subject_conflict",
+                path="/views/0/subject",
+                reason="修正主体",
+                allowed_paths=("/views/0/subject",),
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "did not change"):
+            apply_repair_patches(
+                ticket,
+                [
+                    {
+                        "op": "set",
+                        "path": "/views/0/subject",
+                        "value": "section",
+                    }
+                ],
+            )
+
+    def test_cyclic_dependency_patch_is_rejected(self):
+        draft = _draft()
+        draft["views"][0]["depends_on"] = ["q2"]
+        draft["views"].append(
+            {
+                "id": "q2",
+                "question": "统计裂缝数量",
+                "subject": "disease",
+                "view": "count",
+                "metrics": ["count"],
+                "dimensions": [],
+                "depends_on": [],
+                "filters": [],
+            }
+        )
+        ticket = _ticket(
+            draft=draft,
+            issue=RepairIssue(
+                code="missing_dependency",
+                path="/views/1/depends_on",
+                reason="补齐依赖",
+                allowed_paths=("/views/*/depends_on",),
+            ),
+        )
+
+        with self.assertRaisesRegex(ValueError, "dependency cycle"):
+            apply_repair_patches(
+                ticket,
+                [
+                    {
+                        "op": "set",
+                        "path": "/views/1/depends_on",
+                        "value": ["q1"],
+                    }
+                ],
+            )
 
     def test_json_pointer_escaping_is_applied(self):
         draft = {"a/b": {"m~n": 1}}

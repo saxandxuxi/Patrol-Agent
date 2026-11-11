@@ -2,7 +2,10 @@ import unittest
 from dataclasses import replace
 from unittest.mock import patch
 
-from app.query.analysis import analyze_single_turn
+from app.query.analysis import (
+    analyze_single_turn,
+    structured_dependency_binding,
+)
 from app.query.capability_registry import CapabilityRegistry
 from app.query.contracts import (
     InputBinding,
@@ -1064,6 +1067,81 @@ class QueryPlanningTests(unittest.TestCase):
         self.assertEqual(
             plan.nodes[-1].spec.filters,
             plan.nodes[0].spec.filters,
+        )
+
+    @patch("app.query.analysis.chat_json")
+    def test_independent_patrol_and_disease_results_are_a_valid_mixed_plan(
+        self,
+        chat_json,
+    ):
+        chat_json.return_value = {
+            "final_goal": "返回该任务的完成里程和关联病害",
+            "intent_family": "analysis",
+            "answer_operation": "single_result",
+            "unknown_terms": [],
+            "views": [
+                {
+                    "id": "mileage",
+                    "action": "query_data",
+                    "question": "查询该巡查编号的完成里程",
+                    "subject": "patrol",
+                    "view": "count",
+                    "metrics": ["patrol_mileage"],
+                    "dimensions": [],
+                    "filters": [
+                        {
+                            "field": "patrol_number",
+                            "op": "=",
+                            "raw_value": "XCBH202611020003",
+                        }
+                    ],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "comparison_depends_on": [],
+                    "inputs": [],
+                },
+                {
+                    "id": "diseases",
+                    "action": "query_data",
+                    "question": "查询同一巡查编号检出的病害及数量",
+                    "subject": "disease",
+                    "view": "count",
+                    "metrics": ["count"],
+                    "dimensions": [],
+                    "filters": [
+                        {
+                            "field": "patrol_number",
+                            "op": "=",
+                            "raw_value": "XCBH202611020003",
+                        }
+                    ],
+                    "output_projection": [],
+                    "order_by": [],
+                    "limit": None,
+                    "required_assertions": ["preserve_user_scope"],
+                    "depends_on": [],
+                    "comparison_depends_on": [],
+                    "inputs": [],
+                },
+            ],
+        }
+
+        plan = analyze_single_turn(
+            "巡查编号XCBH202611020003这次任务完成了多少里程，"
+            "检出了哪些病害、共多少处？",
+            "mysql",
+            PhysicalSchemaView(columns=frozenset()),
+            FieldReachSet(),
+            registry=CapabilityRegistry.load(),
+            subject="patrol",
+        )
+
+        self.assertEqual(
+            [(node.id, node.spec.subject) for node in plan.nodes],
+            [("mileage", "patrol"), ("diseases", "disease")],
         )
 
     @patch("app.query.planning_repair.controller.chat_json")
@@ -2199,10 +2277,12 @@ class QueryPlanningTests(unittest.TestCase):
             )
 
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
+    @patch("app.query.planning_repair.controller.chat_json")
     @patch("app.query.analysis.chat_json")
-    def test_uncompilable_plan_is_fed_back_before_audit(
+    def test_uncompilable_plan_is_patch_repaired_before_audit(
         self,
         chat_json,
+        repair_chat_json,
         _audit,
     ):
         invalid = {
@@ -2226,17 +2306,21 @@ class QueryPlanningTests(unittest.TestCase):
                 },
             ],
         }
-        valid = {
-            **invalid,
-            "views": [
+        chat_json.return_value = invalid
+        repair_chat_json.return_value = {
+            "patches": [
                 {
-                    **invalid["views"][0],
-                    "dimensions": ["equipment_id"],
-                    "output_projection": ["equipment_id"],
-                }
-            ],
+                    "op": "set",
+                    "path": "/views/0/dimensions",
+                    "value": ["equipment_id"],
+                },
+                {
+                    "op": "set",
+                    "path": "/views/0/output_projection",
+                    "value": ["equipment_id"],
+                },
+            ]
         }
-        chat_json.side_effect = [invalid, valid]
 
         plan = analyze_single_turn(
             "列出所有巡查设备",
@@ -2246,7 +2330,8 @@ class QueryPlanningTests(unittest.TestCase):
             audit=True,
         )
 
-        self.assertEqual(chat_json.call_count, 2)
+        self.assertEqual(chat_json.call_count, 1)
+        self.assertEqual(repair_chat_json.call_count, 1)
         self.assertEqual(plan.nodes[0].spec.dimensions, ("equipment_id",))
 
     @patch("app.query.analysis.chat_json")
@@ -2739,7 +2824,7 @@ class QueryPlanningTests(unittest.TestCase):
         )
         self.assertEqual(plan.nodes[1].node_type, "post_calc")
         self.assertEqual(plan.nodes[1].depends_on, ("q1",))
-        self.assertEqual(plan.nodes[1].spec.view, "top")
+        self.assertEqual(plan.nodes[1].spec.view, "top_groups")
         self.assertEqual(plan.nodes[1].spec.metrics, ("count",))
         self.assertEqual(
             plan.nodes[1].spec.dimensions,
@@ -2893,79 +2978,14 @@ class QueryPlanningTests(unittest.TestCase):
         self.assertEqual(plan.nodes[1].node_type, "post_calc")
         self.assertEqual(plan.nodes[1].depends_on, ("q1",))
 
-    @patch("app.query.analysis.resolve_value")
-    @patch("app.query.analysis.chat_json")
-    def test_internal_dependency_placeholder_is_normalized_to_input_binding(
-        self,
-        chat_json,
-        resolve_value,
-    ):
-        chat_json.return_value = {
-            "final_goal": "先找主要路线，再统计该路线未识别病害",
-            "intent_family": "analysis",
-            "views": [
-                {
-                    "id": "q1",
-                    "action": "query_data",
-                    "question": "按路线统计未识别病害数量并取第一名",
-                    "subject": "disease",
-                    "view": "top_groups",
-                    "metrics": ["count"],
-                    "dimensions": ["route_name"],
-                    "filters": [],
-                    "output_projection": ["route_name", "count"],
-                    "order_by": [{"field": "count", "direction": "desc"}],
-                    "limit": 1,
-                    "required_assertions": ["preserve_user_scope"],
-                    "depends_on": [],
-                    "inputs": [],
-                },
-                {
-                    "id": "q2",
-                    "action": "query_data",
-                    "question": "统计该路线未识别病害数量",
-                    "subject": "disease",
-                    "view": "count",
-                    "metrics": ["count"],
-                    "dimensions": [],
-                    "filters": [
-                        {
-                            "field": "route_name",
-                            "op": "=",
-                            "raw_value": "DEPENDS_ON_q1_route_name",
-                        }
-                    ],
-                    "output_projection": [],
-                    "order_by": [],
-                    "limit": None,
-                    "required_assertions": ["preserve_user_scope"],
-                    "depends_on": ["q1"],
-                    "inputs": [],
-                },
-            ],
-        }
-
-        plan = analyze_single_turn(
-            "AI认不出来的病害主要集中在哪条路上？有多少处？",
-            "mysql",
-            PhysicalSchemaView(columns=frozenset()),
-            FieldReachSet(),
-            subject="disease",
-            registry=CapabilityRegistry.load(),
-        )
-
-        downstream = plan.nodes[1]
-        self.assertEqual(downstream.depends_on, ("q1",))
-        self.assertEqual(downstream.spec.filters, ())
-        self.assertEqual(
-            downstream.spec.input_bindings,
-            (
-                type(downstream.spec.input_bindings[0])(
-                    from_node="q1",
-                    from_field="route_name",
-                    to_field="route_name",
-                    op="=",
-                ),
-            ),
-        )
-        resolve_value.assert_not_called()
+    def test_internal_dependency_placeholder_is_rejected(self):
+        with self.assertRaisesRegex(
+            QuerySpecError,
+            "^invalid_dependency_value:",
+        ):
+            structured_dependency_binding(
+                "DEPENDS_ON_q1_route_name",
+                "route_name",
+                "=",
+                {"q1": {"route_name"}},
+            )

@@ -98,6 +98,7 @@ def normalize_top_view(spec: QuerySpec) -> QuerySpec:
 def normalize_post_calc_shape(spec: QuerySpec) -> QuerySpec:
     """Keep explanatory post-calc nodes on the executable data contract."""
 
+    spec = normalize_top_view(spec)
     if (
         spec.calculation is None
         and "analysis_only" in spec.required_assertions
