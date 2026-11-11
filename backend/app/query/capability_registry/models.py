@@ -132,6 +132,7 @@ class CapabilitySnapshot:
     capability_gaps: dict[str, Any]
     templates: dict[str, Any]
     calculators: dict[str, Any]
+    table_labels: dict[str, str] = field(default_factory=dict)
 
     def metric_ids(self, subject: str) -> tuple[str, ...]:
         canonical = []

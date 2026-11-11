@@ -83,8 +83,30 @@ def merge_metric_facts(
     reject incompatible formulas instead of silently choosing one source.
     """
 
-    if _expression_identity(existing.expression) != _expression_identity(
-        incoming.expression
+    existing_is_reference = (
+        existing.source_kind == "mdl_cube"
+        and not existing.expression
+        and bool(existing.source_reference)
+    )
+    incoming_is_reference = (
+        incoming.source_kind == "mdl_cube"
+        and not incoming.expression
+        and bool(incoming.source_reference)
+    )
+    reference_mismatch = (
+        existing_is_reference
+        and incoming.source_reference
+        and existing.source_reference != incoming.source_reference
+    ) or (
+        incoming_is_reference
+        and existing.source_reference
+        and incoming.source_reference != existing.source_reference
+    )
+    if reference_mismatch or (
+        not existing_is_reference
+        and not incoming_is_reference
+        and _expression_identity(existing.expression)
+        != _expression_identity(incoming.expression)
     ):
         evidence = {
             "code": "conflicting_metric_fact",
@@ -198,6 +220,7 @@ def merge_metric_facts(
     )
     return replace(
         canonical,
+        expression=canonical.expression or alias_fact.expression,
         label=canonical.label or alias_fact.label,
         unit=canonical.unit or alias_fact.unit,
         aliases=aliases,

@@ -12,6 +12,7 @@ from ...services import (
 )
 from ..metrics.semantics import validate_metric_semantics
 from .loader import CapabilityConfigError, load_capability_config
+from .fact_conflicts import validate_fact_conflicts
 from .mdl_facts import inherited_cube_metrics, merge_metric_facts
 from .models import (
     CapabilitySnapshot,
@@ -281,6 +282,14 @@ class CapabilityRegistry:
             capability_gaps=dict(docs["capability_gaps"]),
             templates=dict(docs["templates"]),
             calculators=dict(docs["calculators"]),
+            table_labels={
+                str(table): str(raw.get("label") or "")
+                for table, raw in (
+                    (docs["field_overrides"].get(kind) or {}).get("tables")
+                    or {}
+                ).items()
+                if isinstance(raw, Mapping) and raw.get("label")
+            },
         )
         registry = cls(snapshot, kind)
         registry._augment_mdl_subjects(kind)
@@ -307,6 +316,24 @@ class CapabilityRegistry:
         registry._expand_metric_aliases()
         registry._validate_physical_fields(kind)
         registry._validate_metric_semantics()
+        from ..mdl_sql import load_mdl_snapshot
+
+        mdl_snapshot = load_mdl_snapshot(kind)
+        conflict_report = validate_fact_conflicts(
+            registry.snapshot,
+            mdl_snapshot,
+        )
+        if not conflict_report.accepted:
+            raise CapabilityConfigError(
+                "fact_conflicts: invalid capability configuration",
+                evidence={
+                    "accepted": False,
+                    "conflicts": [
+                        conflict.as_dict()
+                        for conflict in conflict_report.conflicts
+                    ],
+                },
+            )
         registry._snapshot = freeze_snapshot(registry.snapshot)
         return registry
 
@@ -738,6 +765,12 @@ class CapabilityRegistry:
                     ("max_", "MAX"),
                 ):
                     metric_id = f"{prefix}{field_id}"
+                    if any(
+                        metric.metric_id == metric_id
+                        or metric_id in metric.aliases
+                        for metric in metrics.values()
+                    ):
+                        continue
                     expression = (
                         f"{aggregate}({{alias}}.{field.physical_column})"
                     )

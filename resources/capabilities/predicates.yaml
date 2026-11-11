@@ -13,6 +13,88 @@ predicates:
   - remark
   - description
   - content
+  _lexicon:
+    numeric_fields:
+    - fallback_words:
+      - "\u9762\u79ef"
+      expr: "p.area"
+    - fallback_words:
+      - "\u7f6e\u4fe1\u5ea6"
+      - "\u53ef\u4fe1\u5ea6"
+      - "\u4fe1\u5ea6"
+      expr: "CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.confidence')) AS DECIMAL(10,6))"
+    - fallback_words:
+      - "\u6807\u6ce8\u5bbd\u5ea6"
+      - "\u56fe\u7247\u5bbd\u5ea6"
+      - "AI \u5bbd\u5ea6"
+      - "\u6807\u6ce8\u6846\u5bbd"
+      expr: "CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.width')) AS DECIMAL(10,2))"
+    - fallback_words:
+      - "\u6807\u6ce8\u9ad8\u5ea6"
+      - "\u56fe\u7247\u9ad8\u5ea6"
+      - "AI \u9ad8\u5ea6"
+      - "\u6807\u6ce8\u6846\u9ad8"
+      expr: "CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.height')) AS DECIMAL(10,2))"
+    - fallback_words:
+      - "\u6807\u6ce8\u7ecf\u5ea6"
+      - "\u56fe\u7247\u7ecf\u5ea6"
+      - "\u6807\u6ce8\u6846\u7ecf\u5ea6"
+      expr: "CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.lng')) AS DECIMAL(12,8))"
+    - fallback_words:
+      - "\u6807\u6ce8\u7eac\u5ea6"
+      - "\u56fe\u7247\u7eac\u5ea6"
+      - "\u6807\u6ce8\u6846\u7eac\u5ea6"
+      expr: "CAST(JSON_UNQUOTE(JSON_EXTRACT(p.pic_position, '$.lat')) AS DECIMAL(12,8))"
+    - fallback_words:
+      - "\u957f\u5ea6"
+      expr: "CASE WHEN p.disease_length IS NOT NULL AND p.disease_length > 0 THEN p.disease_length ELSE GREATEST(COALESCE(p.area_height, 0), COALESCE(p.area_width, 0)) END"
+    - fallback_words:
+      - "\u6869\u53f7"
+      - "\u91cc\u7a0b"
+      expr: "p.pile_distance"
+    numeric_ops:
+    - - "\u5927\u4e8e\u7b49\u4e8e"
+      - ">="
+    - - "\u4e0d\u5c0f\u4e8e"
+      - ">="
+    - - "\u4e0d\u8d85\u8fc7"
+      - "<="
+    - - "\u4e0d\u9ad8\u4e8e"
+      - "<="
+    - - "\u7b49\u4e8e"
+      - "="
+    - - "\u6b63\u597d"
+      - "="
+    - - "\u6070\u597d"
+      - "="
+    - - "\u521a\u597d"
+      - "="
+    - - "\u4e3a"
+      - "="
+    - - "\u8d85\u8fc7"
+      - ">"
+    - - "\u5927\u4e8e"
+      - ">"
+    - - "\u5c0f\u4e8e"
+      - "<"
+    - - "\u4f4e\u4e8e"
+      - "<"
+    - - "\u9ad8\u4e8e"
+      - ">"
+    - - ">="
+      - ">="
+    - - "<="
+      - "<="
+    - - "\u2265"
+      - ">="
+    - - "\u2264"
+      - "<="
+    - - ">"
+      - ">"
+    - - "<"
+      - "<"
+    - - "="
+      - "="
   numeric_ops:
   - '='
   - '>'
@@ -25,6 +107,9 @@ predicates:
   pile_columns:
   - pile_distance
   - pile_meter
+  filter_storage_fields:
+    route_name:
+      route_dictionary: routes_id
   dynamic_markers:
   - percentile
   - ntile

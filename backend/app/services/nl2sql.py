@@ -8211,9 +8211,11 @@ def _lexicon_section(section: str) -> Any:
             return (load_capability_file("dimensions.yaml", {}) or {}).get("_lexicon")
         if section == "time_buckets":
             return (load_capability_file("time_buckets.yaml", {}) or {}).get("_lexicon")
-        return (load_capability_file("metrics.yaml", {}) or {}).get("_lexicon", {}).get(
-            section
-        )
+        predicates = load_capability_file("predicates.yaml", {}) or {}
+        lexicon = predicates.get("_lexicon", {})
+        if section == "metric_expressions":
+            return lexicon.get("numeric_fields")
+        return lexicon.get(section)
     except Exception:  # noqa: BLE001
         return None
 

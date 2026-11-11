@@ -3,6 +3,22 @@ enums:
     table: ai_problem
     column: categories_type
     label: 病害大类
+    display_column: category_name
+    source: sys_dict.disease_categories
+    values:
+      "0":
+        label: 路面病害
+      "5":
+        label: 路基病害
+      "10":
+        label: 沿路设施
+      "15":
+        label: 交安事件
+  ai_problem_base.disease_categories_type:
+    table: ai_problem_base
+    column: disease_categories_type
+    label: 病害大类
+    display_column: category_name
     source: sys_dict.disease_categories
     values:
       "0":
@@ -17,6 +33,7 @@ enums:
     table: ai_problem
     column: damage_type
     label: 损坏程度
+    display_column: damage_type_name
     source: sys_dict.degree_of_damage_type
     values:
       "0":
@@ -29,6 +46,7 @@ enums:
     table: ai_problem
     column: up_or_down
     label: 上下行
+    display_column: up_or_down_name
     values:
       "0":
         label: 全部
@@ -37,10 +55,47 @@ enums:
         label: 上行
       "2":
         label: 下行
+  ai_problem.collect:
+    table: ai_problem
+    column: collect
+    label: 收藏
+    display_column: collect_name
+    values:
+      "0":
+        label: 未收藏
+      "1":
+        label: 已收藏
+  ai_problem.track_problem:
+    table: ai_problem
+    column: track_problem
+    label: 重点关注
+    display_column: track_problem_name
+    values:
+      "0":
+        label: 否
+      "1":
+        label: 是
+  ai_problem.operate_type:
+    table: ai_problem
+    column: operate_type
+    label: 病害操作
+    display_column: operate_type_name
+    values:
+      "0":
+        label: 待转工单
+      "3":
+        label: 病害恢复
+      "5":
+        label: 删除工单
+      "10":
+        label: 转工单
+      "15":
+        label: 忽略病害
   basic_facilities_routes.level:
     table: basic_facilities_routes
     column: level
     label: 行政等级
+    display_column: level_name
     values:
       "0":
         label: 国道
@@ -56,6 +111,7 @@ enums:
     table: basic_facilities_sections
     column: tech_grade
     label: 公路技术等级
+    display_column: tech_grade_name
     values:
       "0":
         label: 高速公路
@@ -69,6 +125,22 @@ enums:
         label: 四级公路
       "5":
         label: 等外公路
+  basic_facilities_sections.route_level:
+    table: basic_facilities_sections
+    column: route_level
+    label: 行政等级
+    display_column: route_level_name
+    values:
+      "0":
+        label: 国道
+      "1":
+        label: 省道
+      "2":
+        label: 县道
+      "3":
+        label: 乡道
+      "4":
+        label: 村道
   # 路面类型是自由文本列，值本身就是存储值。登记成字典后，
   # “沥青混凝土路面”这类带后缀的说法也能解析回存储值，
   # 不会再因为“来源是模型推断且没经过字典”被拦下。
@@ -76,6 +148,7 @@ enums:
     table: ai_problem
     column: road_surface_type
     label: 路面类型
+    display_column: road_surface_type_name
     values:
       "沥青混凝土":
         label: 沥青混凝土
@@ -85,3 +158,48 @@ enums:
         label: 沥青
       "水泥":
         label: 水泥
+  ai_maintain_patrol.patrol_type:
+    table: ai_maintain_patrol
+    column: patrol_type
+    label: 巡查类型
+    display_column: patrol_type_name
+    values:
+      "0":
+        label: 定期巡查
+      "5":
+        label: 日常巡查
+      "10":
+        label: 专项巡查
+      "15":
+        label: 复核考评
+      "20":
+        label: 重点抽查
+  ai_maintain_patrol.patrol_status:
+    table: ai_maintain_patrol
+    column: patrol_status
+    label: 巡查状态
+    display_column: patrol_status_name
+    values:
+      "0":
+        label: 未开始
+      "5":
+        label: 进行中
+      "10":
+        label: 暂停
+      "15":
+        label: 已完成
+      "20":
+        label: 逾期
+  ai_maintain_patrol.up_or_down:
+    table: ai_maintain_patrol
+    column: up_or_down
+    label: 上下行
+    display_column: up_or_down_name
+    values:
+      "0":
+        label: 全部
+        display: 全部/未区分
+      "1":
+        label: 上行
+      "2":
+        label: 下行

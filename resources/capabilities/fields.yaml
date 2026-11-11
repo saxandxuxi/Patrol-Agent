@@ -6,10 +6,141 @@ fields:
       roles: [output]
       physical_table: ai_problem
       physical_column: id
+    problem_number:
+      expression: disease.problem_number
+      label: 病害编号
+      roles: [code, dimension, output, identity]
+      physical_table: ai_problem
+      physical_column: problem_number
+    problem_type_name:
+      expression: COALESCE(disease.problem_type_name, '未知类型')
+      filter_expression: disease.problem_type_name
+      label: 病害类型
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: problem_type_name
+    route_name:
+      expression: disease.route_name
+      label: 路线名称
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: route_name
+    routes_id:
+      expression: route.id
+      label: 路线ID
+      roles: [code, dimension, output]
+      physical_table: basic_facilities_routes
+      physical_column: id
+      requires_join: [disease_route]
+    pile_number:
+      expression: disease.pile_number
+      filter_expression: disease.pile_distance
+      label: 桩号
+      roles: [code, dimension, output]
+      physical_table: ai_problem
+      physical_column: pile_number
+    pile_distance:
+      expression: disease.pile_distance
+      label: 桩号米数
+      unit: m
+      roles: [numeric]
+      physical_table: ai_problem
+      physical_column: pile_distance
+      status: unavailable
+      unavailable_reason: >-
+        原始桩号米数不能直接作为分组维度；请改用已登记的
+        桩号分段维度 pile_segment_<N>m，例如 pile_segment_500m、
+        pile_segment_1000m 或 pile_segment_2000m。
+    collection_time:
+      expression: disease.collection_time
+      label: 采集时间
+      roles: [time, dimension, output]
+      physical_table: ai_problem
+      physical_column: collection_time
+    create_time:
+      expression: disease.create_time
+      label: 创建时间
+      roles: [time, dimension, output]
+      physical_table: ai_problem
+      physical_column: create_time
+    device_code:
+      expression: disease.device_code
+      label: 巡检设备编号
+      roles: [code, dimension, output]
+      physical_table: ai_problem
+      physical_column: device_code
+    patrol_number:
+      expression: disease.patrol_number
+      label: 任务编号
+      roles: [code, dimension, output, identity]
+      physical_table: ai_problem
+      physical_column: patrol_number
+    confidence:
+      expression: disease.confidence
+      label: AI置信度
+      roles: [numeric, output]
+      physical_table: ai_problem
+      physical_column: confidence
+    disease_length:
+      expression: disease.effective_disease_length
+      filter_expression: disease.effective_disease_length
+      label: 实际病害长度
+      unit: m
+      roles: [numeric, output]
+      physical_table: ai_problem
+      physical_column: effective_disease_length
+    effective_disease_length:
+      expression: disease.effective_disease_length
+      filter_expression: disease.effective_disease_length
+      label: 实际病害长度
+      unit: m
+      roles: [numeric, output]
+      physical_table: ai_problem
+      physical_column: effective_disease_length
+    area:
+      expression: disease.area
+      label: 面积
+      unit: ㎡
+      roles: [numeric, output]
+      physical_table: ai_problem
+      physical_column: area
+    road_surface_type:
+      expression: disease.road_surface_type_name
+      filter_expression: disease.road_surface_type
+      roles: [code, dimension, output]
+      physical_table: ai_problem
+      physical_column: road_surface_type
+      enum_key: ai_problem.road_surface_type
+    history_damage_interval:
+      expression: disease.history_damage_interval
+      label: 历史损坏程度区间
+      roles: [code, dimension, output]
+      physical_table: ai_problem
+      physical_column: history_damage_interval
+      status: unavailable
+      unavailable_reason: 当前数据库该字段全部为空，不能用于损坏程度判断。
+    luge_name:
+      expression: disease.luge_name
+      label: 路格
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: luge_name
+      status: unavailable
+      unavailable_reason: >-
+        路格名称不足以稳定表达里程区段编号；请改用已登记的
+        pile_segment_500m、pile_segment_1000m 或 pile_segment_2000m。
+    lane_index:
+      expression: disease.lane_index
+      label: 车道
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: lane_index
+      status: unavailable
+      unavailable_reason: 当前数据库车道字段没有可用数据，不能按车道统计。
     up_or_down:
-      expression: disease.up_or_down
-      label: 上下行
-      roles: [code, dimension]
+      expression: disease.up_or_down_name
+      filter_expression: disease.up_or_down
+      roles: [code, dimension, output]
       physical_table: ai_problem
       physical_column: up_or_down
       enum_key: ai_problem.up_or_down
@@ -17,7 +148,6 @@ fields:
       # 编码用于过滤，中文标签用于展示；两者不能混用。
       expression: disease.category_name
       filter_expression: disease.categories_type
-      label: 病害大类
       roles: [code, dimension, output]
       physical_table: ai_problem
       physical_column: categories_type
@@ -25,21 +155,13 @@ fields:
     category_name:
       expression: disease.category_name
       filter_expression: disease.categories_type
-      label: 病害大类
       roles: [dimension, output]
       physical_table: ai_problem
       physical_column: categories_type
       enum_key: ai_problem.categories_type
     damage_type:
-      expression: >-
-        CASE disease.damage_type
-        WHEN '0' THEN '轻度'
-        WHEN '5' THEN '中度'
-        WHEN '10' THEN '重度'
-        ELSE COALESCE(NULLIF(disease.damage_type, ''), '未填写')
-        END
+      expression: disease.damage_type_name
       filter_expression: disease.damage_type
-      label: 损坏程度
       roles: [code, dimension, output]
       physical_table: ai_problem
       physical_column: damage_type
@@ -47,7 +169,7 @@ fields:
     task_number:
       expression: patrol.task_number
       label: 任务编号
-      roles: [code, dimension, output]
+      roles: [code, dimension, output, identity]
       physical_table: ai_maintain_patrol
       physical_column: task_number
       requires_join: [disease_patrol]
@@ -60,22 +182,194 @@ fields:
       physical_column: route_length_km
       requires_join: [route]
     route_level:
-      expression: route.level
-      label: 行政等级
+      expression: route.level_name
+      filter_expression: route.level
       roles: [code, dimension]
       physical_table: basic_facilities_routes
       physical_column: level
       requires_join: [route]
       enum_key: basic_facilities_routes.level
+    road_level:
+      expression: route.level_name
+      filter_expression: route.level
+      roles: [code, dimension, output]
+      physical_table: basic_facilities_routes
+      physical_column: level
+      requires_join: [disease_route]
+      enum_key: basic_facilities_routes.level
+    damage_severity:
+      expression: disease.damage_type_name
+      filter_expression: disease.damage_type
+      roles: [code, dimension, output]
+      physical_table: ai_problem
+      physical_column: damage_type
+      enum_key: ai_problem.damage_type
+    severity:
+      expression: disease.damage_type_name
+      filter_expression: disease.damage_type
+      roles: [code, dimension, output]
+      physical_table: ai_problem
+      physical_column: damage_type
+      enum_key: ai_problem.damage_type
     tech_grade:
-      expression: section.tech_grade
-      label: 公路技术等级
+      expression: section.tech_grade_name
+      filter_expression: section.tech_grade
       roles: [code, dimension]
       physical_table: basic_facilities_sections
       physical_column: tech_grade
       requires_join: [section]
       enum_key: basic_facilities_sections.tech_grade
+    collection_time_day:
+      expression: DATE(disease.collection_time)
+      label: 日期
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: collection_time
+    collection_time_month:
+      expression: DATE_FORMAT(disease.collection_time, '%Y-%m')
+      label: 月份
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: collection_time
+    collection_month:
+      expression: DATE_FORMAT(disease.collection_time, '%Y-%m')
+      label: 月份
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: collection_time
+    month:
+      expression: DATE_FORMAT(disease.collection_time, '%Y-%m')
+      label: 月份
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: collection_time
+    collection_time_year:
+      expression: DATE_FORMAT(disease.collection_time, '%Y')
+      label: 年份
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: collection_time
+    collection_time_quarter:
+      expression: >-
+        CONCAT(YEAR(disease.collection_time), '年第',
+        QUARTER(disease.collection_time), '季度')
+      label: 季度
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: collection_time
+    collection_time_week:
+      expression: >-
+        CONCAT(DATE_FORMAT(disease.collection_time, '%x'), '年第',
+        DATE_FORMAT(disease.collection_time, '%v'), '周')
+      label: 周
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: collection_time
+    week:
+      expression: >-
+        CONCAT(DATE_FORMAT(disease.collection_time, '%x'), '年第',
+        DATE_FORMAT(disease.collection_time, '%v'), '周')
+      label: 周
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: collection_time
+    pile_segment_500m:
+      expression: FLOOR(disease.pile_distance / 500) * 500
+      label: 桩号分段
+      unit: m
+      roles: [numeric, dimension, output]
+      physical_table: ai_problem
+      physical_column: pile_distance
+    pile_number_segment_500m:
+      expression: FLOOR(disease.pile_distance / 500) * 500
+      label: 桩号分段
+      unit: m
+      roles: [numeric, dimension, output]
+      physical_table: ai_problem
+      physical_column: pile_distance
+    pile_number_segment:
+      expression: FLOOR(disease.pile_distance / 500) * 500
+      label: 桩号分段
+      unit: m
+      roles: [numeric, dimension, output]
+      physical_table: ai_problem
+      physical_column: pile_distance
+    pile_segment:
+      expression: FLOOR(disease.pile_distance / 500) * 500
+      label: 桩号分段
+      unit: m
+      roles: [numeric, dimension, output]
+      physical_table: ai_problem
+      physical_column: pile_distance
+    pile_segment_1000m:
+      expression: >-
+        CONCAT('K', FLOOR(FLOOR(disease.pile_distance / 1000) * 1000 / 1000),
+        '+', LPAD(MOD(FLOOR(disease.pile_distance / 1000) * 1000, 1000), 3, '0'),
+        '~K', FLOOR((FLOOR(disease.pile_distance / 1000) * 1000 + 1000) / 1000),
+        '+000')
+      label: 桩号分段
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: pile_distance
+    pile_number_segment_1000m:
+      expression: >-
+        CONCAT('K', FLOOR(FLOOR(disease.pile_distance / 1000) * 1000 / 1000),
+        '+', LPAD(MOD(FLOOR(disease.pile_distance / 1000) * 1000, 1000), 3, '0'),
+        '~K', FLOOR((FLOOR(disease.pile_distance / 1000) * 1000 + 1000) / 1000),
+        '+000')
+      label: 桩号分段
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: pile_distance
+    kilometer_segment:
+      expression: >-
+        CONCAT('K', FLOOR(FLOOR(disease.pile_distance / 1000) * 1000 / 1000),
+        '+', LPAD(MOD(FLOOR(disease.pile_distance / 1000) * 1000, 1000), 3, '0'),
+        '~K', FLOOR((FLOOR(disease.pile_distance / 1000) * 1000 + 1000) / 1000),
+        '+000')
+      label: 桩号分段
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: pile_distance
+    pile_segment_2000m:
+      expression: >-
+        CONCAT('K', FLOOR(FLOOR(disease.pile_distance / 2000) * 2000 / 1000),
+        '+', LPAD(MOD(FLOOR(disease.pile_distance / 2000) * 2000, 1000), 3, '0'),
+        '~K', FLOOR((FLOOR(disease.pile_distance / 2000) * 2000 + 2000) / 1000),
+        '+000')
+      label: 桩号分段
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: pile_distance
+    pile_number_segment_2000m:
+      expression: >-
+        CONCAT('K', FLOOR(FLOOR(disease.pile_distance / 2000) * 2000 / 1000),
+        '+', LPAD(MOD(FLOOR(disease.pile_distance / 2000) * 2000, 1000), 3, '0'),
+        '~K', FLOOR((FLOOR(disease.pile_distance / 2000) * 2000 + 2000) / 1000),
+        '+000')
+      label: 桩号分段
+      roles: [dimension, output]
+      physical_table: ai_problem
+      physical_column: pile_distance
   patrol:
+    id:
+      expression: patrol.id
+      label: 巡检任务ID
+      roles: [code, dimension, output, identity]
+      physical_table: ai_maintain_patrol
+      physical_column: id
+    task_number:
+      expression: patrol.task_number
+      label: 任务编号
+      roles: [code, dimension, output, identity]
+      physical_table: ai_maintain_patrol
+      physical_column: task_number
+    patrol_number:
+      expression: patrol.patrol_number
+      label: 巡查编号
+      roles: [code, dimension, output, identity]
+      physical_table: ai_maintain_patrol
+      physical_column: patrol_number
     # 巡检查询里的"设备编号/设备"沿用与病害台账同一套设备编号值
     # （ai_problem.device_code 与 ai_maintain_patrol.equipment_id 是同一批值）；
     # ai_maintain_patrol.device_code 这一列在库里全为 NULL，只留在物理目录里，
@@ -83,37 +377,104 @@ fields:
     device_code:
       expression: patrol.equipment_id
       label: 设备编号
-      roles: [code, dimension]
+      roles: [code, dimension, output]
       physical_table: ai_maintain_patrol
       physical_column: equipment_id
     equipment_id:
       expression: patrol.equipment_id
       label: 设备id
-      roles: [code, dimension]
+      roles: [code, dimension, output]
       physical_table: ai_maintain_patrol
       physical_column: equipment_id
+    patrol_name:
+      expression: patrol.patrol_name
+      label: 巡查名称
+      roles: [dimension, output]
+      physical_table: ai_maintain_patrol
+      physical_column: patrol_name
     collection_time:
       expression: patrol.create_time
       label: 巡检时间
       roles: [time, dimension]
       physical_table: ai_maintain_patrol
       physical_column: create_time
+    create_time:
+      expression: patrol.create_time
+      label: 创建时间
+      roles: [time, dimension, output]
+      physical_table: ai_maintain_patrol
+      physical_column: create_time
+    month:
+      expression: DATE_FORMAT(patrol.create_time, '%Y-%m')
+      label: 月份
+      roles: [dimension, output]
+      physical_table: ai_maintain_patrol
+      physical_column: create_time
+    day:
+      expression: DATE(patrol.create_time)
+      label: 日期
+      roles: [dimension, output]
+      physical_table: ai_maintain_patrol
+      physical_column: create_time
+    end_date:
+      expression: patrol.end_date
+      label: 结束时间
+      roles: [time, dimension, output]
+      physical_table: ai_maintain_patrol
+      physical_column: end_date
+    patrol_type:
+      expression: patrol.patrol_type_name
+      filter_expression: patrol.patrol_type
+      roles: [code, dimension, output]
+      physical_table: ai_maintain_patrol
+      physical_column: patrol_type
+      enum_key: ai_maintain_patrol.patrol_type
+    patrol_status:
+      expression: patrol.patrol_status_name
+      filter_expression: patrol.patrol_status
+      roles: [code, dimension, output]
+      physical_table: ai_maintain_patrol
+      physical_column: patrol_status
+      enum_key: ai_maintain_patrol.patrol_status
+    up_or_down:
+      expression: patrol.up_or_down_name
+      filter_expression: patrol.up_or_down
+      roles: [code, dimension, output]
+      physical_table: ai_maintain_patrol
+      physical_column: up_or_down
+      enum_key: ai_maintain_patrol.up_or_down
     route_name:
       expression: route.short_name
       label: 路线名称
-      roles: [dimension, output]
+      roles: [dimension, output, multi_value]
       physical_table: basic_facilities_routes
       physical_column: short_name
-      requires_join: [patrol_route, route]
+      requires_join: [patrol_route_patrol, patrol_route_route]
+    patrol_mileage:
+      expression: patrol.patrol_mileage / 1000.0
+      label: 巡检里程
+      unit: km
+      roles: [numeric, output]
+      physical_table: ai_maintain_patrol
+      physical_column: patrol_mileage
+    disease_del_flag:
+      expression: disease.del_flag
+      filter_expression: disease.del_flag
+      label: 关联病害有效标记
+      roles: [soft_delete]
+      physical_table: ai_problem
+      physical_column: del_flag
+      requires_join: [disease_patrol]
     routes_id:
-      expression: patrol_route.routes_id
+      expression: route.id
       label: 路线ID
       roles: [code, dimension, output]
-      physical_table: ai_maintain_routes_patrol
-      physical_column: routes_id
-      requires_join: [patrol_route]
+      physical_table: basic_facilities_routes
+      physical_column: id
+      requires_join: [patrol_route_patrol, patrol_route_route]
     pile_number:
       expression: disease.pile_number
+      filter_expression: disease.pile_distance
       label: 桩号
       roles: [code, dimension]
       physical_table: ai_problem
@@ -128,6 +489,18 @@ fields:
       physical_column: pile_distance
       requires_join: [disease]
   section:
+    id:
+      expression: section.id
+      label: 路段ID
+      roles: [code, identity, output]
+      physical_table: basic_facilities_sections
+      physical_column: id
+    full_name:
+      expression: section.full_name
+      label: 路段全称
+      roles: [dimension, identity, output]
+      physical_table: basic_facilities_sections
+      physical_column: full_name
     route_name:
       expression: route.short_name
       label: 路线名称
@@ -135,3 +508,41 @@ fields:
       physical_table: basic_facilities_routes
       physical_column: short_name
       requires_join: [section_route]
+    route_level:
+      expression: section.route_level_name
+      filter_expression: section.route_level
+      roles: [code, dimension, output]
+      physical_table: basic_facilities_sections
+      physical_column: route_level
+      enum_key: basic_facilities_sections.route_level
+    start_num:
+      expression: section.start_num
+      label: 起点桩号
+      roles: [dimension, output]
+      physical_table: basic_facilities_sections
+      physical_column: start_num
+    end_num:
+      expression: section.end_num
+      label: 终点桩号
+      roles: [dimension, output]
+      physical_table: basic_facilities_sections
+      physical_column: end_num
+    del_flag:
+      expression: section.del_flag
+      filter_expression: section.del_flag
+      label: 路段删除标记
+      roles: [soft_delete]
+      physical_table: basic_facilities_sections
+      physical_column: del_flag
+    has_disease:
+      expression: disease.del_flag
+      filter_expression: disease.del_flag = 0
+      label: 存在关联病害
+      comment: >-
+        用于筛选至少存在一条有效病害记录的路段。过滤时使用
+        op=exists；关系和 JOIN 条件只从 MDL 的 disease_section 读取。
+      data_type: BOOLEAN
+      roles: [relation_exists]
+      physical_table: ai_problem
+      physical_column: del_flag
+      requires_join: [disease_section]

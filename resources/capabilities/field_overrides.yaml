@@ -2,7 +2,7 @@ field_overrides:
   _note: 字段目录的人工覆盖：只写例外，其余全部来自库里的 COLUMN_COMMENT。事实源是数据库注释，这里只是覆盖层。见 docs/代码结构重构与模板外置方案.md §5.4。
   _用法:
     tables: 覆盖表的中文名（resolve_table 用）
-    columns: 覆盖某一列的 label / code_map / aliases（aliases = 用户口语说法，供字段触达识别）
+    columns: 覆盖某一列的 label / aliases（枚举值统一登记在 enums.yaml）
     roles: 额外角色：image / geo / code / time / numeric
   mysql:
     tables:
@@ -60,44 +60,9 @@ field_overrides:
           label: 缓存图片
         pic_position:
           label: 图片位置（含置信度）
-        collect:
-          label: 收藏
-          code_map:
-            '0': 未收藏
-            '1': 已收藏
-        track_problem:
-          label: 重点关注
-          code_map:
-            '0': 否
-            '1': 是
-        up_or_down:
-          label: 上下行
-          code_map:
-            '0': 全部
-            '1': 上行
-            '2': 下行
-        operate_type:
-          label: 病害操作
-          code_map:
-            '0': 待转工单
-            '3': 病害恢复
-            '5': 删除工单
-            '10': 转工单
-            '15': 忽略病害
         history_damage_interval:
           label: 历史损坏程度区间
-      basic_facilities_routes:
-        level:
-          label: 行政级别
-          code_map:
-            '0': 国道
-            '1': 省道
-            '2': 县道
-            '3': 乡道
-            '4': 村道
       basic_facilities_sections:
-        tech_grade:
-          label: 路面技术等级
         surface_type:
           label: 路面类型
         lane_type:
