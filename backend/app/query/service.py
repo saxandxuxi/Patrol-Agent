@@ -486,7 +486,23 @@ def assemble_answer(
             if str(section.get("type") or "") in {"analysis", "post_calc"}
         ]
         if conclusions:
-            text_sections = conclusions
+            text_sections = [
+                section
+                for section in sections
+                if section in conclusions
+                or (
+                    str(section.get("type") or "") == "data"
+                    and "analysis_context"
+                    in (
+                        section.get("spec", {}).get(
+                            "required_assertions",
+                            (),
+                        )
+                        if isinstance(section.get("spec"), dict)
+                        else ()
+                    )
+                )
+            ]
     texts: list[str] = []
     for section in text_sections:
         # 分析模式下数据节点没有结论可写时，也不能把明细行原样倒出来；
@@ -574,9 +590,9 @@ def _dependency_needs_dictionary(field: str, spec: Any) -> bool:
     """依赖传值是否需要先过字典解析。
 
     上游结果行给的是展示视图里的值（路线中文名、枚举中文标签），而过滤条件
-    要的是存储值（路线 id、枚举 code）。显示值和存储值不能互相替代，所以
-    route_name 和已登记枚举字段必须回到字段字典解析；时间、桩号分段等其他
-    字段保持原样传递。
+    要的是对应字段的存储值。`routes_id` 要转成路线 id，已登记枚举字段要
+    转成 code；`route_name` 也要先校验路线是否存在，但目标字段仍是
+    `route_name` 时必须保留展示值。这样显示值和存储值不会互相污染。
     """
     name = str(field).rsplit(".", 1)[-1]
     if name in {"route_name", "routes_id"}:
@@ -695,9 +711,13 @@ def _materialize_inputs(
         resolver_name = f"node:{binding.from_node}:{binding.from_field}"
         if _dependency_needs_dictionary(binding.to_field, spec):
             resolved = _resolve_dependency_binding(binding, values, spec)
-            storage_value = resolved.storage_value
-            bound_op = resolved.op
-            display_value = resolved.display_value
+            if str(binding.to_field).rsplit(".", 1)[-1] != "route_name":
+                storage_value = resolved.storage_value
+                bound_op = resolved.op
+                display_value = resolved.display_value
+            elif binding.op == "in":
+                bound_op = "in"
+                storage_value = values
             resolver_name = (
                 f"{resolved.resolver}:node:{binding.from_node}:{binding.from_field}"
             )
@@ -943,6 +963,9 @@ def _execute_plan(
     unavailable_dependencies: dict[str, str] = {}
     answers_by_id: dict[str, str] = {}
     empty_scope_nodes: set[str] = set()
+    inside_scope_empty_nodes: set[str] = set()
+    partial_scope_empty_nodes: set[str] = set()
+    partial_scope_details: dict[str, str] = {}
     count_by_scope: dict[tuple[Any, ...], int] = {}
     for node in plan.nodes:
         if node.id in blocked_nodes:
@@ -1049,7 +1072,19 @@ def _execute_plan(
             for dependency in node.depends_on
             if dependency in empty_scope_nodes
         ]
-        if node.node_type == "post_calc" and empty_dependencies:
+        comparison_accepts_empty_sets = (
+            "dataset_comparison" in node.spec.required_assertions
+            and all(
+                dependency in inside_scope_empty_nodes
+                or dependency in partial_scope_empty_nodes
+                for dependency in empty_dependencies
+            )
+        )
+        if (
+            node.node_type == "post_calc"
+            and empty_dependencies
+            and not comparison_accepts_empty_sets
+        ):
             reason = (
                 "前置查询在现有覆盖范围内没有匹配记录，未覆盖部分又无法判断；"
                 "缺少可计算的真实值，已停止这一步后置计算。"
@@ -1245,6 +1280,22 @@ def _execute_plan(
                     }
                 )
                 continue
+            partial_dependencies = [
+                dependency
+                for dependency in node.depends_on
+                if dependency in partial_scope_empty_nodes
+            ]
+            partial_detail = "；".join(
+                partial_scope_details[dependency]
+                for dependency in partial_dependencies
+                if partial_scope_details.get(dependency)
+            )
+            if partial_dependencies:
+                answer = (
+                    f"{answer}；覆盖边界：{partial_detail}。"
+                    "新增或缺失结论只代表有记录覆盖的重叠部分；"
+                    "未覆盖部分仍无法判断。"
+                )
             rows = tuple(
                 row for row in payload.get("rows") or () if isinstance(row, dict)
             )
@@ -1274,6 +1325,10 @@ def _execute_plan(
                     "preview_rows": list(observation.preview_rows),
                     "rows": list(observation.result_rows),
                     "calculation": payload.get("calculation") or {},
+                    "coverage_verdict": (
+                        PARTIAL if partial_dependencies else ""
+                    ),
+                    "coverage_detail": partial_detail,
                 }
             )
             continue
@@ -1418,6 +1473,8 @@ def _execute_plan(
             accepted_specs[node.id] = effective_spec
             answers_by_id[node.id] = answer
             empty_scope_nodes.add(node.id)
+            partial_scope_empty_nodes.add(node.id)
+            partial_scope_details[node.id] = scope_facts.detail
             sections.append(
                 {
                     **_section_identity(node),
@@ -1593,6 +1650,7 @@ def _execute_plan(
                     "已核对范围覆盖，不是查询执行失败。"
                 )
             empty_scope_nodes.add(node.id)
+            inside_scope_empty_nodes.add(node.id)
         else:
             answer = _answer_text(
                 effective_spec,
@@ -1806,6 +1864,7 @@ def start_single_turn(
     schema: PhysicalSchemaView | None = None,
     reach: FieldReachSet | None = None,
     providers: tuple[Any, ...] | list[Any] | None = None,
+    intent: str = "",
 ) -> TurnStart:
     schema = schema or _default_schema(kind)
     grounded = field_grounding.ground(kind, question)
@@ -1830,6 +1889,7 @@ def start_single_turn(
                     audit=True,
                     registry=registry,
                     subject=subject_resolution.subject,
+                    intent=intent,
                 )
                 break
             except QuerySubjectConflict as exc:

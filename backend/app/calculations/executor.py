@@ -10,6 +10,7 @@ from .domain.analysis import analyze_evidence
 from .domain.proportion import is_proportion_calculation
 from .domain.rendering import render_calculation
 from .evidence import compact_table_evidence, row_with_group_labels
+from .group_change import calculate_group_change
 from .models import CalculationOperand, CalculationRequest
 from .numbers import as_decimal, numeric_value
 from .registry import default_calculation_registry
@@ -153,6 +154,7 @@ def input_shape(tool: str) -> str:
         "calculate_scalar": "scalar_list",
         "calculate_columns": "rows",
         "calculate_series": "series",
+        "calculate_group_change": "paired_grouped_rows",
         "calculate_datetime_interval": "temporal_scalar_list",
     }.get(tool, "")
 
@@ -492,6 +494,10 @@ def execute_calculation(
         result = _calculate_series_request(request, results)
         if isinstance(result, dict):
             return result
+    elif request.tool == "calculate_group_change":
+        result = _calculate_group_change_request(request, results)
+        if isinstance(result, dict):
+            return result
     else:
         return calculation_failure(
             calculate_columns(
@@ -545,6 +551,7 @@ def execute_calculation(
     elif request.tool in {
         "calculate_scalar",
         "calculate_series",
+        "calculate_group_change",
         "calculate_datetime_interval",
     }:
         analysis = {
@@ -714,5 +721,98 @@ def _calculate_series_request(
         request.operation,
         labels,
         values,
+        precision=request.precision,
+    )
+
+
+def _calculate_group_change_request(
+    request: CalculationRequest,
+    results: dict[str, dict[str, Any]],
+) -> Any:
+    by_name = {item.name: item for item in request.operands}
+    labels_operand = by_name.get("labels")
+    before_operand = by_name.get("before")
+    after_operand = by_name.get("after")
+    if (
+        labels_operand is None
+        or before_operand is None
+        or after_operand is None
+        or not labels_operand.source
+        or not before_operand.source
+        or not after_operand.source
+    ):
+        return calculate_group_change(
+            request.operation,
+            [],
+            [],
+            label_field="",
+            before_field="",
+            after_field="",
+            output_field="",
+        ).failure(
+            "calculation_operand_missing",
+            "分组变化计算需要 labels、before、after 三个来源",
+        )
+    labels_source = results.get(str(labels_operand.source.get("node") or ""))
+    before_source = results.get(str(before_operand.source.get("node") or ""))
+    after_source = results.get(str(after_operand.source.get("node") or ""))
+    missing_nodes = [
+        str(operand.source.get("node") or "")
+        for operand, source in (
+            (labels_operand, labels_source),
+            (before_operand, before_source),
+            (after_operand, after_source),
+        )
+        if source is None
+    ]
+    if (
+        labels_source is None
+        or before_source is None
+        or after_source is None
+    ):
+        return calculate_group_change(
+            request.operation,
+            [],
+            [],
+            label_field="",
+            before_field="",
+            after_field="",
+            output_field="",
+        ).failure(
+            "calculation_operand_missing",
+            "分组变化计算的来源节点不存在",
+            missing_nodes=missing_nodes,
+        )
+    output_field = (
+        request.output.label
+        if request.output is not None
+        and (request.output.label or request.output.name)
+        else ""
+    )
+    return calculate_group_change(
+        request.operation,
+        [
+            row
+            for row in before_source.get("rows") or []
+            if isinstance(row, dict)
+        ],
+        [
+            row
+            for row in after_source.get("rows") or []
+            if isinstance(row, dict)
+        ],
+        label_field=field_label(
+            labels_source,
+            str(labels_operand.source.get("field") or ""),
+        ),
+        before_field=field_label(
+            before_source,
+            str(before_operand.source.get("field") or ""),
+        ),
+        after_field=field_label(
+            after_source,
+            str(after_operand.source.get("field") or ""),
+        ),
+        output_field=output_field,
         precision=request.precision,
     )

@@ -361,11 +361,31 @@ def _overrides() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _enum_code_maps() -> dict[tuple[str, str], dict[str, str]]:
+    from .capability_mdl_projection import enum_code_map, enum_definitions
+
+    result: dict[tuple[str, str], dict[str, str]] = {}
+    for table, column in enum_definitions():
+        result[(table, column)] = enum_code_map(table, column)
+    return result
+
+
+def _enum_definitions() -> dict[tuple[str, str], dict[str, Any]]:
+    from .capability_mdl_projection import enum_definitions
+
+    return {
+        key: dict(value)
+        for key, value in enum_definitions().items()
+    }
+
+
 def _decorate(kind: str, live: dict[str, Any]) -> dict[str, Any]:
     """给实时结构补上 label / code_map / 角色 / 外键，成为"字段目录"。"""
     raw_overrides = _overrides().get(kind) or {}
     table_overrides = raw_overrides.get("tables") or {}
     overrides = raw_overrides.get("columns") or {}
+    enum_code_maps = _enum_code_maps()
+    enum_definitions = _enum_definitions()
     tables: list[dict[str, Any]] = []
     for table in live.get("tables") or []:
         name = str(table.get("table"))
@@ -381,13 +401,22 @@ def _decorate(kind: str, live: dict[str, Any]) -> dict[str, Any]:
                 continue
             comment = str(col.get("comment") or "")
             override = (overrides.get(name) or {}).get(column_name) or {}
-            label = str(override.get("label") or _label_from_comment(comment, column_name))
+            enum = enum_definitions.get((name, column_name)) or {}
+            label = str(
+                enum.get("label")
+                or override.get("label")
+                or _label_from_comment(comment, column_name)
+            )
             # 极简注释列（注释就一个"米"字）补成"表业务名 + 列名语义"，否则它在字段触达里
             # 永远拿不到分（_phrase_hit 要求标签长度 ≥2）。人工 override 的 label 不动。
             if not override.get("label"):
                 label = _enrich_tiny_label(table_label, column_name, label)
             ctype = str(col.get("type") or "").lower()
-            code_map = dict(override.get("code_map") or _code_map_from_comment(comment) or {})
+            code_map = dict(
+                enum_code_maps.get((name, column_name))
+                or _code_map_from_comment(comment)
+                or {}
+            )
             # 列别名（口语说法）：库里的列注释是"病害类型"，用户常说"病害名称"——
             # 注释匹配不上这类说法，点名的字段整列丢掉（实测"病害代码对应的病害名称"）。
             aliases = [str(item) for item in override.get("aliases") or [] if str(item).strip()]
@@ -416,6 +445,11 @@ def _decorate(kind: str, live: dict[str, Any]) -> dict[str, Any]:
                     "type": ctype,
                     "comment": comment,
                     "code_map": code_map,
+                    "enum_key": (
+                        f"{name}.{column_name}"
+                        if (name, column_name) in enum_definitions
+                        else ""
+                    ),
                     "aliases": aliases,
                     "roles": roles,
                     "join": {"table": fk[0], "column": fk[1], "on": fk[2]} if fk else None,

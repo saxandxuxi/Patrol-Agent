@@ -1,6 +1,6 @@
 name: ai_asset_main
 properties:
-  description: 巡查资产信息表
+  description: 巡查资产记录：巡查资产信息表
 table_reference:
   catalog: ''
   schema: new_four_road_base_ai

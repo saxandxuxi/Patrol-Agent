@@ -1,6 +1,6 @@
 name: damage_dict
 properties:
-  description: 病害类型字典。病害表按 problem_base_id = id 精确关联，按 id 保留每条记录， 避免 problem_code 重复时把病害数量放大。
+  description: 病害类型字典：病害表按 problem_base_id = id 精确关联，按 id 保留每条记录， 避免 problem_code 重复时把病害数量放大。
 ref_sql: "SELECT id, problem_code, problem_type, disease_categories_type,\n       length_unit, formula, del_flag\nFROM ai_problem_base\nWHERE problem_type IS NOT NULL\n  AND (del_flag = 0 OR del_flag IS\
   \ NULL)\n"
 columns:
@@ -133,8 +133,8 @@ columns:
 - name: category_name
   type: VARCHAR
   is_calculated: true
-  expression: CASE disease_categories_type WHEN '0' THEN '路面病害' WHEN '5' THEN '路基病害' WHEN '10' THEN '沿路设施' WHEN '15' THEN '交安事件' ELSE disease_categories_type END
+  expression: CASE disease_categories_type WHEN '0' THEN '路面病害' WHEN '5' THEN '路基病害' WHEN '10' THEN '沿路设施' WHEN '15' THEN '交安事件' ELSE COALESCE(NULLIF(disease_categories_type, ''), '未填写') END
   properties:
-    description: 病害大类（路面病害/路基病害/沿路设施/交安事件）
+    description: 病害大类
 primary_key: id
 cached: false

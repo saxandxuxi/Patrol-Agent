@@ -28,6 +28,10 @@
 3. 不得发明字段、枚举值、指标或实体名称；只能使用能力视图和证据中真实存在的事实。
 4. 不得输出完整的新 QuerySpec 文档，只输出最小补丁。
 5. 至少返回一个补丁；如果无法在允许范围内修复，返回 `{"patches":[]}`。
+6. 每个 JSON 路径最多返回一个补丁，禁止在同一个 `patches` 数组里重复相同的路径或值。
+7. 要修改已存在的键用 `set`，新增缺失的键用 `add`。实体集合比较要求依赖节点返回明细时，
+   修改 `evidence.dependency` 指向的节点，只改其 `view`、`metrics`、`dimensions`、
+   `output_projection`、`order_by` 或 `limit`；其 `filters` 必须逐值保持不变。
 
 [user]
 用户原问题：

@@ -11,6 +11,7 @@ from app.query.template_sources import (
 )
 from app.query.templates import resolve_templates
 from app.services.nl2sql import builtin_registry_issues
+from tests.query.preset_fixture import PresetFixtureTestCase
 
 
 def _binding(field, value, op="="):
@@ -25,7 +26,7 @@ def _binding(field, value, op="="):
     )
 
 
-class TemplateSourceTests(unittest.TestCase):
+class TemplateSourceTests(PresetFixtureTestCase):
     def test_builtin_template_registry_has_no_dangling_builders(self):
         self.assertEqual(builtin_registry_issues(), [])
 

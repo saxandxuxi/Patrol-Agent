@@ -3,9 +3,10 @@ from unittest.mock import patch
 
 from app.routers import preset
 from app.services import preset_lib
+from tests.query.preset_fixture import PresetFixtureTestCase
 
 
-class PresetNumericTemplateTests(unittest.TestCase):
+class PresetNumericTemplateTests(PresetFixtureTestCase):
     def test_numeric_parameter_hint_is_exposed_to_quick_query_ui(self):
         with patch.object(preset, "_options_for", return_value=[]):
             data = preset.preset_queries(with_sql=0)

@@ -1,10 +1,9 @@
 name: disease
 properties:
-  description: 病害记录（一行一条病害）。只有 del_flag = 0 才是有效数据。
+  description: 病害记录：一行一条病害。只有 del_flag = 0 才是有效数据。
 ref_sql: "SELECT ai_problem.*,\n       CAST(JSON_EXTRACT(pic_position, '$.confidence') AS DECIMAL(10,6)) AS confidence,\n       (SELECT r.short_name FROM basic_facilities_routes r\n         WHERE r.id =\
-  \ ai_problem.routes_id LIMIT 1) AS route_name,\n       (SELECT b.problem_type FROM ai_problem_base b\n         WHERE b.id = ai_problem.problem_base_id AND b.problem_type IS NOT NULL LIMIT 1) AS problem_type_name,\n\
-  \       (CASE ai_problem.categories_type\n                 WHEN '0' THEN '路面病害' WHEN '5' THEN '路基病害'\n                 WHEN '10' THEN '沿路设施' WHEN '15' THEN '交安事件'\n                 ELSE ai_problem.categories_type\
-  \ END) AS category_name\nFROM ai_problem\n"
+  \ ai_problem.routes_id LIMIT 1) AS route_name,\n       (SELECT b.problem_type FROM ai_problem_base b\n         WHERE b.id = ai_problem.problem_base_id AND b.problem_type IS NOT NULL LIMIT 1) AS problem_type_name\n\
+  FROM ai_problem\n"
 columns:
 - name: id
   type: VARCHAR
@@ -121,7 +120,7 @@ columns:
   type: VARCHAR
   is_calculated: false
   properties:
-    description: 病害大类编码：0=路面病害、5=路基病害、10=沿路设施、15=交安事件 （直接用 category_name 更省事；不要拿 damage_type 去关联字典算大类，那样只有 936 条能算出来）
+    description: 病害大类编码；中文显示统一使用 category_name。
 - name: problem_number
   type: VARCHAR
   is_calculated: false
@@ -321,8 +320,45 @@ columns:
     description: 病害类型中文名（已关联好，不要再 JOIN ai_problem_base）
 - name: category_name
   type: VARCHAR
-  is_calculated: false
+  is_calculated: true
+  expression: CASE categories_type WHEN '0' THEN '路面病害' WHEN '5' THEN '路基病害' WHEN '10' THEN '沿路设施' WHEN '15' THEN '交安事件' ELSE COALESCE(NULLIF(categories_type, ''), '未填写') END
   properties:
-    description: 病害大类中文名（路面病害/路基病害/沿路设施/交安事件）
+    description: 病害大类
+- name: damage_type_name
+  type: VARCHAR
+  is_calculated: true
+  expression: CASE damage_type WHEN '0' THEN '轻度' WHEN '5' THEN '中度' WHEN '10' THEN '重度' ELSE COALESCE(NULLIF(damage_type, ''), '未填写') END
+  properties:
+    description: 损坏程度
+- name: up_or_down_name
+  type: VARCHAR
+  is_calculated: true
+  expression: CASE up_or_down WHEN '0' THEN '全部/未区分' WHEN '1' THEN '上行' WHEN '2' THEN '下行' ELSE COALESCE(NULLIF(up_or_down, ''), '未填写') END
+  properties:
+    description: 上下行
+- name: collect_name
+  type: VARCHAR
+  is_calculated: true
+  expression: CASE collect WHEN '0' THEN '未收藏' WHEN '1' THEN '已收藏' ELSE COALESCE(NULLIF(collect, ''), '未填写') END
+  properties:
+    description: 收藏
+- name: track_problem_name
+  type: VARCHAR
+  is_calculated: true
+  expression: CASE track_problem WHEN '0' THEN '否' WHEN '1' THEN '是' ELSE COALESCE(NULLIF(track_problem, ''), '未填写') END
+  properties:
+    description: 重点关注
+- name: operate_type_name
+  type: VARCHAR
+  is_calculated: true
+  expression: CASE operate_type WHEN '0' THEN '待转工单' WHEN '3' THEN '病害恢复' WHEN '5' THEN '删除工单' WHEN '10' THEN '转工单' WHEN '15' THEN '忽略病害' ELSE COALESCE(NULLIF(operate_type, ''), '未填写') END
+  properties:
+    description: 病害操作
+- name: road_surface_type_name
+  type: VARCHAR
+  is_calculated: true
+  expression: CASE road_surface_type WHEN '沥青混凝土' THEN '沥青混凝土' WHEN '水泥混凝土' THEN '水泥混凝土' WHEN '沥青' THEN '沥青' WHEN '水泥' THEN '水泥' ELSE COALESCE(NULLIF(road_surface_type, ''), '未填写') END
+  properties:
+    description: 路面类型
 primary_key: id
 cached: false

@@ -1,6 +1,6 @@
 name: ai_work_order
 properties:
-  description: 养护_任务工单
+  description: 病害工单：养护_任务工单
 table_reference:
   catalog: ''
   schema: new_four_road_base_ai

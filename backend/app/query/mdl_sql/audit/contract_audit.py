@@ -5,7 +5,12 @@ from collections.abc import Mapping
 import sqlglot
 from sqlglot import exp
 
-from ..models import MdlQueryContract, ParsedMdlSql, SqlIssue
+from ..models import (
+    MdlQueryContract,
+    ParsedMdlSql,
+    RelationshipSubgraph,
+    SqlIssue,
+)
 from .ast_facts import (
     allowed_fields,
     cte_names,
@@ -21,6 +26,7 @@ from .view_audit import audit_view_shape
 def audit_contract(
     parsed: ParsedMdlSql,
     contract: MdlQueryContract,
+    subgraph: RelationshipSubgraph | None = None,
 ) -> tuple[SqlIssue, ...]:
     issues = list(parsed.issues)
     if not parsed.valid:
@@ -61,6 +67,7 @@ def audit_contract(
             aliases=aliases,
             contract=contract,
             dialect=parsed.dialect,
+            relationship_fields=_relationship_fields(subgraph),
         )
     )
     issues.extend(
@@ -68,6 +75,9 @@ def audit_contract(
             expression,
             aliases=aliases,
             contract=contract,
+            relationships=(
+                subgraph.relationships if subgraph is not None else ()
+            ),
         )
     )
     issues.extend(
@@ -87,6 +97,21 @@ def audit_contract(
         )
     )
     return tuple(issues)
+
+
+def _relationship_fields(
+    subgraph: RelationshipSubgraph | None,
+) -> tuple[tuple[str, str], ...]:
+    if subgraph is None:
+        return ()
+    fields: list[tuple[str, str]] = []
+    for relationship in subgraph.relationships:
+        for pair in relationship.field_pairs:
+            for value in pair:
+                model, separator, column = str(value).partition(".")
+                if separator and model and column:
+                    fields.append((model, column))
+    return tuple(dict.fromkeys(fields))
 
 
 def _model_issues(
@@ -120,8 +145,13 @@ def _field_issues(
     aliases: Mapping[str, str],
     contract: MdlQueryContract,
     dialect: str,
+    relationship_fields: tuple[tuple[str, str], ...],
 ) -> tuple[SqlIssue, ...]:
-    allowed = allowed_fields(contract, dialect)
+    allowed = allowed_fields(
+        contract,
+        dialect,
+        relationship_fields,
+    )
     issues: list[SqlIssue] = []
     for field in used_business_fields(
         expression,

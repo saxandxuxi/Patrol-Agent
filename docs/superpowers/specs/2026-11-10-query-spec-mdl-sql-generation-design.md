@@ -13,8 +13,9 @@
 问题不只是缺少九段 `if/elif`：
 
 1. 九个主体的业务字段、角色、枚举和指标还不完整。
-2. 能力注册表虽然从物理目录补出了字段，但 `route`、`section`、`asset`、`bridge`、
-   `tunnel`、`slope`、`project` 等主体在 `subjects.yaml` 中没有完整 JOIN 声明。
+2. 能力注册表虽然从物理目录补出了字段，但 JOIN 拓扑不能继续手写在
+   `subjects.yaml` 或主体分支中；`route`、`section`、`asset`、`bridge`、
+   `tunnel`、`slope`、`project` 等主体必须直接消费 Wren MDL 的关系事实。
 3. QuerySpec 编译器把主体、字段解析、JOIN、指标、展示表达式和 SQL 拼装集中在同一个
    1161 行文件中，继续增加主体会形成不可维护的大型文件。
 4. 同一个“国道路段”条件可能服务于不同最终答案：
@@ -69,26 +70,28 @@ LLM 兜底不恢复已经废弃的“直接写物理 SQL”旧链路，也不允
 
 ## 四、事实源与权限边界
 
-不同阶段使用不同视图，但事实来源必须唯一。
+不同事实承担不同职责，同时进入同一个受控链路。这里没有“MDL 优先、业务配置兜底”
+或“业务配置优先、MDL 只做校验”的关系。
 
-| 事实 | 唯一来源 | 消费者 | 不允许的行为 |
+| 事实 | 来源 | 消费者 | 不允许的行为 |
 |---|---|---|---|
 | 用户要查什么、最终主体、范围、视图 | QuerySpec | 合同构建器、审计器 | LLM SQL 生成器修改合同 |
-| 业务字段标签、角色、枚举、指标、规则 | 能力注册表 | Planner、合同构建器、LLM 上下文、审计器 | Python 中另建业务映射 |
-| 模型名、字段名、类型、计算列、MDL 关系 | Wren MDL 与 `relationships.yml` | 合同构建器、SQL 生成器、审计器 | LLM 猜模型、猜字段、写物理表 |
+| 模型名、字段名、类型、计算列、cube 指标、MDL 关系 | Wren MDL 与 `relationships.yml` | 能力注册表、合同构建器、SQL 生成器、审计器 | Python 或业务配置复制第二份 JOIN 拓扑 |
+| 业务字段标签、角色、枚举、指标口径、谓词、断言 | `resources/capabilities/` | 能力注册表、Planner、合同构建器、LLM 上下文、审计器 | Python 中另建业务映射 |
+| 口语关键词和固定格式命中 | `assist_rules.yaml` | Planner、MDL-SQL 上下文 | 直接决定主体、字段、过滤、SQL 或答案 |
 | 实际执行 SQL | Wren `dry-plan` | 数据库执行器 | LLM 直接生成物理 SQL |
 | SQL 是否表达合同 | 统一 SQL 审计器 | 两条 SQL 生成路径 | 依据回答文本是否非空判断成功 |
 
-### 4.1 权威优先级
-
-发生冲突时：
+### 4.1 权威边界，不是来源优先级
 
 1. QuerySpec 决定“查什么”，LLM 不得改主体、过滤、指标、时间、路线或数量范围。
-2. 能力注册表决定业务字段、枚举、指标公式和规则。
-3. MDL 决定可用模型、真实列名、计算列和关系字段。
-4. 关系子图决定哪些 JOIN 合法。
-5. Wren `dry-plan` 决定 MDL-SQL 能否展开成物理 SQL。
-6. SQL 审计器决定生成的 SQL 是否仍然表达 QuerySpec。
+2. Wren MDL 和 `resources/capabilities/` 是并行一等事实。前者负责真实模型、列、
+   计算列、cube 指标和关系拓扑，后者负责巡检业务口径、枚举、实体层级和特殊谓词。
+3. 两套事实必须同时进入合同和生成上下文；任何一套都不能替代另一套。
+4. 同名指标公式和单位一致时合并；冲突时返回结构化证据，不静默选边。
+5. `assist_evidence` 只提供 `trusted=false` 的口语候选，不得覆盖合同、MDL 或业务能力。
+6. Wren `dry-plan` 决定 MDL-SQL 能否展开成物理 SQL。
+7. SQL 审计器决定生成的 SQL 是否仍然表达 QuerySpec。
 
 冲突不能被提示词静默解决，必须返回结构化失败证据。
 
@@ -162,9 +165,10 @@ output_aliases
 
 合同只读，确定性编译器和 LLM 兜底都不得修改合同。合同哈希进入 SQL 审计和失败证据。
 
-## 六、三份收窄视图
+## 六、并行收窄视图
 
 上下文选择完全由合同、能力注册表和 MDL 的结构化引用决定，不重新解释用户原话。
+业务能力、MDL 子集、关系子图和口语候选证据同时提供，不设置来源优先级。
 
 ### 6.1 业务能力视图
 
@@ -263,7 +267,19 @@ condition = disease.routes_id = route.id
 
 两题都使用国道条件，但根模型、关系边和结果主体不同。
 
-### 6.4 上下文预算
+### 6.4 口语候选证据
+
+输入是 `assist_rules.yaml` 对用户原话产生、并且仍标记为 `trusted=false` 的结构化证据。
+
+选择规则：
+
+1. 只把当前问题和当前数据库类型产生的候选证据放入上下文。
+2. 每条证据保留 `rule_id`、`raw_span`、候选类型、候选字段或值、原因和 `trusted=false`。
+3. 候选证据可以帮助 LLM 理解“第三车道”“最近五次”等口语表达，但不能新增合同外过滤。
+4. 候选证据与合同、MDL 字段或业务指标冲突时，模型必须停止并报告，不能自行选边。
+5. 确定性编译器仍只执行合同事实；候选证据不能绕过 QuerySpec 校验直接进入 SQL。
+
+### 6.5 上下文预算
 
 上下文超限时不能从中间截断 JSON、MDL 字段或关系。
 
@@ -287,12 +303,14 @@ condition = disease.routes_id = route.id
 系统提示只规定流程和权限：
 
 1. 根据合同生成一条 MDL-SQL，不重新理解或修改用户问题。
-2. 只使用给定的模型、字段、指标、枚举和关系 ID。
-3. 使用 MDL 模型名，不写物理库名或物理表名。
-4. QuerySpec 和合同是只读权威。
-5. 合同与 MDL 或业务能力冲突时停止并报告，不自行选边。
-6. 只执行一条只读 `SELECT` 或 `WITH ... SELECT`。
-7. 只输出规定 JSON，不输出 Markdown、思考过程或解释。
+2. `business_capability` 与 `mdl_subset` 是并行一等事实，必须同时满足。
+3. 只使用给定的模型、字段、指标、枚举和关系 ID。
+4. 使用 MDL 模型名，不写物理库名或物理表名。
+5. QuerySpec 和合同是只读权威。
+6. `assist_evidence` 是 `trusted=false` 的候选线索，不能直接决定 SQL。
+7. 合同与 MDL 或业务能力冲突时停止并报告，不自行选边。
+8. 只执行一条只读 `SELECT` 或 `WITH ... SELECT`。
+9. 只输出规定 JSON，不输出 Markdown、思考过程或解释。
 
 ### 7.2 user JSON
 
@@ -309,6 +327,7 @@ condition = disease.routes_id = route.id
   "contract": {},
   "business_capability": {},
   "mdl_subset": {},
+  "assist_evidence": [],
   "relationship_subgraph": [],
   "compiler_failure": null
 }
@@ -347,6 +366,10 @@ preserve_contract_hash
 空 SQL、失败文本、Markdown、多条 SQL 和无法解析的 JSON 都视为 LLM 兜底失败。
 
 ## 八、确定性优先与 LLM 兜底
+
+这里描述的是“由谁组装 MDL-SQL”的执行路径，不是 MDL 与业务能力之间的事实优先级。
+无论走确定性路径还是 LLM 补写路径，`business_capability` 与 `mdl_subset` 都必须同时
+满足，`assist_evidence` 都只能作为 `trusted=false` 候选证据。
 
 ### 8.1 前置条件
 
@@ -783,7 +806,8 @@ elif subject == "patrol":
 mdl_model: <model_name>
 ```
 
-不允许在 Python 中维护“主体 → 模型”的第二份映射。
+不允许在 Python 中维护“主体 → 模型”的第二份映射，也不允许在 `subjects.yaml`
+保存第二份 JOIN 链。
 
 ### 16.2 mdl_compilation.yaml
 
@@ -839,6 +863,9 @@ require_soft_delete
 4. 完整枚举只在声明完整性断言时出现。
 5. 实体层级只在引用对应实体族时出现。
 6. 上下文超限时不发生静默截断。
+7. `business_capability`、`mdl_subset` 和 `assist_evidence` 同轮出现，
+   口语候选证据全部保持 `trusted=false`。
+8. 同名指标一致时合并能力，冲突时返回结构化证据而不是静默选边。
 
 ### 18.3 编译与兜底
 

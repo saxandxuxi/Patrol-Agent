@@ -1,6 +1,6 @@
 name: route
 properties:
-  description: 路线台账（路线名、技术等级、车道数、路面宽度、起止桩号）。路线过滤走这里。
+  description: 路线台账：路线名、技术等级、车道数、路面宽度、起止桩号。路线过滤走这里。
 ref_sql: "SELECT *,\n       COALESCE(\n         NULLIF(\n           (\n             CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(end_num, '+', 1), 'K', -1) AS UNSIGNED) * 1000\n             + CAST(SUBSTRING_INDEX(end_num,\
   \ '+', -1) AS UNSIGNED)\n             - CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(start_num, '+', 1), 'K', -1) AS UNSIGNED) * 1000\n             - CAST(SUBSTRING_INDEX(start_num, '+', -1) AS UNSIGNED)\n  \
   \         ) / 1000.0,\n           0\n         ),\n         NULLIF(\n           (\n             SELECT SUM(s.end_meter_total - s.start_meter_total) / 1000.0\n             FROM basic_facilities_sections\
@@ -197,5 +197,11 @@ columns:
   is_calculated: false
   properties:
     description: 路线实际长度（公里），优先按路线自身起止桩号差，桩号差为 0 时才按所属路段起止米数求和兜底。每公里密度、平均间距都用它。
+- name: level_name
+  type: VARCHAR
+  is_calculated: true
+  expression: CASE level WHEN '0' THEN '国道' WHEN '1' THEN '省道' WHEN '2' THEN '县道' WHEN '3' THEN '乡道' WHEN '4' THEN '村道' ELSE COALESCE(NULLIF(level, ''), '未填写') END
+  properties:
+    description: 行政等级
 primary_key: id
 cached: false

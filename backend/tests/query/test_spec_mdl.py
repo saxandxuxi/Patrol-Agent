@@ -323,7 +323,8 @@ class SpecMdlTests(unittest.TestCase):
         )
 
         self.assertIn("disease.categories_type = '15'", sql)
-        self.assertIn("disease.category_name AS 病害大类", sql)
+        self.assertIn("CASE disease.categories_type", sql)
+        self.assertIn("AS 病害大类", sql)
 
     def test_disease_distribution_can_group_by_category_name(self):
         sql = compile_spec_mdl(
@@ -343,8 +344,9 @@ class SpecMdlTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("disease.category_name AS 病害大类", sql)
-        self.assertIn("GROUP BY disease.category_name", sql)
+        self.assertIn("CASE disease.categories_type", sql)
+        self.assertIn("AS 病害大类", sql)
+        self.assertIn("GROUP BY CASE disease.categories_type", sql)
 
     def test_disease_damage_severity_uses_authoritative_dictionary(self):
         sql = compile_spec_mdl(
@@ -433,8 +435,9 @@ class SpecMdlTests(unittest.TestCase):
             "route.id = '51c9c71ea0f811f1a6310242ac120002'",
             sql,
         )
-        self.assertIn("LEFT JOIN patrol_route", sql)
-        self.assertIn("LEFT JOIN route", sql)
+        self.assertIn("EXISTS", sql)
+        self.assertIn("INNER JOIN route", sql)
+        self.assertIn("patrol_route.patrol_id = patrol.id", sql)
         self.assertNotIn("patrol.route_name", sql)
 
     def test_patrol_distribution_uses_linked_disease_count(self):
@@ -463,6 +466,30 @@ class SpecMdlTests(unittest.TestCase):
             sql,
         )
         self.assertNotIn("COUNT(*) AS 数量", sql)
+
+    def test_patrol_count_stays_distinct_when_grouped_by_route(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="patrol",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("equipment_id", "route_name"),
+                filters=(),
+                output_projection=(
+                    "equipment_id",
+                    "route_name",
+                    "count",
+                ),
+                order_by=(),
+                limit=None,
+                required_assertions=("preserve_user_scope",),
+                question="每台巡检设备在各条路线上分别完成多少次任务",
+            )
+        )
+
+        self.assertIn("COUNT(DISTINCT patrol.id) AS 数量", sql)
 
     def test_disease_task_evidence_uses_real_task_number(self):
         spec = QuerySpec(
@@ -600,6 +627,27 @@ class SpecMdlTests(unittest.TestCase):
 
         self.assertIn("COUNT(*) AS", sql)
         self.assertIn("SUM(disease.area)", sql)
+
+    def test_grouped_metrics_are_not_dropped_by_output_projection(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("problem_type_name",),
+                filters=(),
+                output_projection=("problem_type_name",),
+                order_by=(),
+                limit=None,
+                required_assertions=(),
+                question="按病害类型统计数量",
+            )
+        )
+
+        self.assertIn("COUNT(*) AS 数量", sql)
+        self.assertIn("GROUP BY", sql)
 
     def test_pile_segment_aliases_compile_to_same_bucket(self):
         sql = compile_spec_mdl(
@@ -948,15 +996,9 @@ class SpecMdlTests(unittest.TestCase):
             )
         )
 
-        self.assertIn(
-            frozenset(
-                {
-                    ("patrol", "id"),
-                    ("disease", "patrol_id"),
-                }
-            ),
-            join_equality_pairs(sql, "patrol"),
-        )
+        self.assertIn("EXISTS", sql)
+        self.assertIn("disease.patrol_id", sql)
+        self.assertIn("patrol.id", sql)
         self.assertIn("patrol.task_number = 'XJJL202611040003'", sql)
         self.assertIn("GROUP BY COALESCE(disease.problem_type_name", sql)
 
@@ -1014,9 +1056,47 @@ class SpecMdlTests(unittest.TestCase):
 
         self.assertIn("route.level", sql)
         self.assertIn("国道", sql)
-        self.assertIn("道路等级", sql)
+        self.assertIn("行政等级", sql)
         self.assertIn("JOIN route ON disease.routes_id = route.id", sql)
         self.assertIn("GROUP BY CASE route.level", sql)
+
+    def test_joined_model_filter_is_in_where_not_join_condition(self):
+        sql = compile_spec_mdl(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="disease",
+                view="distribution",
+                metrics=("route_length_km",),
+                dimensions=("route_name",),
+                filters=(
+                    ValueBinding(
+                        field="route_name",
+                        op="=",
+                        storage_value="route-1",
+                        display_value="路线一",
+                        source="user_explicit",
+                        resolver="route_dictionary",
+                        raw_text="路线一",
+                    ),
+                ),
+                output_projection=("route_name", "route_length_km"),
+                order_by=(),
+                limit=None,
+                required_assertions=("preserve_user_scope",),
+                question="统计指定路线的病害数量",
+            )
+        )
+
+        self.assertIn(
+            "LEFT JOIN route ON disease.routes_id = route.id",
+            sql,
+        )
+        self.assertIn("route.id = 'route-1'", sql)
+        self.assertNotIn(
+            "ON disease.routes_id = route.id AND route.id",
+            sql,
+        )
 
     def test_disease_distribution_uses_calculated_disease_fields(self):
         spec = QuerySpec(
@@ -1142,7 +1222,7 @@ class SpecMdlTests(unittest.TestCase):
         sql = compile_spec_mdl(spec)
         self.assertIn("patrol.equipment_id", sql)
         self.assertIn("LEFT JOIN patrol_route", sql)
-        self.assertIn("COUNT(*) AS 数量", sql)
+        self.assertIn("COUNT(DISTINCT patrol.id) AS 数量", sql)
         self.assertIn("GROUP BY patrol.equipment_id, route.short_name", sql)
 
     def test_patrol_task_detail_keeps_tasks_without_route_relations(self):
@@ -1191,7 +1271,7 @@ class SpecMdlTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("COUNT(*) AS 数量", sql)
+        self.assertIn("COUNT(DISTINCT patrol.id) AS 数量", sql)
 
     def test_dimension_list_without_metric_returns_distinct_dimensions(self):
         spec = QuerySpec(
@@ -1223,7 +1303,6 @@ class SpecMdlTests(unittest.TestCase):
             dimensions=(
                 "patrol_name",
                 "patrol_number",
-                "patrol_mileage",
                 "create_time",
             ),
             filters=(),

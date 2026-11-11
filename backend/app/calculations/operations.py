@@ -16,6 +16,8 @@ ROLE_NAMES = {
 
 
 def roles_for_tool(tool: str, operation: str) -> tuple[str, ...]:
+    if tool == "calculate_group_change":
+        return ("labels", "before", "after")
     if tool == "calculate_series":
         return ("labels", "values")
     if tool == "calculate_datetime_interval":

@@ -235,14 +235,13 @@ def _normalize_rolling_bindings(
         if not related:
             filters.extend(group)
             continue
-        source = group[0].source
         filters.append(
             replace(
                 group[0],
                 op="between",
                 storage_value=[_format(start), _format(end)],
                 display_value=f"{_format(start)} 至 {_format(end)}",
-                source=source,
+                source="business_rule",
                 resolver="named_period",
             )
         )
@@ -263,6 +262,12 @@ def _widen_binding(
     ) and len(binding.storage_value) == 2:
         lower = _parse_time(binding.storage_value[0])
         upper = _parse_time(binding.storage_value[1])
+        if lower == start and upper == end:
+            return replace(
+                binding,
+                source="business_rule",
+                resolver="named_period",
+            )
         if (
             lower is not None
             and upper is not None
@@ -274,12 +279,28 @@ def _widen_binding(
                 binding,
                 storage_value=[binding.storage_value[0], _format(end)],
                 display_value=f"{binding.storage_value[0]} 至 {_format(end)}",
+                source="business_rule",
+                resolver="named_period",
+            )
+        return binding
+    if binding.op == ">=":
+        lower = _parse_time(binding.storage_value)
+        if lower == start:
+            return replace(
+                binding,
+                source="business_rule",
                 resolver="named_period",
             )
         return binding
     if binding.op not in {"<", "<="}:
         return binding
     upper = _parse_time(binding.storage_value)
+    if binding.op == "<" and upper == end:
+        return replace(
+            binding,
+            source="business_rule",
+            resolver="named_period",
+        )
     if (
         upper is None
         or upper >= end
@@ -290,6 +311,7 @@ def _widen_binding(
         binding,
         storage_value=_format(end),
         display_value=_format(end),
+        source="business_rule",
         resolver="named_period",
     )
 
@@ -332,10 +354,16 @@ def normalize_named_period_window(
         lower_bounds = [
             parsed
             for parsed in (
-                _parse_time(item.storage_value)
+                _parse_time(
+                    item.storage_value[0]
+                    if item.op == "between"
+                    and isinstance(item.storage_value, (list, tuple))
+                    and item.storage_value
+                    else item.storage_value
+                )
                 for item in node.spec.filters
                 if str(item.field).rsplit(".", 1)[-1] in TIME_FIELDS
-                and str(item.op) in {">=", ">"}
+                and str(item.op) in {">=", ">", "between"}
             )
             if parsed is not None
         ]

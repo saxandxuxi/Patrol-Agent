@@ -1,6 +1,6 @@
 name: project_manage_project_main
 properties:
-  description: 工程管理_工程项目总表
+  description: 工程项目台账：工程管理_工程项目总表
 table_reference:
   catalog: ''
   schema: new_four_road_base_ai

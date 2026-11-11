@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import Any
 
 from ...capability_registry import CapabilityRegistry
+from ....semantic_aids import detect_evidence
 from ..errors import MdlSqlContextError
 from ..models import (
     MdlContext,
@@ -22,6 +23,8 @@ def build_prompt_context(
     contract: MdlQueryContract,
     registry: CapabilityRegistry,
     snapshot: MdlSnapshot,
+    *,
+    kind: str = "mysql",
 ) -> PromptContextBundle:
     policy = registry.snapshot.mdl_compilation
     if len(contract.allowed_models) > policy.max_models_per_contract:
@@ -43,6 +46,10 @@ def build_prompt_context(
             registry.snapshot,
         ),
         mdl_subset=build_mdl_context(contract, snapshot),
+        assist_evidence=tuple(
+            item.to_dict()
+            for item in detect_evidence(contract.question, kind)
+        ),
     )
 
 

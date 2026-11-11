@@ -1,77 +1,49 @@
 subjects:
+  # 表间关系只从 Wren MDL 读取；禁止在本文件重新添加 joins。
   disease:
     base_table: ai_problem
     mdl_model: disease
     # 病害类型字典（实体）由规划器直接看到：用户口语描述要映射到这里的规范类型。
     # 值仍然要经过字典解析校验，模型不能凭空造类型。
     entities: [disease_type]
-    joins:
-      route:
-        table: basic_facilities_routes
-        on: disease.routes_id = route.id
-      disease_patrol:
-        table: ai_maintain_patrol
-        on: disease.patrol_id = disease_patrol.id
-    allowed_views: [count, distribution, list, detail, top_records, top_groups, trend]
+    allowed_views: [count, sum, avg, distribution, list, detail, top_records, top_groups, trend]
   patrol:
     base_table: ai_maintain_patrol
     mdl_model: patrol
-    joins:
-      patrol_route:
-        table: ai_maintain_routes_patrol
-        on: patrol.id = patrol_route.patrol_id
-        type: left
-      route:
-        table: basic_facilities_routes
-        on: patrol_route.routes_id = route.id
-        type: left
-      disease:
-        table: ai_problem
-        on: patrol.id = disease.patrol_id
-        type: left
-    allowed_views: [count, distribution, list, detail, top_records, top_groups, trend]
+    allowed_views: [count, sum, avg, distribution, list, detail, top_records, top_groups, trend]
   route:
     base_table: basic_facilities_routes
     mdl_model: route
-    joins: {}
-    allowed_views: [count, distribution, list, detail, top_records, top_groups]
+    allowed_views: [count, sum, avg, distribution, list, detail, top_records, top_groups]
   section:
     base_table: basic_facilities_sections
     mdl_model: section
-    joins: {}
-    allowed_views: [count, distribution, list, detail, top_records, top_groups]
+    allowed_views: [count, sum, avg, distribution, list, detail, top_records, top_groups]
   pile_point:
     base_table: basic_facilities_sections_pile_detail
     mdl_model: pile_point
-    joins: {}
-    allowed_views: [count, distribution, list, detail, top_records, top_groups]
+    allowed_views: [count, sum, avg, distribution, list, detail, top_records, top_groups]
   asset:
     base_table: ai_asset_main
     mdl_model: ai_asset_main
-    joins: {}
-    allowed_views: [count, distribution, list, detail, top_records, top_groups]
+    allowed_views: [count, sum, avg, distribution, list, detail, top_records, top_groups]
   work_order:
     base_table: ai_work_order
     mdl_model: ai_work_order
-    joins: {}
-    allowed_views: [count, distribution, list, detail, top_records, top_groups, trend]
+    allowed_views: [count, sum, avg, distribution, list, detail, top_records, top_groups, trend]
   bridge:
     base_table: basic_facilities_bridges
     mdl_model: basic_facilities_bridges
-    joins: {}
-    allowed_views: [count, distribution, list, detail, top_records, top_groups]
+    allowed_views: [count, sum, avg, distribution, list, detail, top_records, top_groups]
   tunnel:
     base_table: basic_facilities_tunnels
     mdl_model: basic_facilities_tunnels
-    joins: {}
-    allowed_views: [count, distribution, list, detail, top_records, top_groups]
+    allowed_views: [count, sum, avg, distribution, list, detail, top_records, top_groups]
   slope:
     base_table: basic_facilities_slope
     mdl_model: basic_facilities_slope
-    joins: {}
-    allowed_views: [count, distribution, list, detail, top_records, top_groups]
+    allowed_views: [count, sum, avg, distribution, list, detail, top_records, top_groups]
   project:
     base_table: project_manage_project_main
     mdl_model: project_manage_project_main
-    joins: {}
-    allowed_views: [count, distribution, list, detail, top_records, top_groups]
+    allowed_views: [count, sum, avg, distribution, list, detail, top_records, top_groups]

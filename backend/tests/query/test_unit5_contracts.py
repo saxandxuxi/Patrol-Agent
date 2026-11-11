@@ -10,7 +10,8 @@ from app.query.contracts import (
     QuerySpecError,
     ValueBinding,
 )
-from app.query.spec_mdl import _patrol_dimension, _patrol_filter, _patrol_output
+from app.query.mdl_sql import load_mdl_snapshot
+from app.query.mdl_sql.contract_builder import build_mdl_query_contract
 from app.query.service import _aggregate_is_empty
 from app.query.values import resolve_value
 from app.query.verifier import verify_result
@@ -79,6 +80,7 @@ class PatrolDeviceFieldContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.registry = CapabilityRegistry.load()
+        cls.snapshot = load_mdl_snapshot("mysql")
 
     def test_registry_maps_device_code_to_equipment_id(self):
         capability = self.registry.snapshot.fields["patrol"]["device_code"]
@@ -86,21 +88,39 @@ class PatrolDeviceFieldContractTests(unittest.TestCase):
         self.assertEqual(capability.physical_table, "ai_maintain_patrol")
         self.assertEqual(capability.physical_column, "equipment_id")
 
-    def test_dimension_and_filter_share_the_same_column(self):
-        joins: set[str] = set()
-        expression, label = _patrol_dimension("device_code", joins)
-        where: list[str] = []
-        _patrol_filter("device_code", "=", "DEV-305", joins, where)
-
-        self.assertEqual(expression, "patrol.equipment_id")
-        self.assertEqual(label, "设备编号")
-        self.assertEqual(where, ["patrol.equipment_id = 'DEV-305'"])
-
-    def test_output_projection_can_show_device_code(self):
-        self.assertEqual(
-            _patrol_output("device_code"),
-            ("patrol.equipment_id", "设备编号"),
+    def test_dimension_filter_and_output_share_the_same_contract_column(self):
+        contract = build_mdl_query_contract(
+            QuerySpec(
+                id="q1",
+                kind="mysql",
+                subject="patrol",
+                view="distribution",
+                metrics=("count",),
+                dimensions=("device_code",),
+                filters=(
+                    binding("device_code", "=", "DEV-305"),
+                ),
+                output_projection=("device_code", "count"),
+                order_by=(),
+                limit=None,
+                required_assertions=("preserve_user_scope",),
+                question="统计设备 DEV-305 的巡检次数",
+            ),
+            self.registry,
+            self.snapshot,
+            plan_id="unit5",
         )
+        field = contract.field_bindings["device_code"]
+        output = next(
+            item
+            for item in contract.outputs
+            if item.output_id == "device_code"
+        )
+
+        self.assertEqual(field.expression, "patrol.equipment_id")
+        self.assertEqual(contract.filters[0].expression, "patrol.equipment_id")
+        self.assertEqual(output.expression, "patrol.equipment_id")
+        self.assertEqual(output.label, "设备编号")
 
     def test_user_supplied_device_code_list_keeps_user_explicit_source(self):
         value = resolve_value(

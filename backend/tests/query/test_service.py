@@ -702,6 +702,277 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("未覆盖部分", sections["q2"]["answer"])
         post_calc_executor.assert_not_called()
 
+    @patch("app.query.service.resolve_entity_comparison_batches")
+    @patch("app.query.service.validate_explicit_patrol_batches")
+    @patch("app.query.service.coverage_facts")
+    @patch("app.query.service.empty_scope_facts")
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    @patch("app.query.service._default_post_calc_executor")
+    def test_dataset_comparison_allows_inside_scope_empty_detail_dependency(
+        self,
+        post_calc_executor,
+        compile_query,
+        execute_compiled,
+        empty_scope_facts,
+        coverage_facts,
+        validate_explicit_patrol_batches,
+        resolve_entity_comparison_batches,
+    ):
+        def detail_spec(node_id: str) -> QuerySpec:
+            return QuerySpec(
+                id=node_id,
+                kind="mysql",
+                subject="disease",
+                view="list",
+                metrics=(),
+                dimensions=(),
+                filters=(
+                    ValueBinding(
+                        field="route_name",
+                        op="=",
+                        storage_value="route-1",
+                        display_value="长沙－芷江高速公路",
+                        source="user_explicit",
+                        resolver="route_dictionary",
+                    ),
+                    ValueBinding(
+                        field="problem_type_name",
+                        op="=",
+                        storage_value="泛油",
+                        display_value="泛油",
+                        source="user_explicit",
+                        resolver="disease_dictionary",
+                    ),
+                ),
+                output_projection=("problem_number", "pile_number"),
+                order_by=(),
+                limit=500,
+                required_assertions=("preserve_user_scope",),
+            )
+
+        comparison_spec = QuerySpec(
+            id="compare",
+            kind="mysql",
+            subject="disease",
+            view="data",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("dataset_comparison",),
+            comparison_depends_on=("before", "after"),
+        )
+        compile_query.side_effect = (
+            CompiledQuery("SELECT before", "wren", "wren"),
+            CompiledQuery("SELECT after", "wren", "wren"),
+        )
+        execute_compiled.side_effect = (
+            ExecutionObservation(
+                node_id="before",
+                ok=True,
+                engine="wren",
+                sql="SELECT before",
+                columns=("病害编号", "桩号"),
+            ),
+            ExecutionObservation(
+                node_id="after",
+                ok=True,
+                engine="wren",
+                sql="SELECT after",
+                columns=("病害编号", "桩号"),
+                row_count=1,
+                preview_rows=({"病害编号": "FY-1", "桩号": "K1+000"},),
+                result_rows=({"病害编号": "FY-1", "桩号": "K1+000"},),
+                rows_fetched=1,
+            ),
+        )
+        empty_scope_facts.return_value = ScopeFacts(
+            verdict=INSIDE,
+            detail="该范围在库里有数据",
+        )
+        coverage_facts.return_value = ScopeFacts(
+            verdict=INSIDE,
+            detail="该范围在库里有数据",
+        )
+        validate_explicit_patrol_batches.side_effect = lambda plan: plan
+        resolve_entity_comparison_batches.side_effect = lambda plan: plan
+        post_calc_executor.return_value = {
+            "accepted": True,
+            "reply": "新增 1",
+            "rows": [{"病害编号": "FY-1", "差异类型": "新增"}],
+            "columns": ["病害编号", "差异类型"],
+        }
+
+        answer = _execute_plan(
+            QueryPlan(
+                question="比较两次巡查中新增的泛油病害",
+                nodes=(
+                    PlanNode(id="before", spec=detail_spec("before")),
+                    PlanNode(id="after", spec=detail_spec("after")),
+                    PlanNode(
+                        id="compare",
+                        spec=comparison_spec,
+                        depends_on=("before", "after"),
+                        node_type="post_calc",
+                    ),
+                ),
+            ),
+            UserDecision(token=""),
+            registry=CapabilityRegistry.load(),
+        )
+
+        sections = {
+            section.get("node_id"): section
+            for section in answer.sections
+            if isinstance(section, dict)
+        }
+        self.assertIn("compare", sections, answer.sections)
+        comparison = sections["compare"]
+        self.assertEqual(comparison["status"], "accepted")
+        self.assertEqual(comparison["rows"], [{"病害编号": "FY-1", "差异类型": "新增"}])
+        post_calc_executor.assert_called_once()
+
+    @patch("app.query.service.resolve_entity_comparison_batches")
+    @patch("app.query.service.validate_explicit_patrol_batches")
+    @patch("app.query.service.coverage_facts")
+    @patch("app.query.service.empty_scope_facts")
+    @patch("app.query.service.execute_compiled")
+    @patch("app.query.service.compile_query")
+    @patch("app.query.service._default_post_calc_executor")
+    def test_dataset_comparison_allows_observed_empty_partial_scope(
+        self,
+        post_calc_executor,
+        compile_query,
+        execute_compiled,
+        empty_scope_facts,
+        coverage_facts,
+        validate_explicit_patrol_batches,
+        resolve_entity_comparison_batches,
+    ):
+        def detail_spec(node_id: str) -> QuerySpec:
+            return QuerySpec(
+                id=node_id,
+                kind="mysql",
+                subject="disease",
+                view="list",
+                metrics=(),
+                dimensions=(),
+                filters=(
+                    ValueBinding(
+                        field="route_name",
+                        op="=",
+                        storage_value="route-1",
+                        display_value="长沙－芷江高速公路",
+                        source="user_explicit",
+                        resolver="route_dictionary",
+                    ),
+                    ValueBinding(
+                        field="problem_type_name",
+                        op="=",
+                        storage_value="泛油",
+                        display_value="泛油",
+                        source="user_explicit",
+                        resolver="disease_dictionary",
+                    ),
+                ),
+                output_projection=("problem_number", "pile_number"),
+                order_by=(),
+                limit=500,
+                required_assertions=("preserve_user_scope",),
+            )
+
+        comparison_spec = QuerySpec(
+            id="compare",
+            kind="mysql",
+            subject="disease",
+            view="data",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("dataset_comparison",),
+            comparison_depends_on=("before", "after"),
+        )
+        compile_query.side_effect = (
+            CompiledQuery("SELECT before", "wren", "wren"),
+            CompiledQuery("SELECT after", "wren", "wren"),
+        )
+        execute_compiled.side_effect = (
+            ExecutionObservation(
+                node_id="before",
+                ok=True,
+                engine="wren",
+                sql="SELECT before",
+            ),
+            ExecutionObservation(
+                node_id="after",
+                ok=True,
+                engine="wren",
+                sql="SELECT after",
+                columns=("病害编号", "桩号"),
+                row_count=1,
+                preview_rows=({"病害编号": "FY-1", "桩号": "K1+000"},),
+                result_rows=({"病害编号": "FY-1", "桩号": "K1+000"},),
+                rows_fetched=1,
+            ),
+        )
+        empty_scope_facts.return_value = ScopeFacts(
+            verdict=PARTIAL,
+            detail=(
+                "查询区间仅部分落在长沙－芷江高速公路的现有病害记录"
+                "覆盖范围内；未覆盖部分无法判断"
+            ),
+        )
+        coverage_facts.return_value = ScopeFacts(
+            verdict=INSIDE,
+            detail="该范围在库里有数据",
+        )
+        validate_explicit_patrol_batches.side_effect = lambda plan: plan
+        resolve_entity_comparison_batches.side_effect = lambda plan: plan
+        post_calc_executor.return_value = {
+            "accepted": True,
+            "reply": "新增 1 处",
+            "rows": [{"病害编号": "FY-1", "差异类型": "新增"}],
+            "columns": ["病害编号", "差异类型"],
+        }
+
+        answer = _execute_plan(
+            QueryPlan(
+                question="比较两次巡查中新增的泛油病害",
+                nodes=(
+                    PlanNode(id="before", spec=detail_spec("before")),
+                    PlanNode(id="after", spec=detail_spec("after")),
+                    PlanNode(
+                        id="compare",
+                        spec=comparison_spec,
+                        depends_on=("before", "after"),
+                        node_type="post_calc",
+                    ),
+                ),
+            ),
+            UserDecision(token=""),
+            registry=CapabilityRegistry.load(),
+        )
+
+        sections = {
+            section.get("node_id"): section
+            for section in answer.sections
+            if isinstance(section, dict)
+        }
+        self.assertEqual(sections["before"]["coverage_verdict"], PARTIAL)
+        self.assertEqual(sections["compare"]["status"], "accepted")
+        self.assertIn("未覆盖部分", sections["compare"]["answer"])
+        self.assertEqual(
+            sections["compare"]["coverage_verdict"],
+            PARTIAL,
+        )
+        post_calc_executor.assert_called_once()
+
     @patch("app.query.service.empty_scope_facts")
     @patch("app.query.service.execute_compiled")
     @patch("app.query.service.compile_query")

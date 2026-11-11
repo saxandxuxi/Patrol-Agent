@@ -43,6 +43,22 @@ def binding_with_op(
     )
 
 
+def output_alias(contract, output_id: str) -> str:
+    return next(
+        output.alias
+        for output in contract.outputs
+        if output.output_id == output_id
+    )
+
+
+def output_expression(contract, output_id: str) -> str:
+    return next(
+        output.expression
+        for output in contract.outputs
+        if output.output_id == output_id
+    )
+
+
 def section_contract(registry, snapshot):
     spec = QuerySpec(
         id="q1",
@@ -173,8 +189,12 @@ class MdlSqlAuditTests(unittest.TestCase):
             cls.registry,
             cls.snapshot,
         )
+        cls.disease_count_alias = output_alias(
+            cls.disease_contract,
+            "count",
+        )
         cls.disease_sql = (
-            "SELECT COUNT(*) AS count "
+            f"SELECT COUNT(*) AS {cls.disease_count_alias} "
             "FROM disease JOIN route ON disease.routes_id = route.id "
             "WHERE disease.del_flag = 0 AND route.level = '0'"
         )
@@ -423,8 +443,9 @@ class MdlSqlAuditTests(unittest.TestCase):
                     self.snapshot,
                     plan_id="plan-audit",
                 )
+                alias = output_alias(contract, "count")
                 sql = (
-                    "SELECT COUNT(*) AS count "
+                    f"SELECT COUNT(*) AS {alias} "
                     "FROM disease JOIN route "
                     "ON disease.routes_id = route.id "
                     "WHERE disease.del_flag = 0 AND "
@@ -462,11 +483,48 @@ class MdlSqlAuditTests(unittest.TestCase):
             self.snapshot,
             plan_id="plan-audit",
         )
+        alias = output_alias(contract, "count")
         sql = (
-            "SELECT COUNT(*) AS count FROM patrol "
+            f"SELECT {contract.metrics[0].expression} AS {alias} "
+            "FROM patrol "
             "WHERE patrol.del_flag = 0 "
             "AND patrol.create_time >= '2026-11-01 00:00:00' "
             "AND patrol.create_time < '2026-11-02 00:00:00'"
+        )
+
+        self.assertEqual(self.contract_codes(sql, contract), ())
+
+    def test_contract_audit_accepts_pile_range_on_normalized_filter_column(self):
+        spec = QuerySpec(
+            id="disease-pile-between",
+            kind="mysql",
+            subject="disease",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(
+                binding_with_op(
+                    "pile_number",
+                    "between",
+                    ("K120+000", "K125+000"),
+                ),
+            ),
+            output_projection=("count",),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+            question="统计 K120 到 K125 的病害",
+        )
+        contract = build_mdl_query_contract(
+            spec,
+            self.registry,
+            self.snapshot,
+            plan_id="plan-audit",
+        )
+        sql = (
+            f"SELECT COUNT(*) AS {contract.outputs[0].alias} FROM disease "
+            "WHERE disease.del_flag = 0 "
+            "AND disease.pile_distance BETWEEN 120000 AND 125000"
         )
 
         self.assertEqual(self.contract_codes(sql, contract), ())
@@ -564,16 +622,19 @@ class MdlSqlAuditTests(unittest.TestCase):
             self.registry,
             self.snapshot,
         )
+        direction_alias = output_alias(contract, "up_or_down")
+        direction_expression = output_expression(contract, "up_or_down")
+        count_alias = output_alias(contract, "count")
         sql = (
-            "SELECT disease.up_or_down AS up_or_down, "
-            "COUNT(*) AS count FROM disease "
+            f"SELECT {direction_expression} AS {direction_alias}, "
+            f"COUNT(*) AS {count_alias} FROM disease "
             "WHERE disease.del_flag = 0"
         )
         self.assertIn(
             "invalid_view_shape",
             self.contract_codes(sql, contract),
         )
-        grouped = sql + " GROUP BY disease.up_or_down"
+        grouped = sql + f" GROUP BY {direction_expression}"
         self.assertEqual(self.contract_codes(grouped, contract), ())
 
         for view in ("trend", "top_groups"):
@@ -587,8 +648,9 @@ class MdlSqlAuditTests(unittest.TestCase):
                 )
 
     def test_contract_audit_rejects_aggregate_degraded_to_detail(self):
+        alias = output_alias(self.disease_contract, "count")
         sql = (
-            "SELECT disease.id AS count FROM disease "
+            f"SELECT disease.id AS {alias} FROM disease "
             "WHERE disease.del_flag = 0"
         )
         self.assertIn(
@@ -597,6 +659,7 @@ class MdlSqlAuditTests(unittest.TestCase):
         )
 
     def test_contract_audit_requires_outputs_and_exact_alias(self):
+        count_alias = output_alias(self.disease_contract, "count")
         missing = (
             "SELECT COUNT(*) FROM disease "
             "JOIN route ON disease.routes_id = route.id "
@@ -605,7 +668,7 @@ class MdlSqlAuditTests(unittest.TestCase):
         self.assertIn("missing_output", self.contract_codes(missing))
 
         wrong_alias = self.disease_sql.replace(
-            "AS count",
+            f"AS {count_alias}",
             "AS total",
         )
         self.assertIn(
@@ -615,8 +678,11 @@ class MdlSqlAuditTests(unittest.TestCase):
 
     def test_contract_audit_enforces_order_direction_and_limit(self):
         contract = section_top_contract(self.registry, self.snapshot)
+        id_alias = output_alias(contract, "id")
+        route_alias = output_alias(contract, "route_name")
         sql = (
-            "SELECT section.id AS id, route.short_name AS route_name "
+            f"SELECT section.id AS {id_alias}, "
+            f"route.short_name AS {route_alias} "
             "FROM section JOIN route ON section.route_id = route.id "
             "WHERE section.del_flag = 0 "
             "ORDER BY section.id DESC LIMIT 5"
@@ -647,9 +713,9 @@ class MdlSqlAuditTests(unittest.TestCase):
             self.snapshot,
             metric="distinct_problem_type_count",
         )
+        alias = output_alias(contract, "distinct_problem_type_count")
         sql = (
-            "SELECT COUNT(disease.problem_type_name) "
-            "AS distinct_problem_type_count "
+            f"SELECT COUNT(disease.problem_type_name) AS {alias} "
             "FROM disease JOIN route "
             "ON disease.routes_id = route.id "
             "WHERE disease.del_flag = 0 AND route.level = '0'"
@@ -684,18 +750,23 @@ class MdlSqlAuditTests(unittest.TestCase):
             self.snapshot,
             plan_id="plan-audit",
         )
+        direction_alias = output_alias(contract, "up_or_down")
+        category_alias = output_alias(contract, "category_name")
+        count_alias = output_alias(contract, "count")
+        direction_expression = output_expression(contract, "up_or_down")
+        category_expression = output_expression(contract, "category_name")
         sql = (
             "WITH ranked AS ("
-            "SELECT disease.up_or_down AS up_or_down, "
-            "disease.category_name AS category_name, "
-            "COUNT(*) AS count, "
+            f"SELECT {direction_expression} AS {direction_alias}, "
+            f"{category_expression} AS {category_alias}, "
+            f"COUNT(*) AS {count_alias}, "
             "ROW_NUMBER() OVER ("
-            "PARTITION BY disease.up_or_down "
+            f"PARTITION BY {direction_expression} "
             "ORDER BY COUNT(*) DESC"
             ") AS rank_in_outer "
             "FROM disease WHERE disease.del_flag = 0 "
-            "GROUP BY disease.up_or_down, disease.category_name"
-            ") SELECT up_or_down, category_name, count "
+            f"GROUP BY {direction_expression}, {category_expression}"
+            f") SELECT {direction_alias}, {category_alias}, {count_alias} "
             "FROM ranked WHERE rank_in_outer <= 3"
         )
 

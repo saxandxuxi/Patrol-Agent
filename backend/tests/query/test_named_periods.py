@@ -153,6 +153,74 @@ class NamedPeriodTests(unittest.TestCase):
         self.assertEqual(filters[1].storage_value, "2027-01-01 00:00:00")
         self.assertEqual(filters[1].resolver, "named_period")
 
+    def test_exact_named_quarter_records_business_rule_provenance(self):
+        plan = QueryPlan(
+            question="统计第三季度不同病害在不同道路上的新增情况",
+            nodes=(
+                PlanNode(
+                    id="q1",
+                    spec=spec(
+                        "q1",
+                        (
+                            bound(
+                                "collection_time",
+                                "between",
+                                (
+                                    "2026-07-01 00:00:00",
+                                    "2026-10-01 00:00:00",
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        normalized = normalize_named_period_window(
+            plan,
+            ["第三季度"],
+            datetime(2026, 11, 7, 10, 0, 0),
+        )
+
+        binding = normalized.nodes[0].spec.filters[0]
+        self.assertEqual(binding.resolver, "named_period")
+        self.assertEqual(binding.source, "business_rule")
+
+    def test_split_exact_quarter_bounds_record_business_rule_provenance(self):
+        plan = QueryPlan(
+            question="统计第三季度不同病害在不同道路上的新增情况",
+            nodes=(
+                PlanNode(
+                    id="q1",
+                    spec=spec(
+                        "q1",
+                        (
+                            bound(
+                                "collection_time",
+                                ">=",
+                                "2026-07-01 00:00:00",
+                            ),
+                            bound(
+                                "collection_time",
+                                "<",
+                                "2026-10-01 00:00:00",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        normalized = normalize_named_period_window(
+            plan,
+            ["第三季度"],
+            datetime(2026, 11, 7, 10, 0, 0),
+        )
+
+        for binding in normalized.nodes[0].spec.filters:
+            self.assertEqual(binding.resolver, "named_period")
+            self.assertEqual(binding.source, "business_rule")
+
     def test_month_inside_current_year_is_not_widened_to_the_year_end(self):
         plan = QueryPlan(
             question="今年10月全路网的坑槽分布",

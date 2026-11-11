@@ -190,21 +190,43 @@ class MdlContextTests(unittest.TestCase):
         self.assertNotIn("strip_disease", context.entity_families)
 
     def test_capability_context_derives_only_from_bound_operands(self):
-        base = QuerySpec(
+        disease_spec = QuerySpec(
             id="q5",
             kind="mysql",
             subject="disease",
             view="count",
-            metrics=("count", "route_length_km"),
+            metrics=("count",),
             dimensions=(),
             filters=(),
-            output_projection=("count", "route_length_km"),
+            output_projection=("count",),
             order_by=(),
             limit=None,
             required_assertions=("preserve_user_scope",),
-            question="病害数量和路线长度",
+            question="病害数量",
         )
-        contract = self.contract(base)
+        route_spec = QuerySpec(
+            id="q_route",
+            kind="mysql",
+            subject="route",
+            view="sum",
+            metrics=("total_route_length_km",),
+            dimensions=(),
+            filters=(),
+            output_projection=("total_route_length_km",),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+            question="路线总长度",
+        )
+        disease_contract = self.contract(disease_spec)
+        route_contract = self.contract(route_spec)
+        contract = replace(
+            disease_contract,
+            metrics=(
+                *disease_contract.metrics,
+                *route_contract.metrics,
+            ),
+        )
 
         context = build_capability_context(
             contract,
@@ -214,7 +236,7 @@ class MdlContextTests(unittest.TestCase):
         self.assertIn("disease_density", context.derived_metrics)
         self.assertEqual(
             context.derived_metrics["disease_density"]["operands"],
-            ("count", "route_length_km"),
+            ("count", "total_route_length_km"),
         )
         self.assertEqual(
             context.derived_metrics["disease_density"]["evaluator"],
@@ -241,6 +263,36 @@ class MdlContextTests(unittest.TestCase):
         self.assertNotIn("basic_facilities_sections", serialized)
         self.assertNotIn("basic_facilities_routes", serialized)
         self.assertNotIn("new_four_road_base_ai", serialized)
+
+    def test_prompt_context_carries_code_evidence_alongside_mdl(self):
+        query_spec = replace(
+            disease_list_spec(),
+            question="G4京港澳高速第三车道的病害明细",
+        )
+        contract = self.contract(query_spec)
+
+        context = build_prompt_context(
+            contract,
+            self.registry,
+            self.snapshot,
+        )
+        prompt_context = context.to_dict()
+
+        self.assertIn("mdl_subset", prompt_context)
+        self.assertIn("business_capability", prompt_context)
+        self.assertIn(
+            "lane_ordinal",
+            {
+                item["rule_id"]
+                for item in prompt_context["assist_evidence"]
+            },
+        )
+        self.assertTrue(
+            all(
+                item["trusted"] is False
+                for item in prompt_context["assist_evidence"]
+            )
+        )
 
     def test_prompt_context_budget_fails_without_truncation(self):
         contract = self.contract(section_list_spec())

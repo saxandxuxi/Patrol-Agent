@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 import sqlglot
 from sqlglot import exp
@@ -66,6 +66,7 @@ def from_table(select: exp.Select) -> exp.Table | None:
 def allowed_fields(
     contract: MdlQueryContract,
     dialect: str,
+    relationship_fields: Iterable[tuple[str, str]] = (),
 ) -> set[tuple[str, str]]:
     fields = {
         (binding.model, binding.column)
@@ -87,6 +88,7 @@ def allowed_fields(
         for column in parsed.find_all(exp.Column):
             if column.table and column.name:
                 fields.add((str(column.table), str(column.name)))
+    fields.update(relationship_fields)
     return fields
 
 

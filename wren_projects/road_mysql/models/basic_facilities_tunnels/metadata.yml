@@ -1,6 +1,6 @@
 name: basic_facilities_tunnels
 properties:
-  description: 基本设施_隧道表
+  description: 隧道台账：基本设施_隧道表
 table_reference:
   catalog: ''
   schema: new_four_road_base_ai

@@ -132,10 +132,12 @@ class CapabilityEndToEndTests(unittest.TestCase):
     @patch("app.query.service._execute_plan", return_value=AnswerPackage("ok"))
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
     @patch("app.query.analysis.chat_json")
+    @patch("app.query.planning_repair.controller.chat_json")
     @patch("app.query.service.field_grounding.ground")
     def test_fake_metric_is_repaired_before_compile(
         self,
         ground,
+        repair_chat_json,
         chat_json,
         _audit,
         _execute,
@@ -147,16 +149,25 @@ class CapabilityEndToEndTests(unittest.TestCase):
         }
         chat_json.side_effect = [
             plan_payload(metric="disease_density"),
-            plan_payload(metric="count"),
         ]
+        repair_chat_json.return_value = {
+            "patches": [
+                {
+                    "op": "set",
+                    "path": "/views/0/metrics",
+                    "value": ["count"],
+                }
+            ]
+        }
 
         result = start_single_turn("哪条路健康状况最好", providers=[])
 
-        self.assertEqual(chat_json.call_count, 2)
+        self.assertEqual(chat_json.call_count, 1)
+        self.assertEqual(repair_chat_json.call_count, 1)
         self.assertEqual(result.plan.nodes[0].spec.metrics, ("count",))
         self.assertIn(
             "allowed_values",
-            chat_json.call_args_list[1].args[0][1]["content"],
+            repair_chat_json.call_args.args[0][1]["content"],
         )
 
     @patch("app.query.service.field_grounding.ground")

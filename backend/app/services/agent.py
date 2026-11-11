@@ -4405,9 +4405,11 @@ def _maybe_single_turn_compiler(
         if capability_id in {"ai", "wren"}:
             question = pending.plan.question if pending is not None else message
             single_turn_service.discard_pending_confirmation(choose_token)
+            intent = intent_service.classify_intent(question)
             turn = single_turn_service.start_single_turn(
                 question,
                 providers=(),
+                intent=intent,
             )
             return _single_turn_compiler_payload(turn)
         if pending is None or pending.candidate_set is None:
@@ -4493,7 +4495,7 @@ def _maybe_single_turn_compiler(
     intent = intent_service.classify_intent(message)
     if intent not in {"data", "analysis", "composite"}:
         return None
-    turn = single_turn_service.start_single_turn(message)
+    turn = single_turn_service.start_single_turn(message, intent=intent)
     return _single_turn_compiler_payload(turn)
 
 

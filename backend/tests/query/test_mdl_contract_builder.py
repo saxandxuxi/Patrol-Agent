@@ -78,7 +78,14 @@ class MdlContractBuilderTests(unittest.TestCase):
                 self.assertEqual(contract.root_model, root_model)
                 self.assertEqual(contract.subject, subject)
                 self.assertEqual(contract.metrics[0].metric_id, "count")
-                self.assertEqual(contract.metrics[0].expression, "COUNT(*)")
+                self.assertEqual(
+                    contract.metrics[0].expression,
+                    (
+                        "COUNT(DISTINCT patrol.id)"
+                        if subject == "patrol"
+                        else "COUNT(*)"
+                    ),
+                )
                 self.assertIn(root_model, contract.allowed_models)
                 self.assertEqual(len(contract.mandatory_predicates), 1)
                 self.assertIn(
@@ -135,7 +142,7 @@ class MdlContractBuilderTests(unittest.TestCase):
         self.assertIn("disease_route", disease.required_relationship_ids)
         self.assertNotEqual(section.contract_hash, disease.contract_hash)
         self.assertEqual(section.filters[0].source, "user_explicit")
-        self.assertEqual(section.output_aliases["route_name"], "route_name")
+        self.assertEqual(section.output_aliases["路线名称"], "route_name")
         self.assertEqual(
             section.field_bindings["route_name"].model,
             "route",
@@ -163,6 +170,29 @@ class MdlContractBuilderTests(unittest.TestCase):
         )
 
         self.assertIn("disease_route", contract.required_relationship_ids)
+
+    def test_filter_binding_uses_normalized_filter_expression_location(self):
+        contract = build_mdl_query_contract(
+            count_spec(
+                "disease",
+                filters=(
+                    binding(
+                        "pile_number",
+                        "between",
+                        ("K120+000", "K125+000"),
+                    ),
+                ),
+            ),
+            self.registry,
+            self.snapshot,
+        )
+
+        binding_value = contract.filters[0]
+        self.assertEqual(binding_value.expression, "disease.pile_distance")
+        self.assertEqual(binding_value.model, "disease")
+        self.assertEqual(binding_value.column, "pile_distance")
+        self.assertEqual(binding_value.value, (120000, 125000))
+        self.assertTrue(binding_value.between_inclusive)
 
     def test_contract_hash_is_stable_and_excludes_narrative_question(self):
         spec = count_spec("disease", id="stable")
@@ -230,6 +260,34 @@ class MdlContractBuilderTests(unittest.TestCase):
 
         self.assertNotEqual(base.contract_hash, changed_filter.contract_hash)
         self.assertNotEqual(base.contract_hash, changed_output.contract_hash)
+
+    def test_outputs_use_registered_business_labels(self):
+        contract = build_mdl_query_contract(
+            QuerySpec(
+                id="labels",
+                kind="mysql",
+                subject="disease",
+                view="list",
+                metrics=(),
+                dimensions=(),
+                filters=(),
+                output_projection=("problem_number",),
+                order_by=(),
+                limit=5,
+                required_assertions=("preserve_user_scope",),
+                question="列出病害编号",
+            ),
+            self.registry,
+            self.snapshot,
+            plan_id="plan-labels",
+        )
+
+        output = contract.outputs[0]
+        self.assertEqual(output.alias, "病害编号")
+        self.assertEqual(
+            contract.output_aliases["病害编号"],
+            "problem_number",
+        )
 
     def test_rejects_unavailable_fields_metrics_and_views(self):
         invalid_specs = (

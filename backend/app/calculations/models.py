@@ -31,7 +31,22 @@ class CalculationRequest:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "CalculationRequest":
+        from .operations import roles_for_tool
+
+        tool = str(value.get("tool") or "")
+        operation = str(value.get("operation") or "")
         raw_operands = value.get("operands")
+        operand_items = raw_operands if isinstance(raw_operands, list) else []
+        if not operand_items:
+            operand_items = [
+                {"name": role, **raw_role}
+                for role in roles_for_tool(tool, operation)
+                if isinstance(raw_role := value.get(role), Mapping)
+                and (
+                    "source" in raw_role
+                    or "value" in raw_role
+                )
+            ]
         operands = tuple(
             CalculationOperand(
                 name=str(item.get("name") or ""),
@@ -42,7 +57,7 @@ class CalculationRequest:
                     else {}
                 ),
             )
-            for item in (raw_operands if isinstance(raw_operands, list) else ())
+            for item in operand_items
             if isinstance(item, dict)
         )
         raw_output = value.get("output")
@@ -66,8 +81,8 @@ class CalculationRequest:
             if precision < 0 or precision > 12:
                 raise ValueError("precision must be between 0 and 12")
         return cls(
-            tool=str(value.get("tool") or ""),
-            operation=str(value.get("operation") or ""),
+            tool=tool,
+            operation=operation,
             operands=operands,
             output=output,
             precision=precision,

@@ -43,15 +43,62 @@ def execute_post_calc(
         for item in selected_ids
         if str(item) in normalized_results
     ]
-    if (
-        "dataset_comparison"
-        in {
-            str(item)
-            for item in task.get("required_assertions") or ()
-        }
-    ):
+    assertions = {
+        str(item)
+        for item in task.get("required_assertions") or ()
+    }
+    if "dataset_comparison" in assertions:
         comparison = compare_datasets(dependencies)
         if comparison:
+            if "analysis_only" in assertions:
+                analysis_dependencies = [
+                    normalized_results[str(item)]
+                    for item in dependency_ids
+                    if str(item) in normalized_results
+                ]
+                analyzed = analyze_evidence(
+                    str(task.get("question") or ""),
+                    [comparison, *analysis_dependencies],
+                    requirements={
+                        "required_assertions": list(assertions),
+                        "declared_metrics": list(
+                            task.get("metrics") or []
+                        ),
+                    },
+                )
+                if analyzed.get("accepted"):
+                    analyzed["columns"] = list(
+                        comparison.get("columns") or []
+                    )
+                    analyzed["rows"] = list(
+                        comparison.get("rows") or []
+                    )
+                    return analyzed
+                failure = react_repair.build_failure(
+                    str(
+                        analyzed.get("failure_code")
+                        or "analysis_only_failed"
+                    ),
+                    stage="post_calc",
+                    reason=str(
+                        analyzed.get("failure_reason")
+                        or analyzed.get("reply")
+                        or "集合比较完成后，组合分析契约未通过"
+                    ),
+                    evidence={
+                        "step_id": task.get("id"),
+                        "step_question": str(task.get("question") or ""),
+                        "depends_on": dependency_ids,
+                        "comparison_depends_on": comparison_ids,
+                        "comparison_reply": str(
+                            comparison.get("reply") or ""
+                        ),
+                        "ungrounded_numbers": list(
+                            analyzed.get("ungrounded_numbers") or []
+                        ),
+                    },
+                )
+                return _failure_payload(failure)
             return comparison
     if not post_calc_has_executable_body(task.get("required_assertions")):
         failure = react_repair.build_failure(

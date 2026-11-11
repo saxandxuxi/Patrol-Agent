@@ -33,7 +33,7 @@ class CapabilityRegistryTests(unittest.TestCase):
 
     def test_every_subject_has_the_registered_mdl_model(self):
         registry = CapabilityRegistry.load(config_dir=CAPABILITY_DIR)
-        expected = {
+        configured = {
             "disease": "disease",
             "patrol": "patrol",
             "route": "route",
@@ -51,8 +51,14 @@ class CapabilityRegistryTests(unittest.TestCase):
             for subject, capability in registry.snapshot.subjects.items()
         }
 
-        self.assertEqual(actual, expected)
-        self.assertLessEqual(set(actual.values()), wren_engine.model_names("mysql"))
+        self.assertEqual(
+            {subject: actual[subject] for subject in configured},
+            configured,
+        )
+        self.assertEqual(
+            set(actual.values()),
+            set(wren_engine.model_names("mysql")),
+        )
 
     def test_registry_rejects_unknown_config_key(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -67,6 +73,62 @@ class CapabilityRegistryTests(unittest.TestCase):
 
             with self.assertRaisesRegex(CapabilityConfigError, "unknown_key"):
                 CapabilityRegistry.load(config_dir=config_dir)
+
+    def test_registry_rejects_subject_joins_in_favor_of_mdl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp) / "capabilities"
+            shutil.copytree(CAPABILITY_DIR, config_dir)
+            path = config_dir / "subjects.yaml"
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            data["subjects"]["route"]["joins"] = {}
+            path.write_text(
+                yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(CapabilityConfigError) as caught:
+                CapabilityRegistry.load(config_dir=config_dir)
+
+        self.assertEqual(
+            caught.exception.evidence,
+            {
+                "fact": "joins",
+                "required_source": "wren_mdl",
+                "path": "subjects.route.joins",
+            },
+        )
+
+    def test_registry_rejects_code_map_outside_enums(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp) / "capabilities"
+            shutil.copytree(CAPABILITY_DIR, config_dir)
+            path = config_dir / "field_overrides.yaml"
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            columns = data["field_overrides"]["mysql"]["columns"][
+                "ai_problem"
+            ]
+            columns.setdefault("up_or_down", {})["code_map"] = {
+                "0": "全部"
+            }
+            path.write_text(
+                yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(CapabilityConfigError) as caught:
+                CapabilityRegistry.load(config_dir=config_dir)
+
+        self.assertEqual(
+            caught.exception.evidence,
+            {
+                "fact": "code_map",
+                "required_source": "enums.yaml",
+                "path": (
+                    "field_overrides.mysql.columns.ai_problem."
+                    "up_or_down.code_map"
+                ),
+            },
+        )
 
     def test_capability_snapshot_nested_mappings_are_read_only(self):
         registry = CapabilityRegistry.load(config_dir=CAPABILITY_DIR)

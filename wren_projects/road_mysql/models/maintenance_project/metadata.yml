@@ -1,6 +1,6 @@
 name: maintenance_project
 properties:
-  description: 养护_项目管理
+  description: 养护项目：养护_项目管理
 table_reference:
   catalog: ''
   schema: new_four_road_base_ai

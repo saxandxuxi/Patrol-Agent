@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from app.query.analysis import _assist_field_issue, analyze_single_turn
 from app.query.capability_registry import CapabilityRegistry
-from app.query.contracts import QuerySpec
+from app.query.contracts import QuerySpec, ValueBinding
 from app.query.fields import FieldReachSet, PhysicalSchemaView
 from app.query.service import start_single_turn
 from app.query.values import resolve_value
@@ -143,6 +143,24 @@ class SemanticAidTests(unittest.TestCase):
         self.assertEqual(binding.op, "between")
         self.assertEqual(binding.source, "code_rule")
 
+    def test_explicit_kilometer_segment_is_untrusted_granularity_evidence(self):
+        evidence = detect_evidence(
+            "2026年11月长沙－芷江高速上病害最集中的3个公里段分别是哪里？"
+        )
+        kilometer = next(
+            item
+            for item in evidence
+            if item.rule_id == "pile_segment_kilometer"
+        )
+
+        self.assertEqual(kilometer.candidate_field, "pile_segment_1000m")
+        self.assertIn("pile_segment_500m", kilometer.discouraged_fields)
+        self.assertFalse(kilometer.trusted)
+        self.assertNotIn(
+            "pile_segment_group",
+            {item.rule_id for item in evidence},
+        )
+
     def test_registered_identifier_overrides_the_wrong_model_field(self):
         binding = resolve_value(
             "task_number",
@@ -235,6 +253,47 @@ class SemanticAidTests(unittest.TestCase):
             metrics=("count",),
             dimensions=("tech_grade", "road_surface_type"),
             filters=(),
+            output_projection=("tech_grade", "road_surface_type", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=(),
+            question=question,
+        )
+
+        issue = _assist_field_issue(
+            [spec],
+            [item.to_dict() for item in evidence],
+            CapabilityRegistry.load(),
+            {spec.id: "query_data"},
+        )
+
+        self.assertFalse(issue)
+
+    def test_admin_level_filter_can_coexist_with_tech_grade_dimension(self):
+        question = (
+            "2026年10月，在行政等级为“国道”的路段上，按公路技术等级"
+            "（一级、二级、三级、四级）分别统计沥青混凝土路面和"
+            "水泥混凝土路面各检出了多少处病害。"
+        )
+        evidence = detect_evidence(question)
+        spec = QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("tech_grade", "road_surface_type"),
+            filters=(
+                ValueBinding(
+                    field="route_level",
+                    op="=",
+                    storage_value="1",
+                    display_value="国道",
+                    source="user_explicit",
+                    resolver="enum_dictionary",
+                    raw_text="行政等级为“国道”",
+                ),
+            ),
             output_projection=("tech_grade", "road_surface_type", "count"),
             order_by=(),
             limit=None,

@@ -45,6 +45,53 @@ class ValueAnalysisTests(unittest.TestCase):
             "enum:ai_maintain_patrol.patrol_status",
         )
 
+    def test_relation_exists_filter_uses_registered_business_rule(self):
+        value = resolve_value(
+            "has_disease",
+            "exists",
+            True,
+            "有病害且是国道的路段有哪些",
+            "mysql",
+            subject="section",
+        )
+
+        self.assertEqual(value.op, "exists")
+        self.assertTrue(value.storage_value)
+        self.assertEqual(value.display_value, "存在关联病害")
+        self.assertEqual(value.source, "business_rule")
+        self.assertEqual(
+            value.resolver,
+            "relation_exists:disease_section",
+        )
+
+    def test_active_soft_delete_filter_uses_registered_field_role(self):
+        value = resolve_value(
+            "del_flag",
+            "=",
+            "0",
+            "现在有多少个养护工单？",
+            "mysql",
+            subject="work_order",
+        )
+
+        self.assertEqual(value.storage_value, 0)
+        self.assertEqual(value.source, "business_rule")
+        self.assertEqual(value.resolver, "field_role:soft_delete")
+
+    def test_relation_exists_filter_rejects_ambiguous_operator(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "必须使用 exists",
+        ):
+            resolve_value(
+                "has_disease",
+                "not_null",
+                True,
+                "有病害且是国道的路段有哪些",
+                "mysql",
+                subject="section",
+            )
+
     def test_exact_date_filter_uses_its_own_raw_value(self):
         question = "长沙－芷江高速公路11月2日与3日的病害对比情况"
 
@@ -75,6 +122,18 @@ class ValueAnalysisTests(unittest.TestCase):
         self.assertEqual(end.op, "<")
         self.assertEqual(exclusive.storage_value, "2026-11-03 00:00:00")
         self.assertEqual(exclusive.op, "<")
+
+    def test_second_explicit_date_keeps_user_source(self):
+        value = resolve_value(
+            "collection_time",
+            ">=",
+            "2026-11-11",
+            "对比长沙－芷江高速在2026年11月8日和11月11日这两次巡检的结果",
+            "mysql",
+        )
+
+        self.assertEqual(value.storage_value, "2026-11-11 00:00:00")
+        self.assertEqual(value.source, "user_explicit")
 
     def test_exact_between_boundaries_are_not_expanded_again(self):
         value = resolve_value(
@@ -125,7 +184,7 @@ class ValueAnalysisTests(unittest.TestCase):
 
         self.assertEqual(
             value.storage_value,
-            ["S20外环高速", "G60沪昆高速"],
+            ["id-S20外环高速", "id-G60沪昆高速"],
         )
         self.assertEqual(value.display_value, "S20外环高速、G60沪昆高速")
         self.assertEqual(value.op, "in")
@@ -363,6 +422,7 @@ class ValueAnalysisTests(unittest.TestCase):
             "views": [
                 {
                     "id": "q1",
+                    "action": "query_data",
                     "subject": "patrol",
                     "view": "distribution",
                     "metrics": ["count"],
@@ -396,6 +456,7 @@ class ValueAnalysisTests(unittest.TestCase):
             "views": [
                 {
                     "id": "q1",
+                    "action": "query_data",
                     "subject": "patrol",
                     "view": "distribution",
                     "metrics": ["count"],
@@ -431,6 +492,7 @@ class ValueAnalysisTests(unittest.TestCase):
             "views": [
                 {
                     "id": "q1",
+                    "action": "query_data",
                     "subject": "disease",
                     "view": "list",
                     "metrics": [],
@@ -464,6 +526,7 @@ class ValueAnalysisTests(unittest.TestCase):
             "views": [
                 {
                     "id": "q1",
+                    "action": "query_data",
                     "subject": "disease",
                     "view": "distribution",
                     "metrics": ["count"],
@@ -582,6 +645,7 @@ class ValueAnalysisTests(unittest.TestCase):
             "views": [
                 {
                     "id": "q3",
+                    "action": "query_data",
                     "subject": "disease",
                     "view": "distribution",
                     "metrics": [
@@ -650,6 +714,7 @@ class ValueAnalysisTests(unittest.TestCase):
             "views": [
                 {
                     "id": "crack",
+                    "action": "query_data",
                     "subject": "disease",
                     "view": "distribution",
                     "metrics": ["count"],
@@ -662,6 +727,7 @@ class ValueAnalysisTests(unittest.TestCase):
                 },
                 {
                     "id": "pothole",
+                    "action": "query_data",
                     "subject": "disease",
                     "view": "distribution",
                     "metrics": ["count"],
@@ -732,6 +798,7 @@ class ValueAnalysisTests(unittest.TestCase):
             "views": [
                 {
                     "id": "q1",
+                    "action": "query_data",
                     "subject": "disease",
                     "view": "distribution",
                     "metrics": [
@@ -763,7 +830,10 @@ class ValueAnalysisTests(unittest.TestCase):
         )
         self.assertEqual(len(plan.nodes), 1)
         spec = plan.nodes[0].spec
-        self.assertEqual(spec.dimensions, ("route_name",))
+        self.assertEqual(
+            spec.dimensions,
+            ("route_name", "routes_id"),
+        )
         self.assertEqual(
             spec.metrics,
             ("count", "total_area", "average_area", "route_length_km"),
@@ -782,6 +852,7 @@ class ValueAnalysisTests(unittest.TestCase):
             "views": [
                 {
                     "id": "q1",
+                    "action": "query_data",
                     "subject": "disease",
                     "view": "count",
                     "metrics": ["count"],

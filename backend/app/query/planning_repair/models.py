@@ -11,6 +11,8 @@ class RepairIssue:
     reason: str
     expected: str = ""
     actual: str = ""
+    allowed_values: tuple[str, ...] = ()
+    preserve: tuple[str, ...] = ("original_question", "user_scope")
     allowed_paths: tuple[str, ...] = ()
     mutable_filter_fields: tuple[str, ...] = ()
     evidence: dict[str, Any] = field(default_factory=dict)

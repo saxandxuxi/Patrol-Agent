@@ -1,5 +1,6 @@
 import json
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 from app.query.mdl_sql.compiler.llm_fallback import (
@@ -129,6 +130,30 @@ class MdlLlmFallbackTests(unittest.TestCase):
         prompt = "\n".join(message["content"] for message in messages)
         self.assertIn("plan-q1:node-1:contract-hash", prompt)
         self.assertIn("compiler_not_covered", prompt)
+
+    def test_prompt_carries_parallel_mdl_business_and_assist_evidence(self):
+        context = replace(
+            prompt_context(),
+            assist_evidence=(
+                {
+                    "rule_id": "lane_ordinal",
+                    "source": "code_rule",
+                    "candidate_field": "lane_index",
+                    "candidate_value": "3",
+                    "trusted": False,
+                },
+            ),
+        )
+        with patch.object(llm, "chat", return_value=valid_reply()) as chat:
+            generate_mdl_sql_once(context, compiler_failure())
+
+        messages = chat.call_args.args[0]
+        prompt = "\n".join(message["content"] for message in messages)
+        self.assertIn('"business_capability"', prompt)
+        self.assertIn('"mdl_subset"', prompt)
+        self.assertIn('"assist_evidence"', prompt)
+        self.assertIn('"lane_ordinal"', prompt)
+        self.assertIn('"trusted":false', prompt)
 
     def test_default_sql_role_is_used_when_model_is_not_passed(self):
         role = {"model": "role-sql-model"}

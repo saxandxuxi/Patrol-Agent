@@ -53,6 +53,56 @@ def empty_mdl(**changes):
 
 
 class FactConflictTests(unittest.TestCase):
+    def test_metric_formula_identity_keeps_explicit_model_qualifiers(self):
+        snapshot = empty_snapshot(
+            subjects={
+                "patrol": SubjectCapability(
+                    subject_id="patrol",
+                    base_table="ai_maintain_patrol",
+                    mdl_model="patrol",
+                )
+            },
+            metrics={
+                "patrol": {
+                    "count": MetricCapability(
+                        metric_id="count",
+                        expression="COUNT(DISTINCT {alias}.id)",
+                        label="任务数",
+                        source_kind="resources",
+                        source_reference="metrics.yaml:patrol.count",
+                    ),
+                    "linked_disease_count": MetricCapability(
+                        metric_id="linked_disease_count",
+                        expression="COUNT(DISTINCT {disease}.id)",
+                        label="关联病害数",
+                        source_kind="resources",
+                        source_reference=(
+                            "metrics.yaml:patrol.linked_disease_count"
+                        ),
+                    ),
+                }
+            },
+        )
+        mdl = empty_mdl(
+            models={
+                "patrol": MdlModel(
+                    name="patrol",
+                    physical_table="ai_maintain_patrol",
+                    description="",
+                    columns={
+                        "id": MdlColumn("id", "VARCHAR", ""),
+                    },
+                )
+            },
+            physical_table_to_model={
+                "ai_maintain_patrol": "patrol",
+            },
+        )
+
+        report = validate_fact_conflicts(snapshot, mdl)
+
+        self.assertTrue(report.accepted, report.conflicts)
+
     def test_duplicate_metric_formula_owner_fails_before_context_build(self):
         snapshot = empty_snapshot(
             subjects={

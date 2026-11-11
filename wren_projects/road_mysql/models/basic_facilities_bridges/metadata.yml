@@ -1,6 +1,6 @@
 name: basic_facilities_bridges
 properties:
-  description: 基本设施_桥梁表
+  description: 桥梁台账：基本设施_桥梁表
 table_reference:
   catalog: ''
   schema: new_four_road_base_ai

@@ -24,7 +24,7 @@ from typing import Any
 import yaml
 
 from ..config import settings
-from . import schema_catalog, wren_engine
+from . import capability_mdl_projection, schema_catalog, wren_engine
 from .logging_service import log_error, log_event
 
 
@@ -67,12 +67,19 @@ def _load_overrides(project_dir: Path) -> dict[str, Any]:
 
 def _model_metadata(table: dict[str, Any], override: dict[str, Any], kind: str) -> dict[str, Any]:
     """一张表 → 一个模型定义（结构来自库，语义来自 override）。"""
+    business_description = (
+        override.get("description")
+        or table.get("comment")
+        or "库侧没写表注释，待补"
+    )
     model: dict[str, Any] = {
         "name": override.get("name") or table["table"],
         "properties": {
-            "description": override.get("description")
-            or table.get("comment")
-            or f"{table['table']}（库侧没写表注释，待补）",
+            "description": capability_mdl_projection.model_description(
+                kind,
+                str(table["table"]),
+                str(business_description),
+            ),
         },
     }
     if override.get("ref_sql"):
@@ -122,6 +129,20 @@ def _model_metadata(table: dict[str, Any], override: dict[str, Any], kind: str) 
                 "type": str(extra.get("type") or "VARCHAR"),
                 "is_calculated": False,
                 "properties": {"description": extra.get("description") or ""},
+            }
+        )
+    for extra in capability_mdl_projection.enum_calculated_columns(
+        str(table["table"])
+    ):
+        columns.append(
+            {
+                "name": extra["name"],
+                "type": str(extra.get("type") or "VARCHAR"),
+                "is_calculated": True,
+                "expression": str(extra["expression"]),
+                "properties": {
+                    "description": str(extra.get("description") or "")
+                },
             }
         )
     # live_catalog 可能已经把上一版 MDL 的派生列带回来，override 里又声明一次；

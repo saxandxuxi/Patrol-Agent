@@ -1,6 +1,6 @@
 name: maintenance_road_work_record
 properties:
-  description: 养护_道路作业记录
+  description: 日常养护作业记录：养护_道路作业记录
 table_reference:
   catalog: ''
   schema: new_four_road_base_ai

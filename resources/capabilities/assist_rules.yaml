@@ -229,13 +229,21 @@ regex_rules:
     candidate_field: pile_number
     reason: "桩号区间候选，数值边界应由受控桩号解析器换算后再进入 SQL。"
   - id: pile_segment_group
-    pattern: "(?:高发路段|高发桩号|病害集中|密集路段|哪些位置|什么位置|多少米处|哪个桩号|桩号分段|多少米范围)"
+    pattern: "^(?!.*(?:公里段|每公里|一公里|1公里)).*(?:高发路段|高发桩号|病害集中|密集路段|哪些位置|什么位置|多少米处|哪个桩号|桩号分段|多少米范围)"
     candidate_type: group_by
     candidate_field: pile_segment_500m
     candidate_value: pile_segment_500m
     discouraged_fields: [luge_name]
     requires_field: true
     reason: "“高发路段/哪些位置/多少米处”要按注册的桩号分段维度分组（默认 500 米），不能按 luge_name 这类里程区段编号分组。"
+  - id: pile_segment_kilometer
+    pattern: "(?:公里段|每公里|一公里|1公里)"
+    candidate_type: group_by
+    candidate_field: pile_segment_1000m
+    candidate_value: pile_segment_1000m
+    discouraged_fields: [pile_segment_500m, pile_segment_2000m, luge_name]
+    requires_field: true
+    reason: "用户明确说“公里段/每公里/一公里”时，桩号分段粒度是 1 公里，不能默认成 500 米或 2 公里分段。"
   - id: top_n
     pattern: "(?:前|取前|排名前|最多(?:的)?|最常见(?:的)?)\\s*([一二三四五六七八九十两0-9]+)\\s*(?:类|种|个|条|项|名)"
     group: 1

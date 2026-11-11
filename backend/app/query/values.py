@@ -167,6 +167,25 @@ def _relative_time_range(question: str) -> tuple[datetime, datetime] | None:
     return _shift_months(now, -months), now
 
 
+def _explicit_time_candidate_matches(
+    question: str,
+    kind: str,
+    target: datetime,
+) -> bool:
+    for item in detect_evidence(question, kind):
+        if (
+            item.rule_id != "explicit_date"
+            or item.candidate_type != "time_value"
+        ):
+            continue
+        parsed = parsers.parse_time_range(
+            str(item.candidate_value or item.raw_span or "")
+        )
+        if parsed is not None and parsed[0].date() == target.date():
+            return True
+    return False
+
+
 def _resolve_damage_type(
     raw_value: Any,
     question: str,
@@ -401,6 +420,44 @@ def resolve_value(
             registry = CapabilityRegistry.load(kind)
         value = _resolve_damage_type(raw_value, question, kind, registry)
         return ValueBinding(**{**value.__dict__, "op": op})
+    field_capability = registry.snapshot.fields.get(
+        subject,
+        {},
+    ).get(field)
+    if (
+        field_capability is not None
+        and "relation_exists" in field_capability.roles
+    ):
+        if str(op or "").lower() != "exists":
+            raise QuerySpecError(
+                f"关系存在字段 {field} 必须使用 exists 运算符"
+            )
+        relationships = ",".join(field_capability.requires_join)
+        return ValueBinding(
+            field=field,
+            op="exists",
+            storage_value=True,
+            display_value=field_capability.label,
+            source="business_rule",
+            resolver=f"relation_exists:{relationships}",
+            raw_text=str(raw_value if raw_value is not None else field),
+        )
+    if (
+        field_capability is not None
+        and "soft_delete" in field_capability.roles
+        and op == "="
+        and str(raw_value if raw_value is not None else "").strip().lower()
+        in {"0", "false"}
+    ):
+        return ValueBinding(
+            field=field,
+            op="=",
+            storage_value=0,
+            display_value="有效记录",
+            source="business_rule",
+            resolver="field_role:soft_delete",
+            raw_text=str(raw_value),
+        )
     enum_registry = registry
     if _enum_location(enum_registry, subject, field) in enum_registry.snapshot.enums:
         value = _resolve_code(
@@ -433,6 +490,10 @@ def resolve_value(
                 raise QuerySpecError(
                     f"路线不在数据库台账中：{'、'.join(route_values)}"
                 )
+            storage_ids = [
+                str(route["id"])
+                for route in resolved_routes
+            ]
             displays = [
                 str(
                     route.get("short_name")
@@ -446,7 +507,7 @@ def resolve_value(
             return ValueBinding(
                 field=field,
                 op="in",
-                storage_value=list(dict.fromkeys(displays)),
+                storage_value=list(dict.fromkeys(storage_ids)),
                 display_value=joined,
                 source=_source(route_values, question),
                 resolver="route_dictionary",
@@ -519,6 +580,11 @@ def resolve_value(
             start, end = parsed
             start_text = start.strftime("%Y-%m-%d %H:%M:%S")
             end_text = end.strftime("%Y-%m-%d %H:%M:%S")
+            explicit_time_candidate = _explicit_time_candidate_matches(
+                question,
+                kind,
+                start,
+            )
             if relative or op == "between":
                 storage_value: Any = (start_text, end_text)
                 display_value = f"{start_text} 至 {end_text}"
@@ -558,6 +624,7 @@ def resolve_value(
                 source=(
                     "user_explicit"
                     if relative
+                    or explicit_time_candidate
                     or (
                         question_parsed is not None
                         and raw_parsed is not None

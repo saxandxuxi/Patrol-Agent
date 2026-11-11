@@ -37,9 +37,7 @@ def derived_metric_plan(
     declare_derived: bool = True,
     post_calc_subject: str = "disease",
 ) -> QueryPlan:
-    metrics = ("count", "total_area")
-    if include_operand:
-        metrics += ("route_length_km",)
+    route_metrics = ("total_route_length_km",) if include_operand else ()
     return QueryPlan(
         question="哪条路的健康状况最好",
         nodes=(
@@ -50,10 +48,30 @@ def derived_metric_plan(
                     kind="mysql",
                     subject="disease",
                     view="distribution",
-                    metrics=metrics,
+                    metrics=("count", "total_area"),
                     dimensions=("route_name",),
                     filters=(),
-                    output_projection=("route_name", *metrics),
+                    output_projection=(
+                        "route_name",
+                        "count",
+                        "total_area",
+                    ),
+                    order_by=(),
+                    limit=None,
+                    required_assertions=(),
+                ),
+            ),
+            PlanNode(
+                id="q_route",
+                spec=QuerySpec(
+                    id="q_route",
+                    kind="mysql",
+                    subject="route",
+                    view="sum",
+                    metrics=route_metrics,
+                    dimensions=(),
+                    filters=(),
+                    output_projection=route_metrics,
                     order_by=(),
                     limit=None,
                     required_assertions=(),
@@ -76,7 +94,7 @@ def derived_metric_plan(
                     # 否则规划期审计就会按 calculation_required 打回重排。
                     required_assertions=("lower_is_better", "analysis_only"),
                 ),
-                depends_on=("q1",),
+                depends_on=("q1", "q_route"),
                 node_type="post_calc",
             ),
         ),
@@ -305,8 +323,11 @@ class CapabilityRepairTests(unittest.TestCase):
         self.assertEqual(analyze_once.call_count, 2)
         feedback = analyze_once.call_args_list[1].args[4]
         self.assertIn('"failure_code": "missing_derived_operand"', feedback)
-        self.assertIn('"route_length_km"', feedback)
-        self.assertIn("route_length_km", plan.nodes[0].spec.metrics)
+        self.assertIn('"total_route_length_km"', feedback)
+        self.assertIn(
+            "total_route_length_km",
+            plan.nodes[1].spec.metrics,
+        )
 
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
     @patch("app.query.analysis._analyze_once")
@@ -319,11 +340,9 @@ class CapabilityRepairTests(unittest.TestCase):
             derived_metric_plan(
                 include_operand=False,
                 declare_derived=False,
-                post_calc_subject="route",
             ),
             derived_metric_plan(
                 include_operand=True,
-                post_calc_subject="route",
             ),
         ]
 
@@ -341,7 +360,7 @@ class CapabilityRepairTests(unittest.TestCase):
         feedback = analyze_once.call_args_list[1].args[4]
         self.assertIn('"failure_code": "missing_derived_metric"', feedback)
         self.assertIn("disease_density", feedback)
-        self.assertEqual(plan.nodes[1].spec.metrics, ("disease_density",))
+        self.assertEqual(plan.nodes[2].spec.metrics, ("disease_density",))
 
     @patch("app.query.analysis.audit_query_plan", return_value={"complete": True})
     @patch("app.query.analysis._analyze_once")

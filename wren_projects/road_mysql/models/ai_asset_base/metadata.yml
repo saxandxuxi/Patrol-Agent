@@ -1,6 +1,6 @@
 name: ai_asset_base
 properties:
-  description: 资产基础表
+  description: 资产类型字典：资产基础表
 table_reference:
   catalog: ''
   schema: new_four_road_base_ai

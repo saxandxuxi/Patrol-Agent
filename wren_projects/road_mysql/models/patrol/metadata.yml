@@ -1,6 +1,6 @@
 name: patrol
 properties:
-  description: 巡检任务（一次巡查 = 一条记录，含巡查类型、状态、起止时间）。
+  description: 巡查任务：一次巡查 = 一条记录，含巡查类型、状态、起止时间。
 table_reference:
   catalog: ''
   schema: new_four_road_base_ai
@@ -137,5 +137,23 @@ columns:
   is_calculated: false
   properties:
     description: 结束时间
+- name: patrol_type_name
+  type: VARCHAR
+  is_calculated: true
+  expression: CASE patrol_type WHEN '0' THEN '定期巡查' WHEN '5' THEN '日常巡查' WHEN '10' THEN '专项巡查' WHEN '15' THEN '复核考评' WHEN '20' THEN '重点抽查' ELSE COALESCE(NULLIF(patrol_type, ''), '未填写') END
+  properties:
+    description: 巡查类型
+- name: patrol_status_name
+  type: VARCHAR
+  is_calculated: true
+  expression: CASE patrol_status WHEN '0' THEN '未开始' WHEN '5' THEN '进行中' WHEN '10' THEN '暂停' WHEN '15' THEN '已完成' WHEN '20' THEN '逾期' ELSE COALESCE(NULLIF(patrol_status, ''), '未填写') END
+  properties:
+    description: 巡查状态
+- name: up_or_down_name
+  type: VARCHAR
+  is_calculated: true
+  expression: CASE up_or_down WHEN '0' THEN '全部/未区分' WHEN '1' THEN '上行' WHEN '2' THEN '下行' ELSE COALESCE(NULLIF(up_or_down, ''), '未填写') END
+  properties:
+    description: 上下行
 primary_key: id
 cached: false

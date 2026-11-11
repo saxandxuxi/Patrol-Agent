@@ -1,6 +1,6 @@
 name: section
 properties:
-  description: 路段（一条路线拆成多个路段，带起止桩号、路面类型、技术等级、宽度）。
+  description: 路段台账：一条路线拆成多个路段，带起止桩号、路面类型、技术等级、宽度。
 ref_sql: "SELECT *,\n       (\n         CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(end_num, '+', 1), 'K', -1) AS UNSIGNED) * 1000\n         + CAST(SUBSTRING_INDEX(end_num, '+', -1) AS UNSIGNED)\n         - CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(start_num,\
   \ '+', 1), 'K', -1) AS UNSIGNED) * 1000\n         - CAST(SUBSTRING_INDEX(start_num, '+', -1) AS UNSIGNED)\n       ) / 1000.0 AS section_length_km\nFROM basic_facilities_sections\n"
 columns:
@@ -390,5 +390,17 @@ columns:
   is_calculated: false
   properties:
     description: 路段实际长度（公里），由起止桩号相减算出。按路段算密度/间距用这一列， 不要用距离/里程字段。
+- name: tech_grade_name
+  type: VARCHAR
+  is_calculated: true
+  expression: CASE tech_grade WHEN '0' THEN '高速公路' WHEN '1' THEN '一级公路' WHEN '2' THEN '二级公路' WHEN '3' THEN '三级公路' WHEN '4' THEN '四级公路' WHEN '5' THEN '等外公路' ELSE COALESCE(NULLIF(tech_grade, ''), '未填写') END
+  properties:
+    description: 公路技术等级
+- name: route_level_name
+  type: VARCHAR
+  is_calculated: true
+  expression: CASE route_level WHEN '0' THEN '国道' WHEN '1' THEN '省道' WHEN '2' THEN '县道' WHEN '3' THEN '乡道' WHEN '4' THEN '村道' ELSE COALESCE(NULLIF(route_level, ''), '未填写') END
+  properties:
+    description: 行政等级
 primary_key: id
 cached: false

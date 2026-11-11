@@ -258,6 +258,44 @@ class AgentIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["source"], "confirm")
         self.assertIn("compiler_context", payload)
 
+    @patch("app.services.agent.chat_settings.load", return_value={"single_turn_compiler_enabled": True})
+    @patch("app.services.agent.intent_service.classify_intent", return_value="analysis")
+    @patch("app.query.service.start_single_turn")
+    @patch("app.query.service.discard_pending_confirmation")
+    @patch("app.query.service.pending_confirmation")
+    def test_ai_choice_replans_the_saved_original_question(
+        self,
+        pending_confirmation,
+        discard_pending_confirmation,
+        start,
+        classify_intent,
+        _settings,
+    ):
+        pending = turn_with_confirmation_card()
+        pending_confirmation.return_value = pending
+        start.return_value = TurnStart(
+            plan=pending.plan,
+            answer=AnswerPackage("共 10 处。", ()),
+        )
+
+        payload = agent._maybe_single_turn_compiler(
+            "泛油有多少处？",
+            choose_token="saved-question-token",
+            capability_id="ai",
+            slot_values={},
+        )
+
+        classify_intent.assert_called_once_with("泛油有多少处？")
+        discard_pending_confirmation.assert_called_once_with(
+            "saved-question-token"
+        )
+        start.assert_called_once_with(
+            "泛油有多少处？",
+            providers=(),
+            intent="analysis",
+        )
+        self.assertEqual(payload["source"], "single_turn_compiler")
+
     @patch("app.services.agent._persist_conversation_turn")
     @patch("app.services.agent.intent_service.classify_intent", return_value="data")
     @patch(

@@ -41,7 +41,7 @@ class SegmentPatrolCapabilityTests(unittest.TestCase):
         self.assertIn("pile_number", view.fields)
         self.assertIn("pile_distance", view.fields)
 
-    def test_patrol_segment_batch_compiles_through_disease_join(self):
+    def test_patrol_segment_batch_uses_disease_exists_filter(self):
         sql = compile_spec_mdl(
             QuerySpec(
                 id="batches",
@@ -76,7 +76,8 @@ class SegmentPatrolCapabilityTests(unittest.TestCase):
         )
 
         self.assertIsNotNone(sql)
-        self.assertIn("LEFT JOIN disease", sql)
+        self.assertIn("EXISTS((SELECT 1 FROM disease", sql)
+        self.assertNotIn("LEFT JOIN disease", sql)
         self.assertIn("disease.pile_distance BETWEEN 50000 AND 51000", sql)
 
     def test_recent_window_keeps_route_and_pile_scope_for_batch_axis(self):

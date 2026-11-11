@@ -1854,7 +1854,11 @@ def _analyze_once(
         order_issue = _spec_order_issue(spec, registry)
         if order_issue:
             raise QuerySpecError(order_issue)
-        if requires_order:
+    if requires_order and not any(
+        node_types.get(spec.id) == "query_data" and spec.order_by
+        for spec in specs
+    ):
+        for spec in specs:
             extreme_issue = _spec_extreme_order_issue(spec, node_types)
             if extreme_issue:
                 raise QuerySpecError(extreme_issue)

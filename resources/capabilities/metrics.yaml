@@ -160,13 +160,13 @@ metrics:
       allowed_views: [count, distribution, top_groups, trend]
   patrol:
     count:
-      expression: COUNT(*)
+      expression: COUNT(DISTINCT {alias}.id)
       label: 数量
       unit: 次
-      aggregation: count
+      aggregation: count_distinct
       grain: patrol
       identity: patrol.id
-      fanout_safe: false
+      fanout_safe: true
       aliases: [count_task]
       allowed_views: [count, distribution, top_groups, trend]
     # 结果行仍是一次巡检任务，病害数量只是该任务关联病害的聚合；

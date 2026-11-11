@@ -1,6 +1,6 @@
 name: pile_point
 properties:
-  description: 里程桩点（路段上标注的桩号点位），问"标了多少个里程桩点"用这张表。
+  description: 里程桩点：路段上标注的桩号点位，问"标了多少个里程桩点"用这张表。
 table_reference:
   catalog: ''
   schema: new_four_road_base_ai

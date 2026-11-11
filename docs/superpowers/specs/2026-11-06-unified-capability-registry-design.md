@@ -1,7 +1,7 @@
 # 统一能力注册表与实体/枚举解析设计
 
 > 日期：2026-11-06  
-> 状态：待用户审阅  
+> 状态：已确认，按本文与 2026-11-10 MDL-SQL 设计共同实施
 > 范围：单轮 QuerySpec 查询链路的字段、枚举、实体、指标、派生指标、校验、编译和有限修复
 
 ## 一、问题定义
@@ -47,18 +47,30 @@
 - 模板挖掘算法。
 - 自由 SQL 模式。
 
-## 四、事实分层
+## 四、并行事实源
 
-能力事实按以下优先级生成，不允许在查询代码中另建同名映射：
+能力注册表同时消费以下事实，不设置“谁优先、谁兜底”的关系：
 
-1. **实时物理结构**：`information_schema` 中的表、列、类型、注释。
-2. **人工能力配置**：主体、逻辑字段、指标、派生指标、枚举补充、实体层级和别名。
-3. **数据库动态字典**：病害类型、路线、设备等运行数据。
-4. **字段触达证据**：只表示“用户这句话可能提到了某个字段”，不是物理事实，也不能直接进入 SQL。
+1. **Wren MDL**：物理表对应的模型、真实列、类型、字段说明、计算列、cube 指标、
+   模型关系和 MDL 指纹。
+2. **实时物理结构**：`information_schema` 中的表、列、类型、注释和可解析字典。
+3. **人工能力配置**：主体、逻辑字段、业务指标、派生指标、枚举补充、实体层级、
+   别名、谓词、断言和口语候选规则。
+4. **数据库动态字典**：病害类型、路线、设备等运行数据。
+5. **字段触达与口语候选证据**：只表示“用户这句话可能提到了某个字段或值”，
+   全部是 `trusted=false`，不是物理事实，也不能直接进入 SQL。
+
+MDL 和人工能力配置是两套并行互补视图：
+
+- MDL 有、业务配置没有的模型、字段、计算列、指标和关系，自动进入注册表。
+- 业务配置有、MDL 没有专门表达的业务口径，继续作为第二份一等事实加载。
+- 同名指标公式和单位一致时合并可用视图、关联依赖和展示元数据，不能因来源不同丢掉能力。
+- 同名指标公式或单位冲突时返回结构化 `FailureEvidence`，不得静默选择一边。
+- JOIN 拓扑只由 MDL 的 `relationships` 决定；`subjects.yaml` 不再保存第二份 JOIN 链。
 
 配置与数据库冲突时：
 
-- 人工配置引用不存在的物理列或枚举 code：启动校验失败。
+- 配置引用不存在的物理列或 MDL 字段：启动校验失败。
 - 数据库新增了枚举列但未配置补充信息：仍可作为普通字段读取，但不能作为受控枚举直接解析。
 - 数据库动态实体成员不存在：配置校验失败；新成员未纳入实体族时记录待审核，不自动猜测归属。
 
@@ -96,15 +108,22 @@ resources/capabilities/
 
 ### 6.1 subjects.yaml
 
-定义查询主体、主表、关联链路和允许的视图。
+定义查询主体、主表、MDL 模型名和允许的视图。表间关系不在本文件复制，
+统一读取 Wren MDL 的 `relationships`。
 
 ```yaml
 subjects:
   disease:
     base_table: ai_problem
-    joins:
-      route: { table: basic_facilities_routes, on: disease.routes_id = route.id }
-    allowed_views: [count, distribution, list, detail, top, trend]
+    mdl_model: disease
+    allowed_views:
+      - count
+      - distribution
+      - list
+      - detail
+      - top_records
+      - top_groups
+      - trend
 ```
 
 ### 6.2 fields.yaml
@@ -130,7 +149,8 @@ fields:
 
 ### 6.3 metrics.yaml
 
-定义当前主体可直接查询的原子指标。
+定义巡检业务自己的原子指标补充。Wren MDL cube 中已经声明的 measure 也会自动继承；
+两边同 id 且公式、单位一致时合并，冲突时返回结构化证据。
 
 ```yaml
 metrics:
@@ -262,11 +282,15 @@ failures:
 启动或首次请求时构建不可变 `CapabilitySnapshot`：
 
 ```text
-PhysicalSchemaCatalog
+WrenMDL (models / columns / calculated / cubes / relationships)
+  + PhysicalSchemaCatalog
   + CapabilityConfig
   + DynamicEntityDictionaries
   → CapabilitySnapshot
 ```
+
+前两项和 `CapabilityConfig` 是并行事实，不按“高优先级覆盖低优先级”处理。每个消费者
+只读取自己需要的视图，冲突必须显式返回证据。
 
 快照必须带版本或哈希，日志和 FailureEvidence 记录使用的能力快照 ID。
 
@@ -378,6 +402,8 @@ LLM 收到结构化证据后最多修复两轮。两轮失败返回 `unsupported
 ```text
 用户问题
   → 用户原话与实体候选证据
+  → Wren MDL（模型、字段、计算列、cube 指标、关系）
+  → resources/capabilities（业务字段、指标、枚举、实体、谓词和断言）
   → CapabilityRegistry 生成 PlannerCapabilityView
   → Planner 生成 QuerySpec
   → 结构校验
@@ -422,6 +448,11 @@ LLM 收到结构化证据后最多修复两轮。两轮失败返回 `unsupported
 10. `up_or_down` 在不同表使用各自的 code_map，不能共享错误的全局映射。
 11. 只说“上下行”时输出上行、下行和“全部/未区分”三个独立类别。
 12. 配置目录外不得新增人工维护的业务映射。
+13. 当前数据库的全部 MDL 模型都进入注册表；只有 MDL 的模型也能形成合法主体和 count。
+14. JOIN 拓扑只来自 MDL 关系；`subjects.yaml` 不保存第二份关系事实。
+15. 同名指标公式、单位一致时合并，冲突时返回 `FailureEvidence`。
+16. `business_capability`、`mdl_subset` 和 `assist_evidence` 同轮进入 MDL-SQL 生成，
+    口语证据保持 `trusted=false`，不能单独决定 SQL。
 
 ## 十二、验收题目
 

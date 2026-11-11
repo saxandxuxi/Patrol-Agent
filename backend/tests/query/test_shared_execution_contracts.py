@@ -8,13 +8,14 @@ from app.calculations.domain.analysis import analyze_evidence
 from app.calculations.post_calc import execute_post_calc
 from app.query.capability_registry import CapabilityRegistry
 from app.query.capability_registry.entity_resolver import resolve_entity
-from app.query.contracts import QuerySpec, ValueBinding
+from app.query.contracts import PlanNode, QueryPlan, QuerySpec, ValueBinding
 from app.query.scope_facts import (
     INSIDE,
     PARTIAL,
     coverage_facts,
     empty_scope_facts,
 )
+from app.query.semantic_operations import semantic_operation_contract_issue
 from app.query.shape_contracts import validate_shape_contract
 from app.query.spec_mdl import compile_spec_mdl
 
@@ -178,6 +179,64 @@ class AnalysisOnlyNumberGroundingTests(unittest.TestCase):
         self.assertNotIn("均为下行", result["reply"])
 
     @patch("app.calculations.domain.analysis.chat")
+    def test_single_dimension_multi_metric_comparison_uses_existing_facts(
+        self,
+        chat,
+    ):
+        chat.return_value = (
+            "上海-昆明最严重，病害密度约为 0.0944 处/公里。"
+        )
+
+        result = analyze_evidence(
+            "哪些路线的泛油更严重？请结合数量和面积说明。",
+            [
+                {
+                    "question": "按路线统计泛油数量、总面积和路线长度",
+                    "rows": [
+                        {
+                            "路线名称": "上海-昆明",
+                            "数量": "51",
+                            "总面积": "209.71",
+                            "路线长度": "540.299",
+                        },
+                        {
+                            "路线名称": "长沙－芷江高速公路",
+                            "数量": "17",
+                            "总面积": "57.46",
+                            "路线长度": "382.588",
+                        },
+                    ],
+                    "columns": ["路线名称", "数量", "总面积", "路线长度"],
+                    "field_labels": {
+                        "route_name": "路线名称",
+                        "count": "数量",
+                        "total_area": "总面积",
+                        "route_length_km": "路线长度",
+                    },
+                    "view": "distribution",
+                    "spec": {
+                        "metrics": ["count", "total_area", "route_length_km"],
+                        "dimensions": ["route_name"],
+                    },
+                }
+            ],
+            requirements={
+                "required_assertions": [
+                    "analysis_only",
+                    "multi_metric_comparison",
+                ]
+            },
+        )
+
+        self.assertTrue(result["accepted"], result)
+        chat.assert_not_called()
+        self.assertIn("上海-昆明", result["reply"])
+        self.assertIn("51", result["reply"])
+        self.assertIn("209.71", result["reply"])
+        self.assertIn("代理指标", result["reply"])
+        self.assertNotIn("0.0944", result["reply"])
+
+    @patch("app.calculations.domain.analysis.chat")
     def test_single_ranked_row_per_parent_is_reported_as_selected_item(
         self,
         chat,
@@ -319,11 +378,31 @@ class CoverageFactsTests(unittest.TestCase):
 
 class SharedRegistryContractTests(unittest.TestCase):
     def test_net_crack_alias_resolves_through_disease_entity_config(self):
-        resolution = resolve_entity(
-            CapabilityRegistry.load(),
-            "disease_type",
-            "网裂",
-        )
+        rows = {
+            "rows": [
+                {
+                    "entity_code": "WL",
+                    "entity_label": "网状裂缝",
+                    "entity_alias": "",
+                }
+            ]
+        }
+        with (
+            patch(
+                "app.query.capability_registry.entity_resolver.db_manager.query",
+                return_value=rows,
+            ),
+            patch.dict(
+                "app.query.capability_registry.entity_resolver._CACHE",
+                {},
+                clear=True,
+            ),
+        ):
+            resolution = resolve_entity(
+                CapabilityRegistry.load(),
+                "disease_type",
+                "网裂",
+            )
 
         self.assertEqual(resolution.status, "resolved")
         self.assertEqual(resolution.values[0].label, "网状裂缝")
@@ -350,7 +429,7 @@ class SharedRegistryContractTests(unittest.TestCase):
             "ROW_NUMBER() OVER (PARTITION BY COALESCE(disease.problem_type_name",
             sql,
         )
-        self.assertIn("__top_rank <= 1", sql)
+        self.assertIn("rank_in_outer <= 1", sql)
 
     def test_top_per_outer_group_requires_outer_and_inner_dimensions(self):
         spec = QuerySpec(
@@ -376,6 +455,193 @@ class SharedRegistryContractTests(unittest.TestCase):
                 for issue in issues
             )
         )
+
+    def test_group_total_requires_a_real_same_scope_aggregate(self):
+        registry = CapabilityRegistry.load()
+        distribution = QuerySpec(
+            id="months",
+            kind="mysql",
+            subject="patrol",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("month",),
+            filters=(),
+            output_projection=("month", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+            question="按月份统计巡査次数",
+        )
+        analysis_only = QuerySpec(
+            id="summary",
+            kind="mysql",
+            subject="patrol",
+            view="count",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("analysis_only", "preserve_user_scope"),
+            question="汇总分布结果和总计",
+        )
+        plan = QueryPlan(
+            question="各月巡查次数分别是多少，总共多少次",
+            nodes=(
+                PlanNode(
+                    id="months",
+                    spec=distribution,
+                    node_type="query_data",
+                ),
+                PlanNode(
+                    id="summary",
+                    spec=analysis_only,
+                    depends_on=("months",),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+
+        issue = semantic_operation_contract_issue(
+            plan,
+            "group_total",
+            registry,
+        )
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(
+            issue.code,
+            "group_total_requires_aggregate",
+        )
+        self.assertEqual(issue.node_id, "months")
+
+    def test_group_total_summary_must_consume_the_real_aggregate(self):
+        registry = CapabilityRegistry.load()
+        distribution = QuerySpec(
+            id="months",
+            kind="mysql",
+            subject="patrol",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("month",),
+            filters=(),
+            output_projection=("month", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+            question="按月份统计巡査次数",
+        )
+        aggregate = replace(
+            distribution,
+            id="total",
+            view="count",
+            dimensions=(),
+            output_projection=(),
+            question="统计同一范围巡査总次数",
+        )
+        summary = QuerySpec(
+            id="summary",
+            kind="mysql",
+            subject="patrol",
+            view="count",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("analysis_only", "preserve_user_scope"),
+            question="汇总分布结果和总计",
+        )
+        plan = QueryPlan(
+            question="各月巡查次数分别是多少，总共多少次",
+            nodes=(
+                PlanNode(
+                    id="months",
+                    spec=distribution,
+                    node_type="query_data",
+                ),
+                PlanNode(
+                    id="total",
+                    spec=aggregate,
+                    node_type="query_data",
+                ),
+                PlanNode(
+                    id="summary",
+                    spec=summary,
+                    depends_on=("months",),
+                    node_type="post_calc",
+                ),
+            ),
+        )
+
+        issue = semantic_operation_contract_issue(
+            plan,
+            "group_total",
+            registry,
+        )
+
+        self.assertIsNotNone(issue)
+        self.assertEqual(
+            issue.code,
+            "group_total_summary_missing_total",
+        )
+        self.assertEqual(issue.node_id, "summary")
+
+    def test_scalar_with_details_accepts_count_and_same_scope_list(self):
+        registry = CapabilityRegistry.load()
+        aggregate = QuerySpec(
+            id="count",
+            kind="mysql",
+            subject="patrol",
+            view="count",
+            metrics=("count",),
+            dimensions=(),
+            filters=(),
+            output_projection=(),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+            question="统计巡检任务总次数",
+        )
+        details = QuerySpec(
+            id="details",
+            kind="mysql",
+            subject="patrol",
+            view="list",
+            metrics=(),
+            dimensions=(),
+            filters=(),
+            output_projection=("task_number", "route_name", "patrol_status"),
+            order_by=(),
+            limit=500,
+            required_assertions=("preserve_user_scope",),
+            question="列出巡检任务明细",
+        )
+        plan = QueryPlan(
+            question="共执行多少次巡检任务，并列出每次任务的编号、路线和状态",
+            nodes=(
+                PlanNode(
+                    id="count",
+                    spec=aggregate,
+                    node_type="query_data",
+                ),
+                PlanNode(
+                    id="details",
+                    spec=details,
+                    node_type="query_data",
+                ),
+            ),
+        )
+
+        issue = semantic_operation_contract_issue(
+            plan,
+            "scalar_with_details",
+            registry,
+        )
+
+        self.assertIsNone(issue)
 
 
 if __name__ == "__main__":

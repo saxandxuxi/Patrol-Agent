@@ -1,6 +1,6 @@
 name: ai_distance_capture
 properties:
-  description: 定距采集表
+  description: 定距采集记录：定距采集表
 table_reference:
   catalog: ''
   schema: new_four_road_base_ai

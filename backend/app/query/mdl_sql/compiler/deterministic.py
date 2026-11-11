@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -26,8 +27,41 @@ def compile_contract_to_mdl_sql(
 ) -> MdlSqlCandidate:
     try:
         _validate_context(contract, context)
-        join_plan = _ordered_join_plan(contract, context)
-        select = _build_select(contract, join_plan)
+        filter_paths = _filter_only_relationship_paths(
+            contract,
+            context,
+        )
+        main_models = _main_reference_models(contract, context)
+        filter_path_ids = {
+            str(relationship.get("relationship_id") or "")
+            for path in filter_paths.values()
+            for relationship in path
+        }
+        main_path_ids = {
+            str(relationship.get("relationship_id") or "")
+            for model in main_models - {contract.root_model}
+            for relationship in _relationship_path(
+                contract.root_model,
+                model,
+                context,
+            )
+        }
+        relationship_ids = tuple(
+            relationship_id
+            for relationship_id in contract.required_relationship_ids
+            if relationship_id not in filter_path_ids - main_path_ids
+        )
+        join_plan = _ordered_join_plan(
+            contract,
+            context,
+            relationship_ids=relationship_ids,
+            required_models=frozenset(main_models),
+        )
+        select = _build_select(
+            contract,
+            join_plan,
+            filter_paths,
+        )
         mdl_sql = select.sql(dialect=_DIALECT)
         return MdlSqlCandidate(
             source="deterministic",
@@ -39,8 +73,15 @@ def compile_contract_to_mdl_sql(
                 + [joined_model for _, _, joined_model in join_plan]
             ),
             used_relationship_ids=tuple(
-                relationship_id
-                for relationship_id, _, _ in join_plan
+                dict.fromkeys(
+                    (
+                        *sorted(filter_path_ids),
+                        *(
+                            relationship_id
+                            for relationship_id, _, _ in join_plan
+                        ),
+                    )
+                )
             ),
         )
     except _NotCovered as exc:
@@ -84,12 +125,20 @@ def _validate_context(
 def _build_select(
     contract: MdlQueryContract,
     join_plan: tuple[tuple[str, Mapping[str, Any], str], ...],
+    filter_paths: Mapping[
+        str,
+        tuple[Mapping[str, Any], ...],
+    ],
 ) -> exp.Select:
     if (
         contract.view == "top_groups"
         and "top_per_outer_group" in contract.required_assertions
     ):
-        return _build_ranked_top_groups(contract, join_plan)
+        return _build_ranked_top_groups(
+            contract,
+            join_plan,
+            filter_paths,
+        )
 
     select = exp.Select(
         expressions=[
@@ -98,7 +147,7 @@ def _build_select(
         ]
     ).from_(_table(contract.root_model))
     _apply_joins(select, join_plan, contract)
-    _apply_where(select, contract)
+    _apply_where(select, contract, filter_paths)
 
     if contract.group_by:
         select.set(
@@ -133,6 +182,10 @@ def _build_select(
 def _build_ranked_top_groups(
     contract: MdlQueryContract,
     join_plan: tuple[tuple[str, Mapping[str, Any], str], ...],
+    filter_paths: Mapping[
+        str,
+        tuple[Mapping[str, Any], ...],
+    ],
 ) -> exp.Select:
     if not contract.dimensions:
         raise _NotCovered("top_per_outer_group_dimensions_missing")
@@ -170,7 +223,7 @@ def _build_ranked_top_groups(
     )
     inner = inner.from_(_table(contract.root_model))
     _apply_joins(inner, join_plan, contract)
-    _apply_where(inner, contract)
+    _apply_where(inner, contract, filter_paths)
     if contract.group_by:
         inner.set(
             "group",
@@ -206,17 +259,104 @@ def _build_ranked_top_groups(
     )
 
 
+def _main_reference_models(
+    contract: MdlQueryContract,
+    context: PromptContextBundle,
+) -> set[str]:
+    known_models = set(context.mdl_subset.models)
+    models = {contract.root_model}
+    for binding in contract.field_bindings.values():
+        if set(binding.contexts) - {"filters", "mandatory_predicates"}:
+            if binding.model in known_models:
+                models.add(binding.model)
+    expressions = [
+        output.expression for output in contract.outputs
+    ]
+    expressions.extend(metric.expression for metric in contract.metrics)
+    expressions.extend(contract.group_by)
+    expressions.extend(order.expression for order in contract.order_by)
+    for value in expressions:
+        for column in _parse_expression(value).find_all(exp.Column):
+            model = str(column.table or "")
+            if model in known_models:
+                models.add(model)
+    return models
+
+
+def _filter_only_relationship_paths(
+    contract: MdlQueryContract,
+    context: PromptContextBundle,
+) -> dict[str, tuple[Mapping[str, Any], ...]]:
+    main_models = _main_reference_models(contract, context)
+    paths: dict[str, tuple[Mapping[str, Any], ...]] = {}
+    for binding in contract.filters:
+        model = str(binding.model or "")
+        if model in main_models or model == contract.root_model:
+            continue
+        paths[model] = _relationship_path(
+            contract.root_model,
+            model,
+            context,
+        )
+    return paths
+
+
+def _relationship_path(
+    root_model: str,
+    target_model: str,
+    context: PromptContextBundle,
+) -> tuple[Mapping[str, Any], ...]:
+    if root_model == target_model:
+        return ()
+    adjacency: dict[str, list[tuple[str, Mapping[str, Any]]]] = {}
+    for relationship in context.mdl_subset.relationships:
+        models = tuple(str(model) for model in relationship.get("models") or ())
+        if len(models) != 2:
+            continue
+        left, right = models
+        adjacency.setdefault(left, []).append((right, relationship))
+        adjacency.setdefault(right, []).append((left, relationship))
+    for edges in adjacency.values():
+        edges.sort(
+            key=lambda item: str(
+                item[1].get("relationship_id") or ""
+            )
+        )
+
+    queue = deque([(root_model, ())])
+    visited = {root_model}
+    while queue:
+        current, path = queue.popleft()
+        for neighbor, relationship in adjacency.get(current, ()):
+            next_path = (*path, relationship)
+            if neighbor == target_model:
+                return next_path
+            if neighbor in visited:
+                continue
+            visited.add(neighbor)
+            queue.append((neighbor, next_path))
+    raise _NotCovered(
+        f"filter_relationship_path_missing:{root_model}->{target_model}"
+    )
+
+
 def _ordered_join_plan(
     contract: MdlQueryContract,
     context: PromptContextBundle,
+    *,
+    relationship_ids: tuple[str, ...] | None = None,
+    required_models: frozenset[str] | None = None,
 ) -> tuple[tuple[str, Mapping[str, Any], str], ...]:
     relationships = {
         str(item.get("relationship_id") or ""): item
         for item in context.mdl_subset.relationships
     }
-    unknown = sorted(
-        set(contract.required_relationship_ids) - set(relationships)
+    selected_ids = (
+        contract.required_relationship_ids
+        if relationship_ids is None
+        else relationship_ids
     )
+    unknown = sorted(set(selected_ids) - set(relationships))
     if unknown:
         raise _NotCovered(
             "required_relationship_missing_from_context:"
@@ -225,7 +365,7 @@ def _ordered_join_plan(
 
     pending = {
         relationship_id: relationships[relationship_id]
-        for relationship_id in contract.required_relationship_ids
+        for relationship_id in selected_ids
     }
     connected = {contract.root_model}
     plan: list[tuple[str, Mapping[str, Any], str]] = []
@@ -255,9 +395,12 @@ def _ordered_join_plan(
         connected.add(joined_model)
         pending.pop(relationship_id)
 
-    missing_models = sorted(
-        set(contract.allowed_models) - connected
+    expected_models = (
+        frozenset(contract.allowed_models)
+        if required_models is None
+        else required_models
     )
+    missing_models = sorted(set(expected_models) - connected)
     if missing_models:
         raise _NotCovered(
             "allowed_models_not_joined:" + ",".join(missing_models)
@@ -307,6 +450,10 @@ def _join_condition(relationship: Mapping[str, Any]) -> exp.Expression:
 def _apply_where(
     select: exp.Select,
     contract: MdlQueryContract,
+    filter_paths: Mapping[
+        str,
+        tuple[Mapping[str, Any], ...],
+    ],
 ) -> None:
     predicates: list[exp.Expression] = []
     root_predicates = tuple(
@@ -314,8 +461,33 @@ def _apply_where(
         for binding in contract.mandatory_predicates
         if binding.model == contract.root_model
     )
-    for binding in (*contract.filters, *root_predicates):
+    root_filters = tuple(
+        binding
+        for binding in contract.filters
+        if binding.model == contract.root_model
+    )
+    for binding in (*root_filters, *root_predicates):
         predicates.extend(_filter_expressions(binding))
+    for binding in contract.filters:
+        if (
+            binding.model == contract.root_model
+            or binding.model in filter_paths
+        ):
+            continue
+        predicates.extend(_filter_expressions(binding))
+    for model, path in filter_paths.items():
+        filters = tuple(
+            binding
+            for binding in contract.filters
+            if binding.model == model
+        )
+        predicates.append(
+            _exists_filter(
+                contract,
+                path,
+                filters,
+            )
+        )
     if predicates:
         select.set(
             "where",
@@ -323,15 +495,69 @@ def _apply_where(
         )
 
 
+def _exists_filter(
+    contract: MdlQueryContract,
+    path: tuple[Mapping[str, Any], ...],
+    filters: tuple[MdlFilterBinding, ...],
+) -> exp.Expression:
+    if not path:
+        raise _NotCovered("filter_relationship_path_empty")
+    connected = {contract.root_model}
+    joined_models: list[str] = []
+    for relationship in path:
+        models = tuple(
+            str(model) for model in relationship.get("models") or ()
+        )
+        next_model = next(
+            (model for model in models if model not in connected),
+            "",
+        )
+        if not next_model:
+            raise _NotCovered("filter_relationship_path_disconnected")
+        joined_models.append(next_model)
+        connected.add(next_model)
+
+    inner = exp.Select(
+        expressions=[exp.Literal.number(1)]
+    ).from_(_table(joined_models[0]))
+    for relationship, joined_model in zip(
+        path[1:],
+        joined_models[1:],
+    ):
+        inner = inner.join(
+            _table(joined_model),
+            on=_join_condition(relationship),
+            join_type="inner",
+            copy=False,
+        )
+    predicates = [_join_condition(path[0])]
+    predicates.extend(
+        expression
+        for binding in contract.mandatory_predicates
+        if binding.model in joined_models
+        for expression in _filter_expressions(binding)
+    )
+    for binding in filters:
+        predicates.extend(_filter_expressions(binding))
+    inner = inner.where(
+        _conjoin(predicates, "filter_exists_empty")
+    )
+    return exp.Exists(
+        this=exp.Subquery(this=inner)
+    )
+
+
 def _filter_expressions(
     binding: MdlFilterBinding,
 ) -> tuple[exp.Expression, ...]:
+    op = str(binding.op or "").lower()
+    if op == "exists":
+        return (_parse_expression(binding.expression),)
     column = _parse_expression(binding.expression)
     if not isinstance(column, exp.Column):
         raise _NotCovered(
             f"filter_expression_is_not_column:{binding.field_id}"
         )
-    op = str(binding.op or "").lower()
     value = binding.value
 
     if op == "between":

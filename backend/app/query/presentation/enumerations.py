@@ -163,18 +163,26 @@ def _labels_for_explicit_values(
         return labels
     if binding is not None:
         display = binding.display_value
-        display_values = (
-            tuple(
+        if isinstance(display, (list, tuple)):
+            display_values = tuple(
                 _normalized(entry)
                 for entry in display
                 if _normalized(entry)
             )
-            if isinstance(display, (list, tuple))
-            else (_normalized(display),)
-            if len(wanted) == 1
-            else ()
-        )
-        if display_values and display_values != wanted:
+        else:
+            text = _normalized(display)
+            display_values = (
+                tuple(
+                    value
+                    for entry in text.split("、")
+                    if (value := _normalized(entry))
+                )
+                if len(wanted) > 1
+                else (text,)
+                if text
+                else ()
+            )
+        if len(display_values) == len(wanted) and display_values != wanted:
             return tuple(
                 label
                 for label in display_values

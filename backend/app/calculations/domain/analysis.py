@@ -44,6 +44,7 @@ def analyze_evidence(
                 "field_labels": json_value(
                     dependency.get("field_labels") or {}
                 ),
+                "spec": json_value(dependency.get("spec") or {}),
                 "row_count": int(
                     dependency.get("row_count")
                     or len(dependency.get("rows") or [])
@@ -79,19 +80,25 @@ def analyze_evidence(
         dependencies,
         assertions,
     )
-    reply = (
-        trend_comparison
-        if trend_comparison
-        else _request_analysis(question, evidence, requirements)
-    )
     grouped_comparison = _group_comparison_conclusion(
         evidence,
         assertions,
     )
+    metric_comparison = _metric_comparison_conclusion(
+        evidence,
+        assertions,
+    )
+    reply = (
+        grouped_comparison
+        or metric_comparison
+        or trend_comparison
+        or _request_analysis(question, evidence, requirements)
+    )
     presentation_repair: dict[str, Any] | None = None
-    if grouped_comparison:
-        reply = grouped_comparison
-    elif "analysis_only" in assertions and reply:
+    if not (grouped_comparison or metric_comparison or trend_comparison) and (
+        "analysis_only" in assertions
+        and reply
+    ):
         ungrounded = _ungrounded_numbers(reply, evidence)
         if ungrounded:
             repair_requirements = {
@@ -320,6 +327,79 @@ def _group_comparison_conclusion(
     if not parts:
         return ""
     return "按结构化结果比较：" + "；".join(parts[:10]) + "。"
+
+
+def _metric_comparison_conclusion(
+    evidence: dict[str, Any],
+    assertions: set[str],
+) -> str:
+    if (
+        "multi_metric_comparison" not in assertions
+        or "analysis_only" not in assertions
+    ):
+        return ""
+    boundary_name = "min" if "lower_is_better" in assertions else "max"
+    boundary_label = "最低" if boundary_name == "min" else "最高"
+    for dependency in evidence.get("upstream") or []:
+        spec = dependency.get("spec") or {}
+        metrics = [
+            str(metric)
+            for metric in spec.get("metrics") or ()
+            if str(metric) not in {"route_length_km", "count_record"}
+        ]
+        dimensions = [
+            str(dimension)
+            for dimension in spec.get("dimensions") or ()
+        ]
+        compact = dependency.get("compact") or {}
+        if (
+            len(metrics) < 2
+            or len(dimensions) != 1
+            or len(compact.get("group_columns") or ()) != 1
+        ):
+            continue
+        labels = dependency.get("field_labels") or {}
+        selected = []
+        for metric in metrics:
+            column = str(labels.get(metric) or metric)
+            boundary = (
+                (compact.get("metrics") or {})
+                .get(column, {})
+                .get(boundary_name)
+            )
+            if not isinstance(boundary, Mapping):
+                continue
+            group = str(boundary.get("group") or "").strip()
+            if not group:
+                continue
+            selected.append(
+                (
+                    column,
+                    group,
+                    _format_number(boundary.get("value")),
+                )
+            )
+        if len(selected) < 2:
+            continue
+        facts = "；".join(
+            f"{metric}{boundary_label}的是{group}（{value}）"
+            for metric, group, value in selected
+        )
+        groups = {group for _, group, _ in selected}
+        metric_names = "、".join(metric for metric, _, _ in selected)
+        if len(groups) == 1:
+            conclusion = (
+                f"按{metric_names}这些可用代理指标，"
+                f"{selected[0][1]}均{boundary_label}。"
+                f"{facts}。"
+            )
+        else:
+            conclusion = (
+                f"按可用代理指标，{facts}；不同指标指向不同对象，"
+                "不能据此判定单一“最严重”。"
+            )
+        return conclusion + "这些是代理指标，不代表正式业务严重度评分。"
+    return ""
 
 
 def _trend_series_conclusion(

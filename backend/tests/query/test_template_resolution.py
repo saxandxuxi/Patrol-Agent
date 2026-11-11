@@ -8,6 +8,7 @@ from app.query.template_sources import contract_from_preset
 from app.query.templates import TemplateContract, TemplateProvider, resolve_templates
 from app.services import preset_lib
 from tests.query.factories import count_spec
+from tests.query.preset_fixture import PresetFixtureTestCase
 
 
 class FixedProvider(TemplateProvider):
@@ -18,7 +19,7 @@ class FixedProvider(TemplateProvider):
         return self.contracts
 
 
-class TemplateResolutionTests(unittest.TestCase):
+class TemplateResolutionTests(PresetFixtureTestCase):
     def test_date_granularity_follows_time_dimension(self):
         spec = QuerySpec(
             id="q1",

@@ -7,6 +7,7 @@ from app.calculations.columns import calculate_columns
 from app.calculations.domain.trend import render_series_calculation
 from app.calculations.evidence import compact_table_evidence
 from app.calculations.executor import execute_calculation
+from app.calculations.group_change import calculate_group_change
 from app.calculations.models import (
     CalculationOperand,
     CalculationOutput,
@@ -474,6 +475,160 @@ class AnalysisPresentationRepairTests(unittest.TestCase):
             {row["problem_number"] for row in payload["rows"]},
             {"D1", "D3"},
         )
+
+    @patch("app.calculations.post_calc.analyze_evidence")
+    def test_dataset_comparison_with_analysis_only_uses_both_contracts(
+        self,
+        analyze_evidence,
+    ):
+        task = {
+            "id": "compare",
+            "question": "比较两次巡检新增病害，并给出两次总数和新增桩号",
+            "depends_on": [
+                "disease_before",
+                "disease_after",
+                "count_before",
+                "count_after",
+            ],
+            "comparison_depends_on": [
+                "disease_before",
+                "disease_after",
+            ],
+            "required_assertions": [
+                "dataset_comparison",
+                "analysis_only",
+            ],
+        }
+        analyze_evidence.return_value = {
+            "reply": (
+                "前一次 0 处，后一次 16 处，新增 16 处；"
+                "新增病害位于 K85+993。"
+            ),
+            "source": "calc",
+            "engine": "post_calc",
+            "accepted": True,
+            "columns": [],
+            "rows": [],
+        }
+
+        payload = execute_post_calc(
+            task,
+            {
+                "disease_before": {
+                    "spec": {
+                        "output_projection": [
+                            "problem_number",
+                            "pile_number",
+                        ]
+                    },
+                    "rows": [],
+                },
+                "disease_after": {
+                    "spec": {
+                        "output_projection": [
+                            "problem_number",
+                            "pile_number",
+                        ]
+                    },
+                    "rows": [
+                        {
+                            "problem_number": "D1",
+                            "pile_number": "K85+993",
+                        }
+                    ],
+                },
+                "count_before": {
+                    "rows": [{"病害数量": "0"}],
+                    "field_labels": {"count": "病害数量"},
+                },
+                "count_after": {
+                    "rows": [{"病害数量": "16"}],
+                    "field_labels": {"count": "病害数量"},
+                },
+            },
+        )
+
+        self.assertTrue(payload["accepted"])
+        self.assertIn("新增 16", payload["reply"])
+        self.assertIn("K85+993", payload["reply"])
+        self.assertEqual(payload["rows"][0]["差异类型"], "新增")
+        analyzed_dependencies = analyze_evidence.call_args.args[1]
+        self.assertTrue(
+            any(
+                "新增 1" in str(item.get("reply") or "")
+                for item in analyzed_dependencies
+            )
+        )
+        self.assertTrue(
+            any(
+                item.get("rows") == [{"病害数量": "16"}]
+                for item in analyzed_dependencies
+            )
+        )
+
+    @patch("app.calculations.post_calc.analyze_evidence")
+    def test_dataset_comparison_does_not_drop_failed_analysis_contract(
+        self,
+        analyze_evidence,
+    ):
+        task = {
+            "id": "compare",
+            "question": "比较两次巡检新增病害，并给出新增桩号",
+            "depends_on": ["before", "after"],
+            "comparison_depends_on": ["before", "after"],
+            "required_assertions": [
+                "dataset_comparison",
+                "analysis_only",
+            ],
+        }
+        analyze_evidence.return_value = {
+            "reply": "analysis_only 不能生成新的数值。",
+            "source": "calc",
+            "engine": "post_calc",
+            "accepted": False,
+            "failure_code": "analysis_only_new_numeric_value",
+            "failure_reason": "analysis_only 只能复述上游已有数值。",
+            "ungrounded_numbers": ["1"],
+            "columns": [],
+            "rows": [],
+        }
+
+        payload = execute_post_calc(
+            task,
+            {
+                "before": {
+                    "spec": {
+                        "output_projection": [
+                            "problem_number",
+                            "pile_number",
+                        ]
+                    },
+                    "rows": [],
+                },
+                "after": {
+                    "spec": {
+                        "output_projection": [
+                            "problem_number",
+                            "pile_number",
+                        ]
+                    },
+                    "rows": [
+                        {
+                            "problem_number": "FY-1",
+                            "pile_number": "K1+000",
+                        }
+                    ],
+                },
+            },
+        )
+
+        self.assertFalse(payload["accepted"])
+        self.assertEqual(
+            payload["failure"]["failure_code"],
+            "analysis_only_new_numeric_value",
+        )
+        self.assertEqual(payload["rows"], [])
+        self.assertNotIn("新增 1", payload["reply"])
 
     def test_datetime_interval_uses_registered_tool(self):
         payload = execute_post_calc(
@@ -1070,6 +1225,115 @@ class SeriesCalculationTests(unittest.TestCase):
 
         self.assertEqual(evidence["metrics"]["数量"]["max"]["group"], "A")
         self.assertEqual(evidence["metrics"]["数量"]["min"]["group"], "B")
+
+
+class GroupChangeCalculationTests(unittest.TestCase):
+    def test_group_change_aligns_rows_and_treats_missing_groups_as_zero(self):
+        result = calculate_group_change(
+            "subtract",
+            [
+                {"病害类型": "裂缝", "数量": 3},
+                {"病害类型": "坑槽", "数量": 2},
+            ],
+            [
+                {"病害类型": "裂缝", "数量": 1},
+                {"病害类型": "泛油", "数量": 4},
+            ],
+            label_field="病害类型",
+            before_field="数量",
+            after_field="数量",
+            output_field="增加数量",
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(
+            [
+                (
+                    row["病害类型"],
+                    row["前次值"],
+                    row["后次值"],
+                    row["增加数量"],
+                )
+                for row in result.rows
+            ],
+            [
+                ("裂缝", 3, 1, -2),
+                ("坑槽", 2, 0, -2),
+                ("泛油", 0, 4, 4),
+            ],
+        )
+        self.assertEqual(result.evidence["missing_before"], ("泛油",))
+        self.assertEqual(result.evidence["missing_after"], ("坑槽",))
+
+    def test_group_change_executor_reports_max_increase(self):
+        request = CalculationRequest(
+            tool="calculate_group_change",
+            operation="subtract",
+            operands=(
+                CalculationOperand(
+                    name="labels",
+                    source={
+                        "node": "before",
+                        "field": "problem_type_name",
+                    },
+                ),
+                CalculationOperand(
+                    name="before",
+                    source={"node": "before", "field": "count"},
+                ),
+                CalculationOperand(
+                    name="after",
+                    source={"node": "after", "field": "count"},
+                ),
+            ),
+            output=CalculationOutput(
+                name="count_increase",
+                label="增加数量",
+                unit="处",
+            ),
+        )
+
+        payload = execute_calculation(
+            {
+                "id": "compare",
+                "question": "两次巡查相比，哪种病害增加最多？",
+                "depends_on": ["before", "after"],
+            },
+            request,
+            {
+                "before": {
+                    "field_labels": {
+                        "problem_type_name": "病害类型",
+                        "count": "数量",
+                    },
+                    "rows": [
+                        {"病害类型": "裂缝", "数量": "3"},
+                        {"病害类型": "坑槽", "数量": "2"},
+                    ],
+                },
+                "after": {
+                    "field_labels": {
+                        "problem_type_name": "病害类型",
+                        "count": "数量",
+                    },
+                    "rows": [
+                        {"病害类型": "裂缝", "数量": "1"},
+                        {"病害类型": "泛油", "数量": "4"},
+                    ],
+                },
+            },
+        )
+
+        self.assertTrue(payload["accepted"])
+        self.assertEqual(payload["calculation"]["tool"], "calculate_group_change")
+        self.assertIn("泛油", payload["reply"])
+        self.assertIn("增加", payload["reply"])
+        self.assertIn("4", payload["reply"])
+        self.assertEqual(payload["rows"][-1]["病害类型"], "泛油")
+        self.assertEqual(
+            as_decimal(payload["rows"][-1]["增加数量"]),
+            Decimal("4"),
+        )
 
 
 if __name__ == "__main__":

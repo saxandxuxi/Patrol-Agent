@@ -63,6 +63,34 @@ class AggregatePresentationTests(unittest.TestCase):
 
 
 class EnumPresentationTests(unittest.TestCase):
+    @staticmethod
+    def _multi_route_spec():
+        return QuerySpec(
+            id="q1",
+            kind="mysql",
+            subject="disease",
+            view="distribution",
+            metrics=("count",),
+            dimensions=("route_name",),
+            filters=(
+                ValueBinding(
+                    field="route_name",
+                    op="in",
+                    storage_value=[
+                        "51cb17fca0f811f1a6310242ac120002",
+                        "51c9c71ea0f811f1a6310242ac120002",
+                    ],
+                    display_value="包头-茂名、上海-昆明",
+                    source="user_explicit",
+                    resolver="route_dictionary",
+                ),
+            ),
+            output_projection=("route_name", "count"),
+            order_by=(),
+            limit=None,
+            required_assertions=("preserve_user_scope",),
+        )
+
     def test_explicit_entity_values_fill_cartesian_enum_groups(self):
         from app.query.presentation.enumerations import (
             complete_explicit_enum_groups,
@@ -176,6 +204,70 @@ class EnumPresentationTests(unittest.TestCase):
 
         self.assertEqual(rows, [row])
         self.assertEqual(filled, [])
+
+    def test_present_multi_route_groups_use_display_names_only(self):
+        from app.query.presentation.enumerations import (
+            complete_explicit_enum_groups,
+        )
+
+        original_rows = [
+            {"路线名称": "上海-昆明", "数量": "4"},
+            {"路线名称": "包头-茂名", "数量": "2"},
+        ]
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT route_name, COUNT(*)",
+            columns=("路线名称", "数量"),
+            row_count=2,
+            preview_rows=tuple(original_rows),
+            result_rows=tuple(original_rows),
+            rows_fetched=2,
+        )
+
+        rows, filled = complete_explicit_enum_groups(
+            self._multi_route_spec(),
+            observation,
+            CapabilityRegistry.load(),
+        )
+
+        self.assertEqual(rows, original_rows)
+        self.assertEqual(filled, [])
+
+    def test_missing_multi_route_group_is_filled_with_display_name(self):
+        from app.query.presentation.enumerations import (
+            complete_explicit_enum_groups,
+        )
+
+        row = {"路线名称": "上海-昆明", "数量": "4"}
+        observation = ExecutionObservation(
+            node_id="q1",
+            ok=True,
+            engine="wren",
+            sql="SELECT route_name, COUNT(*)",
+            columns=("路线名称", "数量"),
+            row_count=1,
+            preview_rows=(row,),
+            result_rows=(row,),
+            rows_fetched=1,
+        )
+
+        rows, filled = complete_explicit_enum_groups(
+            self._multi_route_spec(),
+            observation,
+            CapabilityRegistry.load(),
+        )
+
+        self.assertEqual(filled, ["包头-茂名"])
+        self.assertIn({"路线名称": "包头-茂名", "数量": 0}, rows)
+        self.assertFalse(
+            any(
+                "51cb17fca0f811f1a6310242ac120002" in str(value)
+                for row in rows
+                for value in row.values()
+            )
+        )
 
     def test_two_explicit_enum_dimensions_fill_cartesian_zero_groups(self):
         from app.query.presentation.enumerations import (

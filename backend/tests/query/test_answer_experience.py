@@ -80,10 +80,12 @@ class AnswerExperienceTests(unittest.TestCase):
             },
         )
 
-        chat.assert_called_once()
+        chat.assert_not_called()
         self.assertTrue(payload["accepted"])
-        self.assertIn("综合", payload["reply"])
-        self.assertIn("病害密度", payload["reply"])
+        self.assertIn("A均最低", payload["reply"])
+        for metric in ("数量", "总面积", "平均面积", "总长度"):
+            self.assertIn(metric, payload["reply"])
+        self.assertNotIn("病害密度", payload["reply"])
 
     @patch("app.calculations.executor.analyze_evidence")
     def test_large_calculation_sends_preview_and_full_compact_evidence(
@@ -874,6 +876,59 @@ class AnswerExperienceTests(unittest.TestCase):
         self.assertEqual(len(answer.sections), 2)
         self.assertEqual(answer.sections[0]["node_id"], "q1")
         self.assertEqual(answer.sections[1]["node_id"], "q2_calc")
+
+    def test_analysis_answer_keeps_explicit_context_rows(self):
+        conclusion = "长沙－芷江高速公路病害数量从 11886 处降至 1883 处。"
+        answer = assemble_answer(
+            [
+                {
+                    "node_id": "q1",
+                    "type": "data",
+                    "view": "trend",
+                    "status": "accepted",
+                    "answer": "月度趋势明细",
+                    "rows_fetched": 2,
+                },
+                {
+                    "node_id": "q_route_length",
+                    "type": "data",
+                    "view": "distribution",
+                    "status": "accepted",
+                    "rows_fetched": 1,
+                    "columns": ["路线名称", "路线长度"],
+                    "display_units": {"路线长度": "公里"},
+                    "rows": [
+                        {
+                            "路线名称": "长沙－芷江高速公路",
+                            "路线长度": "382.5880",
+                        }
+                    ],
+                    "preview_rows": [
+                        {
+                            "路线名称": "长沙－芷江高速公路",
+                            "路线长度": "382.5880",
+                        }
+                    ],
+                    "spec": {
+                        "subject": "disease",
+                        "view": "distribution",
+                        "required_assertions": ["analysis_context"],
+                    },
+                },
+                {
+                    "node_id": "pc_trend",
+                    "type": "post_calc",
+                    "status": "accepted",
+                    "answer": conclusion,
+                    "rows_fetched": 2,
+                },
+            ],
+            response_mode="analysis",
+        )
+
+        self.assertIn("382.588公里", answer.text)
+        self.assertIn(conclusion, answer.text)
+        self.assertNotIn("月度趋势明细", answer.text)
 
     def test_analysis_answer_keeps_upstream_partial_coverage_evidence(self):
         conclusion = "长沙－芷江高速公路的病害数量高于另外两条路线。"

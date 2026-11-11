@@ -17,6 +17,11 @@ calculators:
     operations: [subtract, percentage_change]
     precision: 6
     zero_denominator: error
+  calculate_group_change:
+    input_shapes: [paired_grouped_rows]
+    operations: [subtract, percentage_change]
+    precision: 6
+    zero_denominator: undefined
   calculate_datetime_interval:
     input_shapes: [temporal_scalar_list]
     operations: [elapsed_days]

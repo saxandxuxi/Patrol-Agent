@@ -31,7 +31,7 @@ def audit_mdl_sql(
         else "mysql"
     )
     parsed = parse_mdl_sql(candidate.mdl_sql, kind)
-    contract_issues = audit_contract(parsed, contract)
+    contract_issues = audit_contract(parsed, contract, subgraph)
     relationship_issues, used_relationships = relationship_audit_details(
         parsed,
         contract,

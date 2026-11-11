@@ -268,11 +268,10 @@ def _expression_identity(expression: str) -> str:
     text = str(expression or "").strip()
     if not text:
         return ""
+    text = re.sub(r"\{alias\}\s*\.\s*", "", text)
     text = re.sub(r"\{([^{}]+)\}", r"\1", text)
     try:
         parsed = sqlglot.parse_one(f"SELECT {text}", read="mysql")
-        for column in parsed.find_all(exp.Column):
-            column.set("table", None)
         return " ".join(
             parsed.expressions[0].sql(dialect="mysql").lower().split()
         )

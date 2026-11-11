@@ -1,6 +1,6 @@
 name: patrol_route
 properties:
-  description: 巡查任务实际覆盖的路线（patrol_id → routes_id）。路线巡查次数必须从这里统计，不能经病害表回连。
+  description: ai_maintain_routes_patrol：实际覆盖的路线（patrol_id → routes_id）。路线巡查次数必须从这里统计，不能经病害表回连。
 table_reference:
   catalog: ''
   schema: new_four_road_base_ai

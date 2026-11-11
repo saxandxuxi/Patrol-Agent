@@ -20,6 +20,7 @@ from app.query.templates import (
     TemplateContract,
 )
 from tests.query.factories import count_plan, length_query_plan
+from tests.query.preset_fixture import PresetFixtureTestCase
 
 
 def candidate_set_with_one_template() -> CandidateSet:
@@ -154,7 +155,7 @@ def device_time_plan() -> QueryPlan:
     )
 
 
-class SingleTurnEndToEndTests(unittest.TestCase):
+class SingleTurnEndToEndTests(PresetFixtureTestCase):
     @patch(
         "app.query.service.assemble_answer",
         return_value=AnswerPackage("共 20108 处；明细展示前 500 条。"),
